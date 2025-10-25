@@ -1,0 +1,1030 @@
+import 'dart:io';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/personal_chat_service.dart';
+import '../services/socket_service.dart';
+
+class PersonalChatProvider with ChangeNotifier {
+  final PersonalChatService _chatService = PersonalChatService();
+  late SocketService _socketService;
+
+  // Socket event subscriptions
+  StreamSubscription? _newMessageSubscription;
+  StreamSubscription? _messageDeletedSubscription;
+  StreamSubscription? _messageEditedSubscription;
+  StreamSubscription? _readStatusSubscription;
+  StreamSubscription? _connectionSubscription;
+
+  bool _isSendingMessage = false;
+  String? _sendMessageError;
+  Map<String, dynamic>? _lastSentMessage;
+
+  bool get isSendingMessage => _isSendingMessage;
+  String? get sendMessageError => _sendMessageError;
+  Map<String, dynamic>? get lastSentMessage => _lastSentMessage;
+
+  bool _isLoading = false;
+  String? _error;
+  Map<String, dynamic> _chatData = {
+    'error': true,
+    'message': 'No chats loaded',
+    'data': []
+  };
+
+  bool get isLoading => _isLoading;
+  String? get error => _error;
+  Map<String, dynamic> get chatData => _chatData;
+
+  List<dynamic> _messages = [];
+  Map<String, dynamic> _userData = {};
+  String? _currentUserId;
+  String? _currentReceiverId;
+  bool _socketConnected = false;
+
+  List<dynamic> get messages => _messages;
+  Map<String, dynamic> get userData => _userData;
+  String? get currentUserId => _currentUserId;
+  String? get currentReceiverId => _currentReceiverId;
+  bool get socketConnected => _socketConnected;
+
+  @override
+  void dispose() {
+    _cancelSocketSubscriptions();
+    _chatService.dispose();
+    super.dispose();
+  }
+
+  /// Initialize the provider and socket connection
+  Future<void> initialize() async {
+    final prefs = await SharedPreferences.getInstance();
+    _currentUserId = prefs.getString('user_id');
+
+    // Initialize socket service
+    _socketService = _chatService.socketService;
+
+    // Initialize socket connection
+    await initializeSocket();
+
+    notifyListeners();
+  }
+
+  /// Initialize socket connection and setup event listeners
+  Future<bool> initializeSocket() async {
+    try {
+      print('🔌 Initializing socket connection...');
+      final connected = await _chatService.initializeSocket();
+
+      if (connected) {
+        _setupSocketEventListeners();
+        print('✅ Socket initialized successfully');
+      } else {
+        print('❌ Socket initialization failed');
+      }
+
+      return connected;
+    } catch (e) {
+      print('💥 Error initializing socket: $e');
+      return false;
+    }
+  }
+
+  /// Setup socket event listeners
+  void _setupSocketEventListeners() {
+    _cancelSocketSubscriptions(); // Cancel existing subscriptions
+
+    // Listen for connection changes
+    _connectionSubscription = _socketService.onConnectionChanged.listen((connected) {
+      _socketConnected = connected;
+      print('🔌 Socket connection changed: $connected');
+      notifyListeners();
+    });
+
+    // Listen for new messages
+    _newMessageSubscription = _socketService.onNewMessage.listen((messageData) {
+      print('📥 Received new message via socket: ${messageData['message']}');
+      _handleNewMessage(messageData);
+    });
+
+    // Listen for message deletions
+    _messageDeletedSubscription = _socketService.onMessageDeleted.listen((data) {
+      print('🗑️ Message deleted via socket: ${data['messageId']}');
+      _handleMessageDeleted(data);
+    });
+
+    // Listen for message edits
+    _messageEditedSubscription = _socketService.onMessageEdited.listen((data) {
+      print('✏️ Message edited via socket: ${data['messageId']}');
+      _handleMessageEdited(data);
+    });
+
+    // Listen for read status updates
+    _readStatusSubscription = _socketService.onReadStatusUpdated.listen((data) {
+      print('👁️ Read status updated via socket');
+      _handleReadStatusUpdated(data);
+    });
+
+    print('🎯 Socket event listeners setup complete');
+  }
+
+  /// Cancel socket event subscriptions
+  void _cancelSocketSubscriptions() {
+    _newMessageSubscription?.cancel();
+    _messageDeletedSubscription?.cancel();
+    _messageEditedSubscription?.cancel();
+    _readStatusSubscription?.cancel();
+    _connectionSubscription?.cancel();
+  }
+
+  /// Handle new message received via socket
+  void _handleNewMessage(Map<String, dynamic> data) {
+    try {
+      final message = data['message'];
+      if (message != null) {
+        // Add message to local list if it's for the current conversation
+        if (_currentReceiverId != null &&
+            (message['senderId'] == _currentReceiverId ||
+                message['receiverId'] == _currentReceiverId)) {
+
+          // Process message similar to fetchConversation
+          final processedMessage = _processMessage(message);
+          _messages.add(processedMessage);
+          notifyListeners();
+
+          print('✅ New message added to conversation');
+        }
+      }
+    } catch (e) {
+      print('💥 Error handling new message: $e');
+    }
+  }
+
+  /// Handle message deleted via socket
+  void _handleMessageDeleted(Map<String, dynamic> data) {
+    try {
+      final messageId = data['messageId'];
+      if (messageId != null) {
+        _messages.removeWhere((message) => message['_id'] == messageId);
+        notifyListeners();
+        print('✅ Message removed from local list');
+      }
+    } catch (e) {
+      print('💥 Error handling message deletion: $e');
+    }
+  }
+
+  /// Handle message edited via socket
+  void _handleMessageEdited(Map<String, dynamic> data) {
+    try {
+      final messageId = data['messageId'];
+      final newText = data['newText'];
+
+      if (messageId != null && newText != null) {
+        final messageIndex = _messages.indexWhere((message) => message['_id'] == messageId);
+        if (messageIndex >= 0) {
+          _messages[messageIndex]['text'] = newText;
+          _messages[messageIndex]['isEdited'] = true;
+          _messages[messageIndex]['editedAt'] = DateTime.now().toString();
+          notifyListeners();
+          print('✅ Message updated in local list');
+        }
+      }
+    } catch (e) {
+      print('💥 Error handling message edit: $e');
+    }
+  }
+
+  /// Handle read status updated via socket
+  void _handleReadStatusUpdated(Map<String, dynamic> data) {
+    try {
+      final senderId = data['senderId'];
+      final receiverId = data['receiverId'];
+
+      if (senderId != null && receiverId != null) {
+        // Update local messages
+        _messages = _messages.map((message) {
+          final messageMap = Map<String, dynamic>.from(message);
+          if (messageMap['senderId'] == senderId && messageMap['receiverId'] == receiverId) {
+            messageMap['readBy'] = true;
+          }
+          return messageMap;
+        }).toList();
+        notifyListeners();
+        print('✅ Read status updated in local messages');
+      }
+    } catch (e) {
+      print('💥 Error handling read status update: $e');
+    }
+  }
+
+  /// Process individual message (similar to fetchConversation logic)
+  Map<String, dynamic> _processMessage(Map<String, dynamic> message) {
+    final messageMap = Map<String, dynamic>.from(message);
+
+    // Set default status and readBy
+    messageMap['status'] = messageMap['status'] ?? 'sent';
+    messageMap['readBy'] = messageMap['readBy'] ?? false;
+
+    // Handle receiverId and senderId if they're objects
+    if (messageMap['receiverId'] is Map) {
+      messageMap['receiverId'] = messageMap['receiverId']['_id'];
+    }
+    if (messageMap['senderId'] is Map) {
+      messageMap['senderId'] = messageMap['senderId']['_id'];
+    }
+
+    // Process file URLs
+    if (messageMap['isFile'] == true && messageMap['fileUrl'] != null) {
+      final fileUrl = messageMap['fileUrl'] as String;
+      if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
+        const String baseUrl = '$apiBaseUrl'; // Update this!
+        String cleanPath = fileUrl;
+        if (!cleanPath.startsWith('/')) {
+          cleanPath = '/$cleanPath';
+        }
+        messageMap['fileUrl'] = '$baseUrl$cleanPath';
+      }
+    }
+
+    // Process audio URLs
+    if (messageMap['isAudio'] == true && messageMap['audioUrl'] != null) {
+      final audioUrl = messageMap['audioUrl'] as String;
+      if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+        const String baseUrl = '$apiBaseUrl'; // Update this!
+        String cleanPath = audioUrl;
+        if (!cleanPath.startsWith('/')) {
+          cleanPath = '/$cleanPath';
+        }
+        messageMap['audioUrl'] = '$baseUrl$cleanPath';
+      }
+    }
+
+    return messageMap;
+  }
+
+  /// Fetch personal chats/friends list
+  Future<void> fetchPersonalChats() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final response = await _chatService.getPersonalChats();
+
+      if (response['error'] == false) {
+        _chatData = response;
+      } else {
+        _error = response['message'] ?? 'Failed to fetch chats';
+      }
+    } catch (e) {
+      _error = 'Exception: ${e.toString()}';
+    }
+
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  /// Fetch conversation with socket integration
+  Future<void> fetchConversation(String userId) async {
+    _isLoading = true;
+    _error = null;
+    _currentReceiverId = userId;
+    notifyListeners();
+
+    try {
+      // Join conversation room via socket
+      if (_currentUserId != null) {
+        _chatService.joinConversation(_currentUserId!, userId);
+      }
+
+      final result = await _chatService.getMessages(userId: userId);
+      print('Debug - fetchConversation response: $result');
+
+      if (result['error'] == false && result['data'] != null) {
+        final data = result['data'];
+        _userData = data['userData'] ?? {};
+
+        // Process messages
+        final rawMessages = data['messages'] as List<dynamic>? ?? [];
+        _messages = rawMessages.map((message) => _processMessage(message)).toList();
+
+        print('✅ Conversation loaded: ${_messages.length} messages');
+      } else {
+        _error = result['message'] ?? 'Failed to fetch conversation';
+        _messages = [];
+        _userData = {};
+        print('❌ Error loading conversation: $_error');
+      }
+    } catch (e) {
+      _error = "Error fetching conversation: $e";
+      _messages = [];
+      _userData = {};
+      print('💥 Exception while fetching conversation: $_error');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Leave current conversation
+  void leaveConversation() {
+    if (_currentUserId != null && _currentReceiverId != null) {
+      _chatService.leaveConversation(_currentUserId!, _currentReceiverId!);
+    }
+    _currentReceiverId = null;
+  }
+
+  /// Send message with socket integration
+  Future<Map<String, dynamic>?> sendMessage({
+    required String receiverId,
+    required String text,
+    bool readBy = false,
+    String? image,
+    String? replayTo,
+  }) async {
+    _isSendingMessage = true;
+    _sendMessageError = null;
+    _lastSentMessage = null;
+    notifyListeners();
+
+    try {
+      // Create optimistic message
+      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
+      final optimisticMessage = {
+        '_id': tempId,
+        'text': text,
+        'senderId': _currentUserId ?? '',
+        'receiverId': receiverId,
+        'readBy': readBy,
+        'createdAt': DateTime.now().toIso8601String(),
+        'status': 'sending',
+        'isOptimistic': true,
+        if (image != null && image.isNotEmpty) 'image': image,
+        if (replayTo != null && replayTo.isNotEmpty) 'replayTo': replayTo,
+      };
+
+      // Add optimistic message to UI
+      _messages = [..._messages, optimisticMessage];
+      notifyListeners();
+
+      // Send via socket or HTTP
+      final response = await _chatService.sendMessage(
+        receiverId: receiverId,
+        text: text,
+        readBy: readBy,
+        image: image,
+        replayTo: replayTo,
+        useSocket: _socketConnected,
+      );
+
+      if (response['error'] == false) {
+        _lastSentMessage = response['data'];
+
+        // Replace optimistic message with real message
+        final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+        if (messageIndex >= 0) {
+          final realMessage = _processMessage(response['data']['message']);
+          _messages[messageIndex] = realMessage;
+        }
+
+        print('✅ Message sent successfully');
+        notifyListeners();
+
+        return {
+          'success': true,
+          'error': false,
+          'message': response['data']['message'],
+          'data': response['data']
+        };
+      } else {
+        // Remove optimistic message on failure
+        _messages.removeWhere((m) => m['_id'] == tempId);
+        _sendMessageError = response['message'] ?? 'Failed to send message';
+        print('❌ Failed to send message: $_sendMessageError');
+        notifyListeners();
+
+        return {
+          'success': false,
+          'error': true,
+          'message': _sendMessageError
+        };
+      }
+    } catch (e) {
+      _sendMessageError = 'Exception: ${e.toString()}';
+      print('💥 Exception while sending message: $_sendMessageError');
+      notifyListeners();
+
+      return {
+        'success': false,
+        'error': true,
+        'message': e.toString()
+      };
+    } finally {
+      _isSendingMessage = false;
+      notifyListeners();
+    }
+  }
+
+  /// Send file message with socket integration
+  Future<Map<String, dynamic>?> sendFileMessage({
+    required File file,
+    required String receiverId,
+    bool readBy = false,
+  }) async {
+    _isSendingMessage = true;
+    _sendMessageError = null;
+    _lastSentMessage = null;
+    notifyListeners();
+
+    try {
+      // Create optimistic message
+      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
+      final fileName = file.path.split('/').last;
+      final optimisticMessage = {
+        '_id': tempId,
+        'fileName': fileName,
+        'fileUrl': file.path,
+        'senderId': _currentUserId ?? '',
+        'receiverId': receiverId,
+        'isFile': true,
+        'readBy': readBy,
+        'createdAt': DateTime.now().toIso8601String(),
+        'status': 'sending',
+        'isOptimistic': true,
+        'localFilePath': file.path,
+      };
+
+      _messages = [..._messages, optimisticMessage];
+      notifyListeners();
+
+      final response = await _chatService.sendFileMessage(
+        file: file,
+        receiverId: receiverId,
+        readBy: readBy,
+        useSocket: _socketConnected,
+      );
+
+      final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+
+      if (response['error'] == false && messageIndex >= 0) {
+        _lastSentMessage = response['data'];
+
+        // Replace optimistic message with real message
+        final realMessage = _processMessage(response['data']['message']);
+        _messages[messageIndex] = realMessage;
+
+        print('✅ File message sent successfully');
+        notifyListeners();
+        return response['data'];
+      } else {
+        _sendMessageError = response['message'] ?? 'Failed to send file message';
+        if (messageIndex >= 0) {
+          _messages[messageIndex] = {
+            ..._messages[messageIndex],
+            'status': 'failed',
+          };
+        }
+        print('❌ Failed to send file message: $_sendMessageError');
+        notifyListeners();
+        return null;
+      }
+    } catch (e) {
+      _sendMessageError = 'Exception: ${e.toString()}';
+      print('💥 Exception while sending file message: $_sendMessageError');
+      notifyListeners();
+      return null;
+    } finally {
+      _isSendingMessage = false;
+      notifyListeners();
+    }
+  }
+
+  /// Send voice message with socket integration
+  Future<Map<String, dynamic>?> sendVoiceMessage({
+    required File audioFile,
+    required String receiverId,
+    bool readBy = false,
+    String? image,
+  }) async {
+    _isSendingMessage = true;
+    _sendMessageError = null;
+    _lastSentMessage = null;
+    notifyListeners();
+
+    try {
+      // Create optimistic message
+      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
+      final optimisticMessage = {
+        '_id': tempId,
+        'audioUrl': audioFile.path,
+        'senderId': _currentUserId ?? '',
+        'receiverId': receiverId,
+        'isAudio': true,
+        'readBy': readBy,
+        'createdAt': DateTime.now().toIso8601String(),
+        'status': 'sending',
+        'isOptimistic': true,
+        'localFilePath': audioFile.path,
+        if (image != null && image.isNotEmpty) 'image': image,
+      };
+
+      _messages = [..._messages, optimisticMessage];
+      notifyListeners();
+
+      final response = await _chatService.sendVoiceMessage(
+        audioFile: audioFile,
+        receiverId: receiverId,
+        readBy: readBy,
+        image: image,
+        useSocket: _socketConnected,
+      );
+
+      final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+
+      if (response['error'] == false && messageIndex >= 0) {
+        _lastSentMessage = response['data'];
+
+        // Replace optimistic message with real message
+        final realMessage = _processMessage(response['data']['message']);
+        realMessage['localFilePath'] = audioFile.path; // Keep local path for sender
+        _messages[messageIndex] = realMessage;
+
+        print('✅ Voice message sent successfully');
+        notifyListeners();
+        return response['data'];
+      } else {
+        _sendMessageError = response['message'] ?? 'Failed to send voice message';
+        if (messageIndex >= 0) {
+          _messages[messageIndex] = {
+            ..._messages[messageIndex],
+            'status': 'failed',
+          };
+        }
+        print('❌ Failed to send voice message: $_sendMessageError');
+        notifyListeners();
+        return null;
+      }
+    } catch (e) {
+      _sendMessageError = 'Exception: ${e.toString()}';
+      print('💥 Exception while sending voice message: $_sendMessageError');
+      notifyListeners();
+      return null;
+    } finally {
+      _isSendingMessage = false;
+      notifyListeners();
+    }
+  }
+
+  /// Update read status with socket integration
+  Future<Map<String, dynamic>?> updateReadStatus({
+    required String senderId,
+    required String receiverId,
+  }) async {
+    try {
+      final response = await _chatService.updateReadStatus(
+        senderId: senderId,
+        receiverId: receiverId,
+        useSocket: _socketConnected,
+      );
+
+      print('Debug - updateReadStatus response: $response');
+
+      if (response['error'] == false) {
+        print('✅ Read status updated successfully');
+
+        // Update local messages if not updated by socket event
+        if (!_socketConnected) {
+          _messages = _messages.map((message) {
+            final messageMap = Map<String, dynamic>.from(message);
+            if (messageMap['senderId'] == senderId && messageMap['receiverId'] == receiverId) {
+              messageMap['readBy'] = true;
+            }
+            return messageMap;
+          }).toList();
+          notifyListeners();
+        }
+
+        return {
+          'success': true,
+          'error': false,
+          'message': response['message'],
+          'data': response['data'],
+        };
+      } else {
+        _sendMessageError = response['message'] ?? 'Failed to update read status';
+        print('❌ Failed to update read status: $_sendMessageError');
+        return {
+          'success': false,
+          'error': true,
+          'message': _sendMessageError,
+        };
+      }
+    } catch (e) {
+      _sendMessageError = 'Exception: ${e.toString()}';
+      print('💥 Exception while updating read status: $_sendMessageError');
+      return {
+        'success': false,
+        'error': true,
+        'message': e.toString(),
+      };
+    }
+  }
+
+  /// Delete message with socket integration
+  Future<Map<String, dynamic>?> deleteMessage({
+    required String messageId,
+    required String receiverId,
+  }) async {
+    try {
+      print('🗑️ Deleting message: $messageId');
+
+      final response = await _chatService.deleteMessage(
+        messageId: messageId,
+        receiverId: receiverId,
+        useSocket: _socketConnected,
+      );
+
+      if (response != null && response['error'] != true) {
+        // Remove message from local list if not handled by socket event
+        if (!_socketConnected) {
+          _messages.removeWhere((message) => message['_id'] == messageId);
+          print('✅ Message removed from local list');
+          notifyListeners();
+        }
+        return response;
+      } else {
+        print('❌ Delete failed: ${response?['message']}');
+        return response;
+      }
+    } catch (e) {
+      print('💥 Error in deleteMessage: $e');
+      return {
+        'error': true,
+        'message': 'Error deleting message: $e',
+      };
+    }
+  }
+
+  /// Edit message with socket integration
+  Future<Map<String, dynamic>?> editMessage({
+    required String messageId,
+    required String newText,
+    required String receiverId,
+  }) async {
+    try {
+      print('✏️ Editing message: $messageId');
+
+      final response = await _chatService.editMessage(
+        messageId: messageId,
+        newText: newText,
+        receiverId: receiverId,
+        useSocket: _socketConnected,
+      );
+
+      if (response != null && response['error'] != true) {
+        // Update message in local list if not handled by socket event
+        if (!_socketConnected) {
+          final messageIndex = _messages.indexWhere((message) => message['_id'] == messageId);
+          if (messageIndex >= 0) {
+            _messages[messageIndex]['text'] = newText;
+            _messages[messageIndex]['isEdited'] = true;
+            _messages[messageIndex]['editedAt'] = DateTime.now().toString();
+          }
+          notifyListeners();
+        }
+        return response;
+      } else {
+        print('❌ Edit failed: ${response?['message']}');
+        return response;
+      }
+    } catch (e) {
+      print('💥 Error in editMessage: $e');
+      return {
+        'error': true,
+        'message': 'Error editing message: $e',
+      };
+    }
+  }
+
+  /// Helper methods for optimistic message handling
+  void addOptimisticMessage(Map<String, dynamic> message) {
+    _messages = [..._messages, message];
+    notifyListeners();
+  }
+
+  void replaceOptimisticMessage(String tempId, Map<String, dynamic> realMessage) {
+    final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+    if (messageIndex >= 0) {
+      final updatedMessages = List<Map<String, dynamic>>.from(_messages);
+      updatedMessages[messageIndex] = realMessage;
+      _messages = updatedMessages;
+      notifyListeners();
+    }
+  }
+
+  void updateOptimisticMessageStatus(String tempId, String status) {
+    final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+    if (messageIndex >= 0) {
+      final updatedMessages = List<Map<String, dynamic>>.from(_messages);
+      updatedMessages[messageIndex] = {
+        ...updatedMessages[messageIndex],
+        'status': status,
+      };
+      _messages = updatedMessages;
+      notifyListeners();
+    }
+  }
+
+  void removeOptimisticMessage(String tempId) {
+    _messages = _messages.where((m) => m['_id'] != tempId).toList();
+    notifyListeners();
+  }
+
+  void clearOptimisticMessages() {
+    _messages = _messages.where((m) => m['isOptimistic'] != true).toList();
+    notifyListeners();
+  }
+
+  /// Retry failed message
+  Future<void> retryMessage(String tempId) async {
+    final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
+    if (messageIndex >= 0) {
+      final message = _messages[messageIndex];
+
+      // Update status to sending
+      updateOptimisticMessageStatus(tempId, 'sending');
+
+      // Retry based on message type
+      if (message['isAudio'] == true) {
+        final audioFile = File(message['localFilePath']);
+        await sendVoiceMessage(
+          audioFile: audioFile,
+          receiverId: message['receiverId'],
+          readBy: message['readBy'] ?? false,
+          image: message['image'],
+        );
+      } else if (message['isFile'] == true) {
+        final file = File(message['localFilePath']);
+        await sendFileMessage(
+          file: file,
+          receiverId: message['receiverId'],
+          readBy: message['readBy'] ?? false,
+        );
+      } else {
+        await sendMessage(
+          receiverId: message['receiverId'],
+          text: message['text'] ?? '',
+          readBy: message['readBy'] ?? false,
+          image: message['image'],
+          replayTo: message['replayTo'],
+        );
+      }
+
+      // Remove the failed message after retry
+      removeOptimisticMessage(tempId);
+    }
+  }
+
+
+
+
+  /// Reconnect socket manually
+  Future<bool> reconnectSocket() async {
+    print('🔄 Manually reconnecting socket...');
+    return await initializeSocket();
+  }
+
+  /// Check socket connection status
+  bool isSocketConnected() {
+    return _socketService.isConnected;
+  }
+
+  /// Clear all messages (useful when switching conversations)
+  void clearMessages() {
+    _messages.clear();
+    _userData.clear();
+    _currentReceiverId = null;
+    notifyListeners();
+  }
+
+  /// Get message by ID
+  Map<String, dynamic>? getMessageById(String messageId) {
+    try {
+      return _messages.firstWhere(
+            (message) => message['_id'] == messageId,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Get failed messages count
+  int get failedMessagesCount {
+    return _messages.where((message) => message['status'] == 'failed').length;
+  }
+
+  /// Get pending messages count
+  int get pendingMessagesCount {
+    return _messages.where((message) => message['status'] == 'sending').length;
+  }
+
+  /// Retry all failed messages
+  Future<void> retryAllFailedMessages() async {
+    final failedMessages = _messages.where((message) => message['status'] == 'failed').toList();
+
+    for (final message in failedMessages) {
+      await retryMessage(message['_id']);
+    }
+  }
+
+  /// Mark conversation as read
+  Future<void> markConversationAsRead() async {
+    if (_currentUserId != null && _currentReceiverId != null) {
+      await updateReadStatus(
+        senderId: _currentReceiverId!,
+        receiverId: _currentUserId!,
+      );
+    }
+  }
+
+  /// Get unread messages count for current conversation
+  int get unreadMessagesCount {
+    return _messages.where((message) =>
+    message['senderId'] == _currentReceiverId &&
+        message['readBy'] != true
+    ).length;
+  }
+
+  /// Check if user is typing (placeholder for future implementation)
+  bool _isTyping = false;
+  bool get isTyping => _isTyping;
+
+  /// Set typing status (placeholder for future implementation)
+  void setTypingStatus(bool typing) {
+    _isTyping = typing;
+    notifyListeners();
+  }
+
+  /// Get last message in conversation
+  Map<String, dynamic>? get lastMessage {
+    if (_messages.isNotEmpty) {
+      return _messages.last;
+    }
+    return null;
+  }
+
+  /// Search messages by text
+  List<Map<String, dynamic>> searchMessages(String query) {
+    if (query.trim().isEmpty) return [];
+
+    final lowerQuery = query.toLowerCase();
+    return _messages.where((message) {
+      final text = message['text']?.toString().toLowerCase() ?? '';
+      final fileName = message['fileName']?.toString().toLowerCase() ?? '';
+      return text.contains(lowerQuery) || fileName.contains(lowerQuery);
+    }).cast<Map<String, dynamic>>().toList();
+  }
+
+  /// Get messages by date
+  List<Map<String, dynamic>> getMessagesByDate(DateTime date) {
+    return _messages.where((message) {
+      final messageDate = DateTime.tryParse(message['createdAt'] ?? '');
+      if (messageDate == null) return false;
+
+      return messageDate.year == date.year &&
+          messageDate.month == date.month &&
+          messageDate.day == date.day;
+    }).cast<Map<String, dynamic>>().toList();
+  }
+
+  /// Get messages by type (text, file, audio)
+  List<Map<String, dynamic>> getMessagesByType(String type) {
+    switch (type.toLowerCase()) {
+      case 'text':
+        return _messages.where((message) =>
+        message['isFile'] != true &&
+            message['isAudio'] != true
+        ).cast<Map<String, dynamic>>().toList();
+      case 'file':
+        return _messages.where((message) =>
+        message['isFile'] == true
+        ).cast<Map<String, dynamic>>().toList();
+      case 'audio':
+      case 'voice':
+        return _messages.where((message) =>
+        message['isAudio'] == true
+        ).cast<Map<String, dynamic>>().toList();
+      default:
+        return [];
+    }
+  }
+
+  /// Export conversation (placeholder for future implementation)
+  Future<String> exportConversation({String format = 'json'}) async {
+    // This could be implemented to export chat history
+    throw UnimplementedError('Export functionality not yet implemented');
+  }
+
+  /// Clear error states
+  void clearErrors() {
+    _error = null;
+    _sendMessageError = null;
+    notifyListeners();
+  }
+
+  /// Refresh current conversation
+  Future<void> refreshConversation() async {
+    if (_currentReceiverId != null) {
+      await fetchConversation(_currentReceiverId!);
+    }
+  }
+
+  /// Check if current user is sender of message
+  bool isMessageFromCurrentUser(Map<String, dynamic> message) {
+    return message['senderId'] == _currentUserId;
+  }
+
+  /// Get conversation statistics
+  Map<String, dynamic> get conversationStats {
+    if (_messages.isEmpty) {
+      return {
+        'totalMessages': 0,
+        'textMessages': 0,
+        'fileMessages': 0,
+        'voiceMessages': 0,
+        'unreadMessages': 0,
+        'failedMessages': 0,
+      };
+    }
+
+    return {
+      'totalMessages': _messages.length,
+      'textMessages': getMessagesByType('text').length,
+      'fileMessages': getMessagesByType('file').length,
+      'voiceMessages': getMessagesByType('audio').length,
+      'unreadMessages': unreadMessagesCount,
+      'failedMessages': failedMessagesCount,
+    };
+  }
+
+  /// Validate message before sending
+  bool _validateMessage(String text, {File? file, File? audioFile}) {
+    // Check text message
+    if (file == null && audioFile == null) {
+      return text.trim().isNotEmpty && text.length <= 1000; // Max 1000 chars
+    }
+
+    // Check file message
+    if (file != null) {
+      final fileSizeMB = file.lengthSync() / (1024 * 1024);
+      return fileSizeMB <= 50; // Max 50MB
+    }
+
+    // Check audio message
+    if (audioFile != null) {
+      final audioSizeMB = audioFile.lengthSync() / (1024 * 1024);
+      return audioSizeMB <= 25; // Max 25MB
+    }
+
+    return false;
+  }
+
+  /// Get message validation error
+  String? getValidationError(String text, {File? file, File? audioFile}) {
+    if (file == null && audioFile == null) {
+      if (text.trim().isEmpty) {
+        return 'Message cannot be empty';
+      }
+      if (text.length > 1000) {
+        return 'Message too long (max 1000 characters)';
+      }
+    }
+
+    if (file != null) {
+      final fileSizeMB = file.lengthSync() / (1024 * 1024);
+      if (fileSizeMB > 50) {
+        return 'File too large (max 50MB)';
+      }
+    }
+
+    if (audioFile != null) {
+      final audioSizeMB = audioFile.lengthSync() / (1024 * 1024);
+      if (audioSizeMB > 25) {
+        return 'Audio file too large (max 25MB)';
+      }
+    }
+
+    return null;
+  }
+
+  /// Dispose and cleanup
+  void cleanup() {
+    _cancelSocketSubscriptions();
+    _chatService.disconnectSocket();
+    clearMessages();
+    clearErrors();
+  }
+}

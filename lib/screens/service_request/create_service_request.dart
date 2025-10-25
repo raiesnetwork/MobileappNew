@@ -1,0 +1,538 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../providers/service_request_provider.dart';
+
+class CreateServiceRequestScreen extends StatefulWidget {
+  final String? communityId;
+  final Map<String, dynamic>? request;
+
+  const CreateServiceRequestScreen({Key? key, this.communityId, this.request}) : super(key: key);
+
+  @override
+  State<CreateServiceRequestScreen> createState() => _CreateServiceRequestScreenState();
+}
+
+class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _subjectController = TextEditingController();
+  final _descriptionController = TextEditingController();
+
+  String _selectedCategory = '';
+  String _selectedPriority = '';
+  bool _isSubmitting = false;
+
+  final List<String> _categories = [
+    'Access_Request',
+    'Billing / Payment',
+    'Cleaning',
+    'Complaint an issue',
+    'Electrical',
+    'Feedback',
+    'Internet / Network',
+    'Maintenance',
+    'Others',
+    'Plumbing',
+    'Software / IT',
+    'jhhh', // From SR-2025-029
+    'jhhhdfgffe', // From SR-2025-030
+  ];
+
+  final List<Map<String, String>> _priorities = [
+    {
+      'value': 'Critical – Business/essential function is blocked',
+      'label': 'Critical',
+      'description': 'Business/essential function is blocked'
+    },
+    {
+      'value': 'High – Needs action soon, moderate impact',
+      'label': 'High',
+      'description': 'Needs action soon, moderate impact'
+    },
+    {
+      'value': 'Medium – Needs attention within a few hours',
+      'label': 'Medium',
+      'description': 'Needs attention within a few hours'
+    },
+    {
+      'value': 'Low – Not urgent, can wait',
+      'label': 'Low',
+      'description': 'Not urgent, can wait'
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.request != null) {
+      _subjectController.text = widget.request!['subject'] ?? '';
+      _descriptionController.text = widget.request!['description'] ?? '';
+      _selectedCategory = widget.request!['category'] ?? '';
+      _selectedPriority = widget.request!['priority'] ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _subjectController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEditing = widget.request != null;
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: Text(isEditing ? 'Edit Service Request' : 'Create Service Request', style: const TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        scrolledUnderElevation: 0,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: Colors.grey[200]),
+        ),
+      ),
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSectionCard(
+                title: 'Request Details',
+                icon: Icons.assignment_outlined,
+                children: [
+                  _buildTextField(
+                    controller: _subjectController,
+                    label: 'Subject',
+                    required: true,
+                    maxLines: 1,
+                  ),
+                  const SizedBox(height: 14),
+                  _buildTextField(
+                    controller: _descriptionController,
+                    label: 'Description',
+                    required: true,
+                    maxLines: 4,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              _buildSectionCard(
+                title: 'Classification',
+                icon: Icons.category_outlined,
+                children: [
+                  _buildCategorySelector(),
+                  const SizedBox(height: 14),
+                  _buildPrioritySelector(),
+                ],
+              ),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isSubmitting ? null : () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _isSubmitting ? null : _submitRequest,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue[600],
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: _isSubmitting
+                          ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                          : Text(
+                        isEditing ? 'Update Request' : 'Create Request',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionCard({required String title, required IconData icon, required List<Widget> children}) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(icon, size: 16, color: Colors.blue[700]),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required bool required,
+    int maxLines = 1,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: label,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+            children: required
+                ? [
+              const TextSpan(
+                text: ' *',
+                style: TextStyle(color: Colors.red),
+              ),
+            ]
+                : null,
+          ),
+        ),
+        const SizedBox(height: 4),
+        TextFormField(
+          controller: controller,
+          maxLines: maxLines,
+          decoration: InputDecoration(
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Colors.blue, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.all(10),
+          ),
+          validator: (value) {
+            if (required && (value == null || value.trim().isEmpty)) {
+              return '$label is required';
+            }
+            return null;
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategorySelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: 'Category',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+            children: const [
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        DropdownButtonFormField<String>(
+          value: _selectedCategory.isEmpty ? null : _selectedCategory,
+          decoration: InputDecoration(
+            hintText: 'Select a category',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Colors.blue, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.all(10),
+          ),
+          items: _categories.map((category) {
+            return DropdownMenuItem(
+              value: category,
+              child: Text(category),
+            );
+          }).toList(),
+          onChanged: (value) {
+            setState(() {
+              _selectedCategory = value ?? '';
+            });
+          },
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Category is required';
+            }
+            return null;
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPrioritySelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: 'Priority',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+            children: const [
+              TextSpan(
+                text: ' *',
+                style: TextStyle(color: Colors.red),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 6),
+        ..._priorities.map((priority) {
+          final isSelected = _selectedPriority == priority['value'];
+          final color = _getPriorityColor(priority['label']!);
+
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedPriority = priority['value']!;
+              });
+            },
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isSelected ? color.withOpacity(0.1) : Colors.white,
+                border: Border.all(
+                  color: isSelected ? color : Colors.grey[300]!,
+                  width: isSelected ? 2 : 1,
+                ),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: isSelected ? color : Colors.transparent,
+                      border: Border.all(color: color, width: 2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: isSelected ? Icon(Icons.check, size: 10, color: Colors.white) : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.flag, size: 14, color: color),
+                            const SizedBox(width: 4),
+                            Text(
+                              priority['label']!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isSelected ? color : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 1),
+                        Text(
+                          priority['description']!,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+        if (_selectedPriority.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'Priority is required',
+              style: TextStyle(
+                fontSize: 10,
+                color: Colors.red[700],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _submitRequest() async {
+    if (!_formKey.currentState!.validate() || _selectedPriority.isEmpty) {
+      if (_selectedPriority.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a priority level'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      final provider = Provider.of<ServiceRequestProvider>(context, listen: false);
+      Map<String, dynamic> result;
+
+      if (widget.request != null) {
+        // Update existing request using _id
+        result = await provider.updateServiceRequest(
+          requestId: widget.request!['_id'], // Use _id, not requestId
+          subject: _subjectController.text.trim(),
+          description: _descriptionController.text.trim(),
+          category: _selectedCategory,
+          priority: _selectedPriority,
+          status: widget.request!['status'], // Preserve existing status
+        );
+      } else {
+        // Create new request
+        result = await provider.createServiceRequest(
+          subject: _subjectController.text.trim(),
+          description: _descriptionController.text.trim(),
+          category: _selectedCategory,
+          priority: _selectedPriority,
+          communityId: widget.communityId,
+        );
+      }
+
+      if (result['error'] == false && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? (widget.request != null ? 'Service request updated successfully' : 'Service request created successfully')),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context, true);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? (widget.request != null ? 'Failed to update service request' : 'Failed to create service request')),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Color _getPriorityColor(String priority) {
+    switch (priority.toLowerCase()) {
+      case 'critical':
+        return Colors.red;
+      case 'high':
+        return Colors.orange;
+      case 'medium':
+        return Colors.blue;
+      case 'low':
+        return Colors.green;
+      default:
+        return Colors.grey;
+    }
+  }
+}
