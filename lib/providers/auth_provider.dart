@@ -355,4 +355,5 @@ Future<bool> sendForgotPasswordOTP({
     final userData = prefs.getString('user_data');
     return token != null && userData != null;
   }
+  
 }

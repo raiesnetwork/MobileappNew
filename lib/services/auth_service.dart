@@ -1,7 +1,11 @@
 import 'dart:convert';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import '../models/user_model.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 
 class AuthService {
   static Future<Map<String, dynamic>> signup({
@@ -78,33 +82,72 @@ class AuthService {
       };
     }
   }
-   static Future<Map<String, dynamic>> loginWithOTP({
+  static Future<Map<String, dynamic>> loginWithOTP({
     required String mobile,
     required String otp,
   }) async {
-    final response = await ApiService.post(
-      '/api/auth/verifyOTP',
-      {
+    try {
+      final Uri url = Uri.parse("https://api.ixes.ai/api/auth/loginWithOTP");
+
+      final Map<String, dynamic> body = {
         'mobile': mobile,
         'otp': otp,
-      },
-      requireAuth: false,
-    );
+      };
 
-    print("Status Code: ${response.statusCode}");
-    print("Response Body: '${response.body}'");
+      print("📤 Login Request URL: $url");
+      print("📤 Login BODY: $body");
 
-    if (response.statusCode == 200 && response.body.trim() == 'OK') {
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+
+      print("📥 Status Code: ${response.statusCode}");
+      print("📥 Response Body: ${response.body}");
+
+      // Parse the response
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['token'] != null) {
+        final token = data['token'];
+        final userId = data['id'];
+        final username = data['username'];
+        final guid = data['guid'];
+
+        // ✅ Save token & user info in SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('auth_token', token);
+        await prefs.setString('user_id', userId ?? '');
+        await prefs.setString('username', username ?? '');
+        await prefs.setBool('guid', guid ?? false);
+
+        // 🧠 Verify token saved
+        final savedToken = prefs.getString('auth_token');
+        print("✅ Token saved successfully: $savedToken");
+
+        return {
+          'success': true,
+          'message': data['message'] ?? 'Login successful',
+          'token': token,
+          'user_id': userId,
+          'username': username,
+          'guid': guid,
+        };
+      } else {
+        print("❌ Login failed: ${data['message']}");
+        return {
+          'success': false,
+          'message': data['message'] ?? 'OTP verification failed',
+        };
+      }
+    } catch (e) {
+      print("❌ Login Error: $e");
       return {
-        'success': true,
-        'message': 'Login successful',
+        'success': false,
+        'message': 'Error during login: ${e.toString()}',
       };
     }
-
-    return {
-      'success': false,
-      'message': 'OTP verification failed',
-    };
   }
 
   static Future<Map<String, dynamic>> sendOTP(String mobile) async {
@@ -259,4 +302,6 @@ static Future<Map<String, dynamic>> forgotPassword({
       return false;
     }
   }
+
+
 }

@@ -128,7 +128,6 @@ class _FeedScreenState extends State<FeedScreen> {
       }
     }
   }
-
   Future<void> _refreshFeed() async {
     setState(() {
       _currentPage = 0;
@@ -141,18 +140,31 @@ class _FeedScreenState extends State<FeedScreen> {
     });
 
     final provider = context.read<CommentProvider>();
-    final result = await provider.fetchAllPosts(
-      offset: 0,
-      limit: _postsPerPage,
-      isRefresh: true, // ✅ This will replace the provider's post list
-    );
+    Map<String, dynamic>? result;
+
+    // ✅ FIX: Fetch based on feed type
+    if (isCommunityFeed) {
+      result = await provider.fetchCommunityPosts(
+        communityId: widget.communityId!,
+        offset: 0,
+        limit: _postsPerPage,
+      );
+    } else {
+      result = await provider.fetchAllPosts(
+        offset: 0,
+        limit: _postsPerPage,
+        isRefresh: true,
+      );
+    }
 
     setState(() {
-      posts = List.from(provider.posts);
-      _originalPosts = List.from(provider.posts);
-      _allPostsCache = List.from(provider.posts);
+      // ✅ FIX: Use the correct list based on feed type
+      final currentPosts = isCommunityFeed ? provider.communityPosts : provider.posts;
+      posts = List.from(currentPosts);
+      _originalPosts = List.from(currentPosts);
+      _allPostsCache = List.from(currentPosts);
       _currentPage = 1;
-      _hasMorePosts = provider.posts.length == _postsPerPage;
+      _hasMorePosts = currentPosts.length == _postsPerPage;
     });
   }
 
@@ -554,7 +566,13 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+
   Widget _buildPostCard(BuildContext context, Post post) {
+    // ✅ Filter out empty strings AND relative paths (starting with /)
+    final filteredImages = post.postImages
+        .where((img) => img.isNotEmpty && !img.startsWith('/'))
+        .toList();
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
       decoration: BoxDecoration(
@@ -625,8 +643,8 @@ class _FeedScreenState extends State<FeedScreen> {
                                     final startIndex =
                                         _currentPage * _postsPerPage;
                                     final endIndex =
-                                        (startIndex + updatedPosts.length)
-                                            .clamp(0, posts.length);
+                                    (startIndex + updatedPosts.length)
+                                        .clamp(0, posts.length);
                                     posts.removeRange(startIndex, endIndex);
                                     posts.insertAll(startIndex, updatedPosts);
                                   });
@@ -661,13 +679,13 @@ class _FeedScreenState extends State<FeedScreen> {
                               _postsPerPage,
                               posts,
                               visiblePosts: posts,
-                              (updatedPosts) {
+                                  (updatedPosts) {
                                 setState(() {
                                   final startIndex =
                                       _currentPage * _postsPerPage;
                                   final endIndex =
-                                      (startIndex + updatedPosts.length)
-                                          .clamp(0, posts.length);
+                                  (startIndex + updatedPosts.length)
+                                      .clamp(0, posts.length);
                                   posts.removeRange(startIndex, endIndex);
                                   posts.insertAll(startIndex, updatedPosts);
                                 });
@@ -697,13 +715,13 @@ class _FeedScreenState extends State<FeedScreen> {
                               _postsPerPage,
                               posts,
                               visiblePosts: posts,
-                              (updatedPosts) {
+                                  (updatedPosts) {
                                 setState(() {
                                   final startIndex =
                                       _currentPage * _postsPerPage;
                                   final endIndex =
-                                      (startIndex + updatedPosts.length)
-                                          .clamp(0, posts.length);
+                                  (startIndex + updatedPosts.length)
+                                      .clamp(0, posts.length);
                                   posts.removeRange(startIndex, endIndex);
                                   posts.insertAll(startIndex, updatedPosts);
                                 });
@@ -739,19 +757,19 @@ class _FeedScreenState extends State<FeedScreen> {
 
           // Post Content Centered Between Dividers
           if (post.postContent.isNotEmpty ||
-              post.postImages.isNotEmpty ||
+              filteredImages.isNotEmpty ||  // ✅ Use filteredImages
               (post.postVideo != null && post.postVideo!.isNotEmpty))
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (post.postImages.isNotEmpty)
+                  if (filteredImages.isNotEmpty)  // ✅ Use filteredImages
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
-                      child: post.postImages.length == 1
-                          ? _buildSingleImage(post.postImages.first)
-                          : _buildImageCarousel(post.postImages),
+                      child: filteredImages.length == 1  // ✅ Use filteredImages
+                          ? _buildSingleImage(filteredImages.first)
+                          : _buildImageCarousel(filteredImages),  // ✅ Use filteredImages
                     ),
                   if (post.postVideo != null && post.postVideo!.isNotEmpty)
                     Padding(
@@ -792,8 +810,11 @@ class _FeedScreenState extends State<FeedScreen> {
         children: [
           Consumer<CommentProvider>(
             builder: (context, provider, _) {
-              final updatedPost = provider.posts.firstWhere(
-                (p) => p.id == post.id,
+              // ✅ FIX: Check the correct list based on feed type
+              final postsList = isCommunityFeed ? provider.communityPosts : provider.posts;
+
+              final updatedPost = postsList.firstWhere(
+                    (p) => p.id == post.id,
                 orElse: () => post,
               );
 
@@ -895,7 +916,9 @@ class _FeedScreenState extends State<FeedScreen> {
   void _handleLike(Post post) async {
     final provider = context.read<CommentProvider>();
 
-    if (!provider.posts.any((p) => p.id == post.id)) return;
+    // ✅ FIX: Check the correct list based on feed type
+    final postsList = isCommunityFeed ? provider.communityPosts : provider.posts;
+    if (!postsList.any((p) => p.id == post.id)) return;
 
     if (!processingLikes.contains(post.id)) {
       processingLikes.add(post.id);
@@ -903,7 +926,7 @@ class _FeedScreenState extends State<FeedScreen> {
       // Toggle like/unlike
       await provider.toggleLike(post.id);
 
-      // ✅ Fetch updated like count only (no other logic changed)
+      // Fetch updated like count
       await provider.fetchCount(post.id);
 
       processingLikes.remove(post.id);
@@ -916,7 +939,7 @@ class _FeedScreenState extends State<FeedScreen> {
     // Optional: preload post data
     await provider.fetchSinglePost(post.id);
 
-    // ⏬ Wait for bottom sheet to close
+
     await _showCommentsBottomSheet(post.id);
 
     // ⏫ Fetch updated comment count AFTER bottom sheet closes
@@ -1107,44 +1130,48 @@ class _FeedScreenState extends State<FeedScreen> {
                           ),
 
                           // Send Button
+                          // Send Button
+                          // Inside _showCommentsBottomSheet, in the IconButton's onPressed:
                           IconButton(
                             iconSize: 33,
                             icon: const Icon(Icons.send, color: Primary),
                             onPressed: () async {
                               final text = controller.text.trim();
                               if (text.isNotEmpty) {
-                                final provider =
-                                    context.read<CommentProvider>();
+                                final provider = context.read<CommentProvider>();
 
+                                // ✅ Clear the text field immediately for better UX
+                                controller.clear();
+                                FocusScope.of(context).unfocus();
+
+                                // ✅ Pass communityId if it's a community feed
                                 final success = await provider.postComment(
                                   postId: postId,
                                   commentContent: text,
                                   offset: 0,
                                   limit: 10,
+                                  communityId: widget.communityId, // ✅ Pass communityId
                                 );
 
                                 if (success) {
-                                  controller.clear();
-                                  FocusScope.of(context).unfocus();
-
-                                  // Refresh the single post (optional if not using it in UI)
-                                  await provider.fetchSinglePost(postId);
-
-                                  // ✅ Refresh the interaction count (includes commentCount)
-                                  await provider.fetchCount(postId);
-
-                                  // Animate scroll to top
-                                  WidgetsBinding.instance
-                                      .addPostFrameCallback((_) {
-                                    scrollController.animateTo(
-                                      0,
-                                      duration:
-                                          const Duration(milliseconds: 300),
-                                      curve: Curves.easeOut,
-                                    );
+                                  // Animate scroll to top to show the new comment
+                                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                                    if (scrollController.hasClients) {
+                                      scrollController.animateTo(
+                                        0,
+                                        duration: const Duration(milliseconds: 300),
+                                        curve: Curves.easeOut,
+                                      );
+                                    }
                                   });
-
-                                  // await _refreshFeed();
+                                } else {
+                                  // ❌ If posting failed, show error
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Failed to post comment'),
+                                      backgroundColor: Colors.red,
+                                    ),
+                                  );
                                 }
                               }
                             },
@@ -1235,20 +1262,37 @@ class _ImageCarouselWithDots extends StatefulWidget {
 
 // Helper method to determine if the image string is a network URL
 bool _isNetworkImage(String imageString) {
-  return imageString.startsWith('http://') ||
-      imageString.startsWith('https://') ||
-      imageString.startsWith('ftp://');
+  final lower = imageString.toLowerCase();
+  return (lower.startsWith('http://') ||
+      lower.startsWith('https://') ||
+      lower.startsWith('ftp://')) &&
+      (lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.png') ||
+          lower.endsWith('.gif') ||
+          lower.endsWith('.bmp') ||
+          lower.endsWith('.webp')); // 👈 Added support for .webp
 }
+
 
 // Alternative helper method using Uri.tryParse (more robust)
 bool _isNetworkImageRobust(String imageString) {
   try {
     final uri = Uri.parse(imageString);
-    return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https' || uri.scheme == 'ftp');
+    final path = uri.path.toLowerCase();
+    return uri.hasScheme &&
+        (uri.scheme == 'http' || uri.scheme == 'https' || uri.scheme == 'ftp') &&
+        (path.endsWith('.jpg') ||
+            path.endsWith('.jpeg') ||
+            path.endsWith('.png') ||
+            path.endsWith('.gif') ||
+            path.endsWith('.bmp') ||
+            path.endsWith('.webp')); // 👈 Added .webp support
   } catch (e) {
     return false;
   }
 }
+
 
 class _ImageCarouselWithDotsState extends State<_ImageCarouselWithDots> {
   int _currentIndex = 0;

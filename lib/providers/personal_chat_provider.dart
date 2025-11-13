@@ -140,21 +140,35 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   /// Handle new message received via socket
+  // STEP 7: Replace the _handleNewMessage method in PersonalChatProvider class
+// Location: Inside PersonalChatProvider class (this is called by socket events)
+
   void _handleNewMessage(Map<String, dynamic> data) {
     try {
       final message = data['message'];
-      if (message != null) {
-        // Add message to local list if it's for the current conversation
-        if (_currentReceiverId != null &&
-            (message['senderId'] == _currentReceiverId ||
-                message['receiverId'] == _currentReceiverId)) {
+      if (message == null) return;
 
-          // Process message similar to fetchConversation
+      final messageId = message['_id'];
+
+      // Check if message already exists
+      final existingIndex = _messages.indexWhere((m) => m['_id'] == messageId);
+
+      // Only add if this is for current conversation
+      if (_currentReceiverId != null &&
+          (message['senderId'] == _currentReceiverId ||
+              message['receiverId'] == _currentReceiverId)) {
+
+        if (existingIndex == -1) {
+          // Message doesn't exist, add it
           final processedMessage = _processMessage(message);
           _messages.add(processedMessage);
           notifyListeners();
-
           print('✅ New message added to conversation');
+        } else {
+          // Message exists, update it (in case of status change)
+          _messages[existingIndex] = _processMessage(message);
+          notifyListeners();
+          print('✅ Existing message updated');
         }
       }
     } catch (e) {
@@ -337,7 +351,8 @@ class PersonalChatProvider with ChangeNotifier {
     _currentReceiverId = null;
   }
 
-  /// Send message with socket integration
+
+
   Future<Map<String, dynamic>?> sendMessage({
     required String receiverId,
     required String text,
@@ -351,8 +366,9 @@ class PersonalChatProvider with ChangeNotifier {
     notifyListeners();
 
     try {
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+
       // Create optimistic message
-      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
       final optimisticMessage = {
         '_id': tempId,
         'text': text,
@@ -367,7 +383,7 @@ class PersonalChatProvider with ChangeNotifier {
       };
 
       // Add optimistic message to UI
-      _messages = [..._messages, optimisticMessage];
+      _messages.add(optimisticMessage);
       notifyListeners();
 
       // Send via socket or HTTP
@@ -377,17 +393,23 @@ class PersonalChatProvider with ChangeNotifier {
         readBy: readBy,
         image: image,
         replayTo: replayTo,
-        useSocket: _socketConnected,
+
       );
 
       if (response['error'] == false) {
         _lastSentMessage = response['data'];
 
-        // Replace optimistic message with real message
+        // Get the actual message data
+        final messageData = response['data']['message'] ?? response['data'];
+
+        // Replace optimistic message with real message from server
         final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
         if (messageIndex >= 0) {
-          final realMessage = _processMessage(response['data']['message']);
+          final realMessage = _processMessage(messageData);
           _messages[messageIndex] = realMessage;
+        } else {
+          // If not found, just add it (shouldn't happen normally)
+          _messages.add(_processMessage(messageData));
         }
 
         print('✅ Message sent successfully');
@@ -396,7 +418,7 @@ class PersonalChatProvider with ChangeNotifier {
         return {
           'success': true,
           'error': false,
-          'message': response['data']['message'],
+          'message': messageData,
           'data': response['data']
         };
       } else {
@@ -429,6 +451,9 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   /// Send file message with socket integration
+  // STEP 4: Replace the sendFileMessage method in PersonalChatProvider class
+// Location: Inside PersonalChatProvider class
+
   Future<Map<String, dynamic>?> sendFileMessage({
     required File file,
     required String receiverId,
@@ -440,9 +465,9 @@ class PersonalChatProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // Create optimistic message
-      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
       final fileName = file.path.split('/').last;
+
       final optimisticMessage = {
         '_id': tempId,
         'fileName': fileName,
@@ -457,7 +482,7 @@ class PersonalChatProvider with ChangeNotifier {
         'localFilePath': file.path,
       };
 
-      _messages = [..._messages, optimisticMessage];
+      _messages.add(optimisticMessage);
       notifyListeners();
 
       final response = await _chatService.sendFileMessage(
@@ -469,12 +494,17 @@ class PersonalChatProvider with ChangeNotifier {
 
       final messageIndex = _messages.indexWhere((m) => m['_id'] == tempId);
 
-      if (response['error'] == false && messageIndex >= 0) {
+      if (response['error'] == false && response['data'] != null) {
         _lastSentMessage = response['data'];
 
-        // Replace optimistic message with real message
-        final realMessage = _processMessage(response['data']['message']);
-        _messages[messageIndex] = realMessage;
+        final messageData = response['data']['message'] ?? response['data'];
+        final realMessage = _processMessage(messageData);
+
+        if (messageIndex >= 0) {
+          _messages[messageIndex] = realMessage;
+        } else {
+          _messages.add(realMessage);
+        }
 
         print('✅ File message sent successfully');
         notifyListeners();
@@ -482,10 +512,7 @@ class PersonalChatProvider with ChangeNotifier {
       } else {
         _sendMessageError = response['message'] ?? 'Failed to send file message';
         if (messageIndex >= 0) {
-          _messages[messageIndex] = {
-            ..._messages[messageIndex],
-            'status': 'failed',
-          };
+          _messages[messageIndex]['status'] = 'failed';
         }
         print('❌ Failed to send file message: $_sendMessageError');
         notifyListeners();
@@ -501,7 +528,6 @@ class PersonalChatProvider with ChangeNotifier {
       notifyListeners();
     }
   }
-
   /// Send voice message with socket integration
   Future<Map<String, dynamic>?> sendVoiceMessage({
     required File audioFile,
@@ -634,6 +660,9 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   /// Delete message with socket integration
+  // STEP 5: Replace the deleteMessage method in PersonalChatProvider class
+// Location: Inside PersonalChatProvider class
+
   Future<Map<String, dynamic>?> deleteMessage({
     required String messageId,
     required String receiverId,
@@ -648,12 +677,16 @@ class PersonalChatProvider with ChangeNotifier {
       );
 
       if (response != null && response['error'] != true) {
-        // Remove message from local list if not handled by socket event
-        if (!_socketConnected) {
-          _messages.removeWhere((message) => message['_id'] == messageId);
-          print('✅ Message removed from local list');
-          notifyListeners();
+        // Remove from local list immediately
+        _messages.removeWhere((message) => message['_id'] == messageId);
+        print('✅ Message removed from local list');
+        notifyListeners();
+
+        // Refresh from server to ensure consistency
+        if (_currentReceiverId != null) {
+          await fetchConversation(_currentReceiverId!);
         }
+
         return response;
       } else {
         print('❌ Delete failed: ${response?['message']}');
@@ -669,6 +702,9 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   /// Edit message with socket integration
+  // STEP 6: Replace the editMessage method in PersonalChatProvider class
+// Location: Inside PersonalChatProvider class
+
   Future<Map<String, dynamic>?> editMessage({
     required String messageId,
     required String newText,
@@ -685,16 +721,21 @@ class PersonalChatProvider with ChangeNotifier {
       );
 
       if (response != null && response['error'] != true) {
-        // Update message in local list if not handled by socket event
-        if (!_socketConnected) {
-          final messageIndex = _messages.indexWhere((message) => message['_id'] == messageId);
-          if (messageIndex >= 0) {
-            _messages[messageIndex]['text'] = newText;
-            _messages[messageIndex]['isEdited'] = true;
-            _messages[messageIndex]['editedAt'] = DateTime.now().toString();
-          }
+        // Update local message immediately
+        final messageIndex = _messages.indexWhere((message) => message['_id'] == messageId);
+        if (messageIndex >= 0) {
+          _messages[messageIndex]['text'] = newText;
+          _messages[messageIndex]['isEdited'] = true;
+          _messages[messageIndex]['editedAt'] = DateTime.now().toString();
           notifyListeners();
         }
+
+        // Refresh from server to ensure consistency
+        if (_currentReceiverId != null) {
+          await fetchConversation(_currentReceiverId!);
+        }
+
+        print('✅ Message edited successfully');
         return response;
       } else {
         print('❌ Edit failed: ${response?['message']}');

@@ -5,7 +5,7 @@ import 'package:ixes.app/constants/apiConstants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ServicesService {
-  Future<Map<String, dynamic>> getAllServices() async {
+  Future<Map<String, dynamic>> getAllServices({int page = 1, int limit = 10}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
@@ -13,12 +13,15 @@ class ServicesService {
         return {
           'error': true,
           'message': 'Authentication token is missing',
-          'data': []
+          'data': [],
+          'totalPages': 0,
+          'currentPage': 1,
+          'totalServices': 0
         };
       }
 
       final response = await http.get(
-        Uri.parse('https://api.ixes.ai/api/service/fetchallservices'),
+        Uri.parse('https://api.ixes.ai/api/service/fetchallservices?page=$page&limit=$limit'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -28,23 +31,32 @@ class ServicesService {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         return {
-          'error': decoded['error'] ?? true,
+          'error': decoded['error'] ?? false,
           'message': decoded['message'] ?? 'Success',
-          'data': decoded['data'] ?? []
+          'data': decoded['data'] ?? [],
+          'totalPages': decoded['totalPages'] ?? 1,
+          'currentPage': decoded['currentPage'] ?? 1,
+          'totalServices': decoded['totalServices'] ?? 0
         };
       } else {
         final decoded = jsonDecode(response.body);
         return {
           'error': true,
           'message': decoded['message'] ?? 'Failed to fetch services',
-          'data': []
+          'data': [],
+          'totalPages': 0,
+          'currentPage': 1,
+          'totalServices': 0
         };
       }
     } catch (e) {
       return {
         'error': true,
         'message': 'Error fetching services: ${e.toString()}',
-        'data': []
+        'data': [],
+        'totalPages': 0,
+        'currentPage': 1,
+        'totalServices': 0
       };
     }
   }
@@ -689,5 +701,253 @@ class ServicesService {
       };
     }
   }
+  // Add these methods to your ServicesService class
+
+  /// Create Razorpay Payment Order
+  Future<Map<String, dynamic>> createPaymentOrder({
+    required num amount,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        print('❗ Auth token is missing.');
+        return {
+          'err': true,
+          'message': 'Authentication token is missing',
+          'order': {}
+        };
+      }
+
+      final uri = Uri.parse('${apiBaseUrl}api/service/create-order');
+      print('🔍 Creating payment order at: $uri');
+      print('💰 Amount: $amount');
+
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'amount': amount,
+        }),
+      );
+
+      print('📡 Response Status: ${response.statusCode}');
+      print('📦 Response Body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'err': decoded['err'] ?? false,
+          'message': decoded['message'] ?? 'Order created successfully',
+          'order': decoded['order'] ?? {}
+        };
+      } else {
+        final decoded = jsonDecode(response.body);
+        print('⚠️ Error from API: ${decoded['message']}');
+        return {
+          'err': true,
+          'message': decoded['message'] ?? 'Failed to create payment order',
+          'order': {}
+        };
+      }
+    } catch (e) {
+      print('💥 Exception occurred: $e');
+      return {
+        'err': true,
+        'message': 'Error creating payment order: ${e.toString()}',
+        'order': {}
+      };
+    }
+  }
+
+  /// Verify Payment and Create Booking
+  Future<Map<String, dynamic>> verifyPayment({
+    required Map<String, dynamic> response,
+    required String serviceId,
+    required num amount,
+    required String date,
+    required int slots,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        print('❗ Auth token is missing.');
+        return {
+          'err': true,
+          'message': 'Authentication token is missing',
+          'booking': {}
+        };
+      }
+
+      final uri = Uri.parse('${apiBaseUrl}api/service/verify-payment');
+      print('🔍 Verifying payment at: $uri');
+      print('📦 Service ID: $serviceId');
+      print('💰 Amount: $amount');
+      print('📅 Date: $date');
+      print('🎫 Slots: $slots');
+
+      final body = {
+        'response': response,
+        'serviceId': serviceId,
+        'amount': amount,
+        'date': date,
+        'slots': slots,
+      };
+
+      print('📤 Request Body: ${jsonEncode(body)}');
+
+      final httpResponse = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(body),
+      );
+
+      print('📡 Response Status: ${httpResponse.statusCode}');
+      print('📦 Response Body: ${httpResponse.body}');
+
+      if (httpResponse.statusCode == 200 || httpResponse.statusCode == 201) {
+        final decoded = jsonDecode(httpResponse.body);
+        print('✅ Success Response - err: ${decoded['err']}');
+        print('✅ Success Response - message: ${decoded['message']}');
+        print('✅ Success Response - booking: ${decoded['booking']}');
+
+        return {
+          'err': decoded['err'] ?? false,
+          'message': decoded['message'] ?? 'Payment verified and booking created successfully',
+          'booking': decoded['booking'] ?? {}
+        };
+      } else {
+        final decoded = jsonDecode(httpResponse.body);
+
+        // DETAILED ERROR LOGGING
+        print('❌ HTTP Error - Status Code: ${httpResponse.statusCode}');
+        print('❌ Error Response - Full Body: ${httpResponse.body}');
+        print('❌ Error Response - err: ${decoded['err']}');
+        print('❌ Error Response - message: ${decoded['message']}');
+        print('❌ Error Response - error object: ${decoded['error']}');
+
+        // Check if error object has more details
+        if (decoded['error'] != null && decoded['error'] is Map) {
+          final errorMap = decoded['error'] as Map;
+          print('❌ Error Details:');
+          errorMap.forEach((key, value) {
+            print('   - $key: $value');
+          });
+        }
+
+        // Check for any other fields in response
+        print('❌ All response keys: ${decoded.keys.toList()}');
+
+        return {
+          'err': true,
+          'message': decoded['message'] ?? 'Failed to verify payment',
+          'booking': {},
+          'errorDetails': decoded['error'] // Include error details
+        };
+      }
+    } catch (e, stackTrace) {
+      print('💥 Exception occurred: $e');
+      print('💥 Exception type: ${e.runtimeType}');
+      print('💥 Stack trace: $stackTrace');
+
+      return {
+        'err': true,
+        'message': 'Error verifying payment: ${e.toString()}',
+        'booking': {}
+      };
+    }
+  }
+  Future<Map<String, dynamic>> getMyBookings({
+    int page = 1,
+    int limit = 10,
+    String? paymentStatus,
+    String? fromDate,
+    String? toDate,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        print('❗ Auth token is missing.');
+        return {
+          'error': true,
+          'message': 'Authentication token is missing',
+          'data': [],
+        };
+      }
+
+      // Build query parameters
+      final queryParams = {
+        'page': page.toString(),
+        'limit': limit.toString(),
+      };
+
+      if (paymentStatus != null && paymentStatus.isNotEmpty) {
+        queryParams['paymentStatus'] = paymentStatus;
+      }
+
+      if (fromDate != null && fromDate.isNotEmpty) {
+        queryParams['fromDate'] = fromDate;
+      }
+
+      if (toDate != null && toDate.isNotEmpty) {
+        queryParams['toDate'] = toDate;
+      }
+
+      final uri = Uri.parse('${apiBaseUrl}api/service/my-bookings')
+          .replace(queryParameters: queryParams);
+      print('🔍 Fetching my bookings from: $uri');
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      print('📡 Response Status: ${response.statusCode}');
+      print('📦 Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'error': false,
+          'message': decoded['message'] ?? 'Bookings fetched successfully',
+          'data': decoded['bookings'] ?? [],
+          'page': decoded['page'] ?? page,
+          'limit': decoded['limit'] ?? limit,
+          'totalBookings': decoded['totalBookings'] ?? 0,
+          'totalPages': decoded['totalPages'] ?? 0,
+        };
+      } else {
+        final decoded = jsonDecode(response.body);
+        print('⚠️ Error from API: ${decoded['message']}');
+        return {
+          'error': true,
+          'message': decoded['message'] ?? 'Failed to fetch bookings',
+          'data': [],
+        };
+      }
+    } catch (e) {
+      print('💥 Exception occurred: $e');
+      return {
+        'error': true,
+        'message': 'Error fetching bookings: ${e.toString()}',
+        'data': [],
+      };
+    }
+  }
+
 }
 

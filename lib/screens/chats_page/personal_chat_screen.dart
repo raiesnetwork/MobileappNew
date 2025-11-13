@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
+import '../../constants/constants.dart';
 import '../../providers/personal_chat_provider.dart';
 import './chat_detail_screen.dart';
 import 'group_chat/getall_groups.dart'; // Import ChatDetailScreen
@@ -43,14 +44,33 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
         surfaceTintColor: Colors.transparent,
         actions: [
           IconButton(
-            icon: const Icon(Icons.group), // you can change to any icon
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => GroupListScreen(), // your target screen
+            icon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Image.asset(
+                  'assets/icons/google_meet.png', // your Google Meet icon asset path
+                  width: 24,
+                  height: 24,
                 ),
-              );
+                const SizedBox(width: 7),
+                const Text(
+                  'Meet',
+                  style: TextStyle(fontSize: 15,color: Primary),
+                ),
+              ],
+            ),
+            onPressed: () {
+              // your Meet action
+            },
+          ),
+          IconButton(
+            icon: Image.asset(
+               'assets/icons/calendar.png', // your calendar icon asset path
+              width: 20,
+              height: 24,
+            ),
+            onPressed: () {
+              // your calendar action
             },
           ),
         ],

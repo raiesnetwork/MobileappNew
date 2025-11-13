@@ -29,7 +29,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   File? _selectedFile;
-  bool _messagesLoaded = false;
+  bool _isSending = false; // Add this to prevent duplicate sends
 
   // Voice recording variables
   FlutterSoundRecorder? _recorder;
@@ -53,12 +53,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         receiverId: provider.currentUserId!,
       );
 
-      // Mark messages as loaded
-      if (mounted) {
-        setState(() {
-          _messagesLoaded = true;
-        });
-      }
+      // Scroll to bottom after messages load
+      _scrollToBottom();
     });
   }
 
@@ -81,12 +77,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       }
     } catch (e) {
       print('💥 Error initializing recorder: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to initialize voice recorder: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to initialize voice recorder: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -130,39 +128,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final String fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
       _recordingPath = '${tempDir.path}/$fileName';
 
-      // Try different codecs with fallback
-      try {
-        await _recorder!.startRecorder(
-          toFile: _recordingPath,
-          codec: Codec.aacMP4,
-        );
-      } catch (e) {
-        print('AAC failed, trying MP3: $e');
-        try {
-          final String fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.mp3';
-          _recordingPath = '${tempDir.path}/$fileName';
-          await _recorder!.startRecorder(
-            toFile: _recordingPath,
-            codec: Codec.mp3,
-          );
-        } catch (e2) {
-          print('MP3 failed, using default codec: $e2');
-          final String fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.wav';
-          _recordingPath = '${tempDir.path}/$fileName';
-          await _recorder!.startRecorder(
-            toFile: _recordingPath,
-          );
-        }
-      }
+      await _recorder!.startRecorder(
+        toFile: _recordingPath,
+        codec: Codec.aacMP4,
+      );
 
       setState(() {
         _isRecording = true;
         _recordingDuration = Duration.zero;
       });
 
-      // Start duration timer
       _startDurationTimer();
-
       print('🎤 Started recording to: $_recordingPath');
     } catch (e) {
       print('💥 Error starting recording: $e');
@@ -204,7 +180,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // Timer for recording duration
   void _startDurationTimer() {
     Stream.periodic(const Duration(seconds: 1), (i) => i).listen((count) {
-      if (_isRecording) {
+      if (_isRecording && mounted) {
         setState(() {
           _recordingDuration = Duration(seconds: count + 1);
         });
@@ -352,7 +328,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (_scrollController.hasClients && mounted) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 1),
+          duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       }
@@ -378,7 +354,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
+  // STEP 1: Replace the entire _sendMessage() method in chat_detail_screen.dart
+// Location: Inside _ChatDetailScreenState class
+
   void _sendMessage() async {
+    // Prevent duplicate sends
+    if (_isSending) {
+      print('⚠️ Already sending a message, ignoring duplicate call');
+      return;
+    }
+
     final content = _messageController.text.trim();
     final provider = context.read<PersonalChatProvider>();
     final receiverId = widget.userProfile['_id'];
@@ -395,52 +380,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return;
     }
 
+    // File message
     if (_selectedFile != null) {
-      // Force HTTP for file messages since socket isn't implemented
-      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-
-      int fileSize = 0;
-      try {
-        fileSize = await _selectedFile!.length();
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error reading file: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      final optimisticMessage = {
-        '_id': tempId,
-        'fileUrl': _selectedFile!.path,
-        'fileName': _selectedFile!.path.split('/').last,
-        'fileType': _getFileType(_selectedFile!.path),
-        'fileSize': fileSize.toString(),
-        'senderId': currentUserId,
-        'receiverId': receiverId,
-        'isFile': true,
-        'createdAt': DateTime.now().toString(),
-        'status': 'sending',
-        'isOptimistic': true,
-        'localFilePath': _selectedFile!.path,
-      };
-
-      provider.messages.add(optimisticMessage);
-      provider.notifyListeners();
+      setState(() => _isSending = true);
 
       final fileToSend = _selectedFile!;
 
+      // Clear input BEFORE sending
       setState(() {
         _selectedFile = null;
         _messageController.clear();
       });
 
-      _scrollToBottom();
-
       try {
-        // Force HTTP by setting useSocket to false
         final response = await provider.sendFileMessage(
           file: fileToSend,
           receiverId: receiverId,
@@ -448,35 +400,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         );
 
         if (response != null) {
-          final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-          if (messageIndex >= 0) {
-            final messageData = response;
-            provider.messages[messageIndex] = {
-              '_id': messageData['_id'] ?? tempId,
-              'fileUrl': _constructFullFileUrl(messageData['fileUrl']),
-              'fileName': messageData['fileName'] ?? fileToSend.path.split('/').last,
-              'fileType': messageData['fileType'] ?? _getFileType(fileToSend.path),
-              'fileSize': messageData['fileSize'] ?? fileSize.toString(),
-              'senderId': messageData['senderId'] ?? currentUserId,
-              'receiverId': messageData['receiverId'] is Map
-                  ? messageData['receiverId']['_id'] ?? receiverId
-                  : messageData['receiverId'] ?? receiverId,
-              'isFile': messageData['isFile'] ?? true,
-              'createdAt': messageData['createdAt'] ?? DateTime.now().toString(),
-              'status': 'sent',
-              'localFilePath': fileToSend.path,
-              'isFromServer': true,
-              'readBy': messageData['readBy'] ?? false,
-            };
-            provider.notifyListeners();
-          }
+          _scrollToBottom();
         } else {
-          final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-          if (messageIndex >= 0) {
-            provider.messages[messageIndex]['status'] = 'failed';
-            provider.notifyListeners();
-          }
-
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Failed to send file: ${provider.sendMessageError ?? "Unknown error"}'),
@@ -485,82 +410,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           );
         }
       } catch (e) {
-        final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-        if (messageIndex >= 0) {
-          provider.messages[messageIndex]['status'] = 'failed';
-          provider.notifyListeners();
-        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error sending file: $e'),
             backgroundColor: Colors.red,
           ),
         );
+      } finally {
+        setState(() => _isSending = false);
       }
-    } else if (content.isNotEmpty) {
-      // Send text message (existing code)
-      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    }
+    // Text message
+    else if (content.isNotEmpty) {
+      setState(() => _isSending = true);
 
-      final optimisticMessage = {
-        '_id': tempId,
-        'text': content,
-        'senderId': currentUserId,
-        'receiverId': receiverId,
-        'createdAt': DateTime.now().toString(),
-        'status': 'sending',
-        'isOptimistic': true,
-        'readBy': false,
-      };
+      final messageText = content;
 
-      provider.messages.add(optimisticMessage);
-      provider.notifyListeners();
-
+      // Clear input BEFORE sending
       _messageController.clear();
       _scrollToBottom();
 
       try {
         final result = await provider.sendMessage(
           receiverId: receiverId,
-          text: content,
+          text: messageText,
           readBy: false,
         );
 
         if (result != null && (result['error'] == false || result['success'] == true)) {
-          final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-          if (messageIndex >= 0) {
-            final messageData = result['message'];
-            if (messageData != null) {
-              provider.messages[messageIndex] = {
-                '_id': messageData['_id'] ?? tempId,
-                'text': messageData['text'] ?? content,
-                'senderId': messageData['senderId'] ?? currentUserId,
-                'receiverId': messageData['receiverId'] is Map
-                    ? messageData['receiverId']['_id'] ?? receiverId
-                    : messageData['receiverId'] ?? receiverId,
-                'createdAt': messageData['createdAt'] ?? DateTime.now().toString(),
-                'status': 'sent',
-                'readBy': messageData['readBy'] ?? false,
-                'isFromServer': true,
-              };
-            } else {
-              provider.messages[messageIndex]['status'] = 'sent';
-              provider.messages[messageIndex]['readBy'] = false;
-            }
-            provider.notifyListeners();
-          }
+          print('✅ Message sent successfully');
+          _scrollToBottom();
         } else {
-          final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-          if (messageIndex >= 0) {
-            provider.messages[messageIndex]['status'] = 'failed';
-            provider.notifyListeners();
-          }
+          print('❌ Failed to send message');
         }
       } catch (e) {
-        final messageIndex = provider.messages.indexWhere((m) => m['_id'] == tempId);
-        if (messageIndex >= 0) {
-          provider.messages[messageIndex]['status'] = 'failed';
-          provider.notifyListeners();
-        }
+        print('💥 Error sending message: $e');
+      } finally {
+        setState(() => _isSending = false);
       }
     }
   }
@@ -763,7 +649,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     const SizedBox(height: 24),
                     ElevatedButton(
                       onPressed: () {
-                        _messagesLoaded = false;
                         provider.fetchConversation(widget.userId);
                       },
                       style: ElevatedButton.styleFrom(
@@ -843,15 +728,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () async {
-                    setState(() {
-                      _messagesLoaded = false;
-                    });
                     await provider.fetchConversation(widget.userId);
-                    if (mounted) {
-                      setState(() {
-                        _messagesLoaded = true;
-                      });
-                    }
                   },
                   color: Theme.of(context).colorScheme.primary,
                   backgroundColor: Colors.white,
@@ -859,11 +736,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     controller: _scrollController,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     itemCount: messages.length,
-                    physics: const BouncingScrollPhysics(),
-                    reverse: _messagesLoaded,
+                    physics: const AlwaysScrollableScrollPhysics(),
                     itemBuilder: (context, index) {
-                      final actualIndex = _messagesLoaded ? messages.length - 1 - index : index;
-                      final message = messages[actualIndex];
+                      final message = messages[index];
                       final isMe = message['senderId'] == provider.currentUserId;
 
                       return Padding(
@@ -986,26 +861,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                   color: Colors.grey[100],
                                   borderRadius: BorderRadius.circular(25),
                                 ),
-                                child: TextField(
-                                  controller: _messageController,
-                                  decoration: InputDecoration(
-                                    hintText: _selectedFile != null
-                                        ? 'Add a caption...'
-                                        : 'Type a message...',
-                                    hintStyle: TextStyle(color: Colors.grey[500]),
-                                    border: InputBorder.none,
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 12,
+                                child:
+
+                                  TextField(
+                                    controller: _messageController,
+                                    decoration: InputDecoration(
+                                      hintText: _selectedFile != null
+                                          ? 'Add a caption...'
+                                          : 'Type a message...',
+                                      hintStyle: TextStyle(color: Colors.grey[500]),
+                                      border: InputBorder.none,
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 12,
+                                      ),
                                     ),
-                                  ),
-                                  maxLines: null,
-                                  textCapitalization: TextCapitalization.sentences,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: Colors.grey[800],
-                                  ),
-                                ),
+                                    maxLines: null,
+                                    textCapitalization: TextCapitalization.sentences,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: Colors.grey[800],
+                                    ),
+                                    enabled: !_isSending, // Disable while sending
+                                    // IMPORTANT: Remove onSubmitted or add this check
+                                    onSubmitted: (_) {
+                                      if (!_isSending && (_messageController.text.trim().isNotEmpty || _selectedFile != null)) {
+                                        _sendMessage();
+                                      }
+                                    },
+                                  )
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -1023,7 +907,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                       ? Colors.red
                                       : Theme.of(context).colorScheme.primary,
                                 ),
-                                onPressed: _isRecording ? _stopRecording : _startRecording,
+                                onPressed: _isSending
+                                    ? null
+                                    : (_isRecording ? _stopRecording : _startRecording),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1037,11 +923,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               child: IconButton(
                                 icon: Icon(
                                   Icons.attach_file,
-                                  color: _selectedFile == null
+                                  color: (_selectedFile == null && !_isSending)
                                       ? Theme.of(context).colorScheme.primary
                                       : Colors.grey[500],
                                 ),
-                                onPressed: _selectedFile == null ? _pickFile : null,
+                                onPressed: (_selectedFile == null && !_isSending) ? _pickFile : null,
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -1049,12 +935,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             // Send button
                             Container(
                               decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
+                                color: _isSending
+                                    ? Colors.grey[400]
+                                    : Theme.of(context).colorScheme.primary,
                                 shape: BoxShape.circle,
                               ),
                               child: IconButton(
-                                icon: const Icon(Icons.send, color: Colors.white),
-                                onPressed: _sendMessage,
+                                icon: _isSending
+                                    ? SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                                    : const Icon(Icons.send, color: Colors.white),
+                                onPressed: _isSending ? null : _sendMessage,
                               ),
                             ),
                           ],

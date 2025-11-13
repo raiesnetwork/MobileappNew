@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import '../../providers/service_provider.dart';
+import 'booking_screen.dart';
 
 class ServiceDetailsScreen extends StatefulWidget {
   final String serviceId;
@@ -556,26 +557,26 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
                         const SizedBox(height:15),
 
                         // Book Now Button
+                        // Replace the existing "Book Now" button in service_details.dart with this code:
+
+// Book Now Button
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Row(
-                                    children: [
-                                      const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                                      const SizedBox(width: 6),
-                                      Text('Booking for ${service['name']} initiated'),
-                                    ],
+                              // Navigate to BookingScreen
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => BookingScreen(
+                                    serviceId: service['_id']?.toString() ?? '',
+                                    serviceName: service['name']?.toString() ?? 'Service',
+                                    costPerSlot: service['cost'] ?? 0,
+                                    currency: service['currency']?.toString() ?? 'INR',
+                                    maxSlots: service['capacity'] ?? 10,
+                                    serviceImage: service['image']?.toString() ?? '',
+                                    location: service['location']?.toString() ?? '',
                                   ),
-                                  backgroundColor: Colors.green,
-                                  behavior: SnackBarBehavior.floating,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  margin: const EdgeInsets.all(12),
-                                  duration: const Duration(seconds: 3),
                                 ),
                               );
                             },
@@ -605,6 +606,9 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
                             ),
                           ),
                         ),
+
+// Don't forget to add this import at the top of service_details.dart:
+// import 'booking_screen.dart';
                       ],
                     ),
                   ),

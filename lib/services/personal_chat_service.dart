@@ -75,37 +75,8 @@ class PersonalChatService {
   }
 
   /// Send message via socket (preferred) or HTTP fallback
-  Future<Map<String, dynamic>> sendMessage({
-    required String receiverId,
-    required String text,
-    bool readBy = false,
-    String? image,
-    String? replayTo,
-    bool useSocket = true,
-  }) async {
-    if (useSocket && _socketService.isConnected) {
-      print('📤 Sending message via socket...');
-      return await _socketService.sendMessage(
-        receiverId: receiverId,
-        text: text,
-        readBy: readBy,
-        image: image,
-        replayTo: replayTo,
-      );
-    } else {
-      print('📤 Sending message via HTTP fallback...');
-      return await _sendMessageHttp(
-        receiverId: receiverId,
-        text: text,
-        readBy: readBy,
-        image: image,
-        replayTo: replayTo,
-      );
-    }
-  }
 
-  /// HTTP fallback for sending messages
-  Future<Map<String, dynamic>> _sendMessageHttp({
+  Future<Map<String, dynamic>> sendMessage({
     required String receiverId,
     required String text,
     bool readBy = false,

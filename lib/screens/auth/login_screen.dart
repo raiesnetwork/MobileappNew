@@ -8,8 +8,10 @@ import 'package:provider/provider.dart';
 import 'package:sizer/sizer.dart';
 import 'package:country_picker/country_picker.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/google_auth_service.dart';
 import 'signup_screen.dart';
 import 'otp_screen.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -234,9 +236,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                     : Colors.black,
                               ),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(
-                                    10), // keep rounded if needed
-                                side: BorderSide.none, // ✅ removes border
+                                borderRadius: BorderRadius.circular(10),
+                                side: BorderSide.none,
                               ),
                               onSelected: (selected) {
                                 setState(() {
@@ -260,7 +261,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                side: BorderSide.none, // ✅ removes border
+                                side: BorderSide.none,
                               ),
                               onSelected: (selected) {
                                 setState(() {
@@ -345,6 +346,62 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                       const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 50),
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            elevation: 2,
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 14, horizontal: 24),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: const BorderSide(color: Colors.grey),
+                            ),
+                          ),
+                          icon: const Icon(
+                            Icons.g_mobiledata,
+                            size: 32,
+                            color: Color(0xFF4285F4),
+                          ),
+                          label: const Text(
+                            'Sign in with Google',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          onPressed: () async {
+                            await handleGoogleSignIn();
+
+                            // if (!mounted) return;
+                            //
+                            // if (result['success']) {
+                            //
+                            //   ScaffoldMessenger.of(context).showSnackBar(
+                            //     SnackBar(
+                            //       content:
+                            //       Text('Welcome ${result['username']}!'),
+                            //       backgroundColor: Colors.green,
+                            //     ),
+                            //   );
+                            //   Navigator.of(context).pushReplacement(
+                            //     MaterialPageRoute(
+                            //       builder: (context) =>
+                            //       const MainScreen(initialIndex: 0),
+                            //     ),
+                            //   );
+                            // } else {
+                            //
+                            //   ScaffoldMessenger.of(context).showSnackBar(
+                            //     SnackBar(
+                            //       content: Text(result['message']),
+                            //       backgroundColor: Colors.red,
+                            //     ),
+                            //   );
+                            // }
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       TextButton(
                         onPressed: () {
                           Navigator.of(context).push(
@@ -367,5 +424,23 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    serverClientId: '71249839379-7seogt3fsiuki5ngl7bplqudb1ib9une.apps.googleusercontent.com',
+    scopes: ['email', 'profile'],
+  );
+
+
+  Future<void> handleGoogleSignIn() async {
+    try {
+      final account = await _googleSignIn.signIn();
+      if (account != null) {
+        print('✅ Signed in: ${account.displayName} (${account.email})');
+      } else {
+        print('⚠️ User canceled sign-in.');
+      }
+    } catch (error) {
+      print('Sign-In Error: $error');
+    }
   }
 }

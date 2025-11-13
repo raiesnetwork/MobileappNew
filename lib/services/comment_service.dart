@@ -26,7 +26,7 @@ class CommentService {
       print("token$token");
       print("postid$postId");
 
-      final Uri url = Uri.parse("https://api2.ixes.ai/api/post/comment");
+      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment");
       final Map<String, dynamic> body = {
         "postId": postId,
         "commentContent": commentContent,
@@ -71,60 +71,90 @@ class CommentService {
     }
   }
 
-  static Future<Map<String, dynamic>> fetchComments(String postId) async {
+  // static Future<Map<String, dynamic>> fetchComments(String postId) async {
+  //   try {
+  //     SharedPreferences prefs = await SharedPreferences.getInstance();
+  //     final token = prefs.getString('auth_token');
+  //     final url = Uri.parse("https://api.ixes.ai/api/post/$postId/comments");
+  //
+  //     final response = await http.get(
+  //       url,
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //         'Authorization': 'Bearer $token',
+  //       },
+  //     );
+  //
+  //     if (response.statusCode == 200) {
+  //       final data = jsonDecode(response.body);
+  //       return {
+  //         "success": true,
+  //         "data": data['comments'] ?? [],
+  //       };
+  //     } else {
+  //       return {
+  //         "success": false,
+  //         "message": "Failed to load comments",
+  //       };
+  //     }
+  //   } catch (e) {
+  //     return {
+  //       "success": false,
+  //       "message": "Fetch error: $e",
+  //     };
+  //   }
+  // }
+
+  // ✅ FIXED: Returns null on error instead of throwing exception
+  static Future<Post?> getPostById(String postId) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-      final url = Uri.parse("https://api2.ixes.ai/api/post/$postId/comments");
+
+      if (token == null || token.isEmpty) {
+        print("❌ Token missing for getPostById");
+        return null;
+      }
+
+      final url = Uri.parse("https://api.ixes.ai/api/post/$postId");
+
+      print('📤 GET POST BY ID URL: $url');
 
       final response = await http.get(
         url,
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
         },
       );
 
+      print('📥 GET POST BY ID STATUS: ${response.statusCode}');
+      print('📥 GET POST BY ID RESPONSE: ${response.body}');
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        return {
-          "success": true,
-          "data": data['comments'] ?? [],
-        };
+
+        // ✅ Handle different response structures
+        if (data['post'] != null) {
+          print('✅ Post found in response["post"]');
+          return Post.fromJson(data['post']);
+        } else if (data['data'] != null && data['data'] is Map) {
+          print('✅ Post found in response["data"]');
+          return Post.fromJson(data['data']);
+        } else if (data is Map<String, dynamic> && data['_id'] != null) {
+          print('✅ Post found in root response');
+          return Post.fromJson(data);
+        } else {
+          print('⚠️ Unexpected response structure: $data');
+          return null;
+        }
       } else {
-        return {
-          "success": false,
-          "message": "Failed to load comments",
-        };
+        print('❌ Failed to fetch post: ${response.statusCode}');
+        return null;
       }
     } catch (e) {
-      return {
-        "success": false,
-        "message": "Fetch error: $e",
-      };
-    }
-  }
-
-  static Future<Post> getPostById(String postId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-
-    final url = Uri.parse("https://api2.ixes.ai/api/post/$postId");
-
-    final response = await http.get(
-      url,
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return Post.fromJson(
-          data['post']); // ✅ assuming this key holds your post object
-    } else {
-      throw Exception('Failed to fetch post');
+      print('❌ Error in getPostById: $e');
+      return null;
     }
   }
 
@@ -239,7 +269,7 @@ class CommentService {
           "success": true,
           "data": decoded['newComment'],
           "message":
-              decoded['message'] ?? "markAsNotInterested posted successfully"
+          decoded['message'] ?? "markAsNotInterested posted successfully"
         };
       } else {
         print('⚠️ Failed to Post markAsNotInterested');
@@ -259,10 +289,10 @@ class CommentService {
 
   static Future<Map<String, dynamic>> sharePost({
     required String postId,
-    required String type, // "user" or "group"
-    required String whom, // "feed", "campaign", "service", "announcement"
-    String? userId, // Required if type == "user"
-    String? whomId, // Required if whom != "feed"
+    required String type,
+    required String whom,
+    String? userId,
+    String? whomId,
   }) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -341,8 +371,7 @@ class CommentService {
       }
 
       final Uri url = Uri.parse("https://api.ixes.ai/api/post/delete/$postId");
-      print(
-          "Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
+      print("Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
 
       final response = await http.delete(
         url,
@@ -372,12 +401,20 @@ class CommentService {
     }
   }
 
+  // ✅ FIXED: Better error handling
   static Future<Map<String, dynamic>?> getCount(String postId) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? token = prefs.getString('auth_token');
 
+      if (token == null || token.isEmpty) {
+        print("❌ Token missing for getCount");
+        return null;
+      }
+
       final url = Uri.parse('$apiBaseUrl/api/post/interactions/$postId');
+
+      print('📤 GET COUNT URL: $url');
 
       final response = await http.get(
         url,
@@ -387,16 +424,21 @@ class CommentService {
         },
       );
 
+      print('📥 GET COUNT STATUS: ${response.statusCode}');
+      print('📥 GET COUNT RESPONSE: ${response.body}');
+
       if (response.statusCode == 200) {
         final Map<String, dynamic> body = jsonDecode(response.body);
         if (body['error'] == false && body['data'] != null) {
+          print('✅ Interaction count fetched successfully');
           return body['data'];
         }
       }
 
+      print('⚠️ Failed to fetch interaction count');
       return null;
     } catch (e) {
-      print("Error fetching post interaction: $e");
+      print("❌ Error fetching post interaction: $e");
       return null;
     }
   }
@@ -406,13 +448,16 @@ class CommentService {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-      final url = Uri.parse("https://api2.ixes.ai/api/post/like");
+
+      if (token == null || token.isEmpty) {
+        return {"success": false, "message": "Token missing"};
+      }
+
+      final url = Uri.parse("https://api.ixes.ai/api/post/like");
       final body = {"postId": postId};
 
       print('❤️ Sending Like for postId: $postId');
       print('📤 LIKE POST URL: $url');
-      print('📤 BODY: $body');
-      print('🔐 TOKEN: $token');
 
       final response = await http.post(
         url,
@@ -437,18 +482,22 @@ class CommentService {
     }
   }
 
-  /// 🔻 Unlike a Post
+  /// 🔻 Unlike a Post - ✅ FIXED: Changed URL from api2.ixes.ai to api.ixes.ai
   static Future<Map<String, dynamic>> unlikePost(String postId) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-      final url = Uri.parse("https://api2.ixes.ai/api/post/unlike");
+
+      if (token == null || token.isEmpty) {
+        return {"success": false, "message": "Token missing"};
+      }
+
+      // ✅ FIXED: Changed from api2.ixes.ai to api.ixes.ai
+      final url = Uri.parse("https://api.ixes.ai/api/post/unlike");
       final body = {"postId": postId};
 
       print('💔 Sending Unlike for postId: $postId');
       print('📤 UNLIKE POST URL: $url');
-      print('📤 BODY: $body');
-      print('🔐 TOKEN: $token');
 
       final response = await http.post(
         url,

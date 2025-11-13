@@ -66,7 +66,7 @@
             android:value="2" />
             <meta-data android:name="com.google.android.geo.API_KEY"
                android:value="AIzaSyBut5HqGXswofazEpjsi_ta8i1lwkah4TU"/>
-            
+
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -84,8 +84,8 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
-        
+
     </queries>
-   
+
 
 </manifest>

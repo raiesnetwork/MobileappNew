@@ -5,7 +5,9 @@ import 'package:ixes.app/screens/services_page/service_details.dart';
 import 'package:provider/provider.dart';
 import '../../providers/service_provider.dart';
 import '../my_products/my_products_screen.dart';
+import 'booking_screen.dart';
 import 'create_service_screen.dart';
+import 'my_bookings.dart';
 
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({super.key});
@@ -19,9 +21,10 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   bool get wantKeepAlive => true;
 
   String _searchQuery = '';
-  Set<String> _selectedCategories = {}; // Changed to Set for multiple selections
+  Set<String> _selectedCategories = {};
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController(); // ✅ ADDED
 
   final List<String> _categories = [
     'All',
@@ -43,13 +46,31 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
     });
 
     _selectedCategories = {'All'};
+
+    // ✅ ADDED: Scroll listener for pagination
+    _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _scrollController.dispose(); // ✅ ADDED
     super.dispose();
+  }
+
+  // ✅ ADDED: Scroll listener method for pagination
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      final provider = Provider.of<ServicesProvider>(context, listen: false);
+
+      // Only load more if not searching/filtering
+      if (_searchQuery.isEmpty &&
+          (_selectedCategories.isEmpty || _selectedCategories.contains('All'))) {
+        provider.loadMoreServices();
+      }
+    }
   }
 
   List<dynamic> _getFilteredServices(List<dynamic> services) {
@@ -199,9 +220,9 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
                                         checkColor: Colors.white,
                                         fillColor: MaterialStateProperty.resolveWith<Color?>((states) {
                                           if (states.contains(MaterialState.selected)) {
-                                            return Primary; // Filled color when selected
+                                            return Primary;
                                           }
-                                          return Colors.grey.withOpacity(0.3); // Unselected color
+                                          return Colors.grey.withOpacity(0.3);
                                         }),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(3),
@@ -421,6 +442,54 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
                       ),
                     ),
                   ],
+                ],
+              ),
+            ),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const MyBookingsScreen(),
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.grey.withOpacity(0.3),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.book_outlined,
+                    size: 16,
+                    color: Colors.grey[600],
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Bookings',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700],
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -649,27 +718,22 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
                       const Spacer(),
                       ElevatedButton.icon(
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  const Icon(Icons.check_circle, color: Colors.white, size: 18),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      'Booking for ${serviceMap['name']} initiated',
-                                      style: const TextStyle(fontSize: 13),
-                                    ),
-                                  ),
-                                ],
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => BookingScreen(
+                                serviceId: serviceMap['_id'] ?? '',
+                                serviceName: serviceMap['name'] ?? 'Service',
+                                costPerSlot: serviceMap['cost'] ?? 0,
+                                currency: serviceMap['currency'] ?? 'INR',
+                                maxSlots: serviceMap['slots'] ?? 10,
+                                serviceImage: (serviceMap['image'] != null &&
+                                    serviceMap['image'] is List &&
+                                    serviceMap['image'].isNotEmpty)
+                                    ? serviceMap['image'][0]
+                                    : '',
+                                location: serviceMap['location'] ?? '',
                               ),
-                              backgroundColor: Colors.green,
-                              behavior: SnackBarBehavior.floating,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              margin: const EdgeInsets.all(12),
-                              duration: const Duration(seconds: 3),
                             ),
                           );
                         },
@@ -704,190 +768,204 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   Widget build(BuildContext context) {
     super.build(context);
     return Consumer<ServicesProvider>(
-      builder: (context, provider, child) {
-        final filteredServices = _getFilteredServices(provider.services);
+        builder: (context, provider, child) {
+      final filteredServices = _getFilteredServices(provider.services);
 
-        return Scaffold(
+      return Scaffold(
           backgroundColor: Colors.grey[50],
           appBar: AppBar(
-            scrolledUnderElevation: 0,
-            title: const Text(
-              'All Services',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  // Navigate to MyProductsPage when the button is pressed
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => MyProductsScreen()),
-                  );
-                },
-                child: Text(
-                  'View Products',
-                  style: TextStyle(
-                    color: Colors.black, // Adjust color to match your theme
-                    fontSize: 16,
-                  ),
-                ),
-              ),
-            ],
-            backgroundColor: Colors.white,
-            elevation: 0,
-            centerTitle: true,
-          ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CreateServiceScreen(communityId: ''),
-                ),
-              );
-            },
-            backgroundColor: Primary,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.add, size: 20),
-            label: const Text(
-              'Add Service',
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            elevation: 3,
-          ),
-          body: Column(
-            children: [
-              _buildSearchBar(),
-              _buildFilterChip(),
-              const SizedBox(height: 8),
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async {
-                    await provider.fetchServices();
-                  },
-                  color: Primary,
-                  child: provider.isLoading
-                      ? const Center(
-                    child: CircularProgressIndicator(color: Primary),
-                  )
-                      : provider.hasError
-                      ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withOpacity(0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.error_outline,
-                            size: 40,
-                            color: Colors.red[400],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'Oops! Something went wrong',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          provider.message,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 20),
-                        ElevatedButton.icon(
-                          onPressed: () => provider.fetchServices(),
-                          icon: const Icon(Icons.refresh, size: 18),
-                          label: const Text('Try Again'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            elevation: 0,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                      : filteredServices.isEmpty
-                      ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
-                              ? Icons.search_off
-                              : Icons.inventory_2_outlined,
-                          size: 48,
-                          color: Colors.grey[400],
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
-                              ? 'No services found'
-                              : 'No services available',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey[600],
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        if (_searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')) ...[
-                        const SizedBox(height: 6),
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _searchQuery = '';
-                              _selectedCategories = {'All'};
-                              _searchController.clear();
-                              _searchFocusNode.unfocus();
-                            });
-                          },
-                          child: const Text(
-                            'Clear filters',
-                            style: TextStyle(fontSize: 13),
-                          ),
-                        ),
-                      ],
-                      ],
-                    ),
-                  )
-                      : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-                    itemCount: filteredServices.length,
-                    itemBuilder: (context, index) {
-                      final service = filteredServices[index];
-                      return _buildServiceCard(service: service);
-                    },
-                  ),
-                ),
-              ),
-            ],
+          scrolledUnderElevation: 0,
+          title: const Text(
+          'All Services',
+          style: TextStyle(
+          fontSize: 22,
+          fontWeight: FontWeight.bold,
+          color: Colors.black87,
+      ),
+    ),
+    actions: [
+    TextButton(
+    onPressed: () {
+    Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => MyProductsScreen()),
+    );
+    },
+    child: Text(
+    'View Products',
+    style: TextStyle(
+    color: Colors.black,
+    fontSize: 16,
+    ),
+    ),
+    ),
+    ],
+    backgroundColor: Colors.white,
+    elevation: 0,
+    centerTitle: true,
+    ),
+    floatingActionButton: FloatingActionButton.extended(
+    onPressed: () {
+    Navigator.push(
+    context,
+    MaterialPageRoute(
+    builder: (context) => const CreateServiceScreen(communityId: ''),
+    ),
+    );
+    },
+    backgroundColor: Primary,
+    foregroundColor: Colors.white,
+    icon: const Icon(Icons.add, size: 20),
+    label: const Text(
+    'Add Service',
+    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+    ),
+    shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(12),
+    ),
+    elevation: 3,
+    ),
+    body: Column(
+    children: [
+    _buildSearchBar(),
+    _buildFilterChip(),
+    const SizedBox(height: 8),
+    Expanded(
+    child: RefreshIndicator(
+    onRefresh: () async {
+    // ✅ CHANGED: Pass refresh=true to reset pagination
+    await provider.fetchServices(refresh: true);
+    },
+    color: Primary,
+    child: provider.isLoading
+    ? const Center(
+    child: CircularProgressIndicator(color: Primary),
+    )
+        : provider.hasError
+    ? Center(
+    child: Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+    Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+    color: Colors.red.withOpacity(0.1),
+    shape: BoxShape.circle,
+    ),
+    child: Icon(
+    Icons.error_outline,
+    size: 40,
+    color: Colors.red[400],
+    ),
+    ),
+    const SizedBox(height: 12),
+    const Text(
+    'Oops! Something went wrong',
+    style: TextStyle(
+    fontSize: 16,
+    fontWeight: FontWeight.w600,
+    color: Colors.black87,
+    ),
+    ),
+    const SizedBox(height: 6),
+    Text(
+    provider.message,
+    style: TextStyle(
+    fontSize: 13,
+    color: Colors.grey[600],
+    ),
+    textAlign: TextAlign.center,
+    ),
+    const SizedBox(height: 20),
+    ElevatedButton.icon(
+    onPressed: () => provider.fetchServices(),
+    icon: const Icon(Icons.refresh, size: 18),
+    label: const Text('Try Again'),
+    style: ElevatedButton.styleFrom(
+    backgroundColor: Primary,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+    shape: RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(10),
+    ),
+    elevation: 0,
+    ),
+    ),
+    ],
+    ),
+    )
+        : filteredServices.isEmpty
+    ? Center(
+    child: Column(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+    Icon(
+    _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
+    ? Icons.search_off
+        : Icons.inventory_2_outlined,
+    size: 48,
+    color: Colors.grey[400],
+    ),
+    const SizedBox(height: 12),
+    Text(
+    _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
+    ? 'No services found'
+        : 'No services available',
+    style: TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w500,
+    color: Colors.grey[600],
+    ),
+    textAlign: TextAlign.center,
+    ),
+    if (_searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')) ...[
+    const SizedBox(height: 6),
+    TextButton(
+    onPressed: () {
+    setState(() {
+    _searchQuery = '';
+    _selectedCategories = {'All'};
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    });
+    },
+    child: const Text(
+    'Clear filters',
+    style: TextStyle(fontSize: 13),
+    ),
+    ),
+    ],
+    ],
+    ),
+    )
+        : ListView.builder(
+    controller: _scrollController, // ✅ ADDED: Attach scroll controller
+    padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+    // ✅ CHANGED: Add +1 for loading indicator
+    itemCount: filteredServices.length + (provider.isLoadingMoreServices ? 1 : 0),
+    itemBuilder: (context, index) {
+      // ✅ ADDED: Show loading indicator at the end
+      if (index == filteredServices.length) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          alignment: Alignment.center,
+          child: const CircularProgressIndicator(
+            color: Primary,
+            strokeWidth: 2,
           ),
         );
-      },
+      }
+
+      final service = filteredServices[index];
+      return _buildServiceCard(service: service);
+    },
+    ),
+    ),
+    ),
+    ],
+    ),
+      );
+        },
     );
   }
 }

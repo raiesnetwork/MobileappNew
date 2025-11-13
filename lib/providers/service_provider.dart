@@ -11,7 +11,7 @@ class ServicesProvider with ChangeNotifier {
   bool _isCommunityServicesLoading = false;
   bool _isServiceActionLoading = false;
   bool _isServiceDetailsLoading = false;
-  bool _isMyProductsLoading = false; // Added for products
+  bool _isMyProductsLoading = false;
 
   // Separate error states
   bool _hasError = false;
@@ -19,7 +19,7 @@ class ServicesProvider with ChangeNotifier {
   bool _hasCommunityServicesError = false;
   bool _hasServiceActionError = false;
   bool _hasServiceDetailsError = false;
-  bool _hasMyProductsError = false; // Added for products
+  bool _hasMyProductsError = false;
 
   // Separate messages
   String _message = '';
@@ -27,14 +27,21 @@ class ServicesProvider with ChangeNotifier {
   String _communityServicesMessage = '';
   String _serviceActionMessage = '';
   String _serviceDetailsMessage = '';
-  String _myProductsMessage = ''; // Added for products
+  String _myProductsMessage = '';
 
   // Separate data lists
   List<dynamic> _services = [];
   List<dynamic> _myServices = [];
   List<dynamic> _communityServices = [];
   Map<String, dynamic> _serviceDetails = {};
-  List<dynamic> _myProducts = []; // Added for products
+  List<dynamic> _myProducts = [];
+
+  // Pagination properties for All Services
+  int _servicesCurrentPage = 1;
+  int _servicesTotalPages = 1;
+  int _servicesTotalCount = 0;
+  bool _isLoadingMoreServices = false;
+  final int _servicesLimit = 10;
 
   int _currentTabIndex = 0;
 
@@ -43,6 +50,13 @@ class ServicesProvider with ChangeNotifier {
   bool get hasError => _hasError;
   String get message => _message;
   List<dynamic> get services => _services;
+
+  // Pagination getters for All Services
+  int get servicesCurrentPage => _servicesCurrentPage;
+  int get servicesTotalPages => _servicesTotalPages;
+  int get servicesTotalCount => _servicesTotalCount;
+  bool get isLoadingMoreServices => _isLoadingMoreServices;
+  bool get hasMoreServices => _servicesCurrentPage < _servicesTotalPages;
 
   // Getters for My Services
   bool get isMyServicesLoading => _isMyServicesLoading;
@@ -80,16 +94,30 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> fetchServices() async {
+  // Updated fetchServices with pagination support
+  Future<void> fetchServices({bool refresh = false}) async {
+    // If refreshing, reset pagination
+    if (refresh) {
+      _servicesCurrentPage = 1;
+      _services = [];
+    }
+
     _isLoading = true;
     _hasError = false;
-    _services = [];
     notifyListeners();
 
-    final response = await _service.getAllServices();
+    final response = await _service.getAllServices(
+      page: _servicesCurrentPage,
+      limit: _servicesLimit,
+    );
+
     if (!response['error']) {
       _services = response['data'];
       _message = response['message'];
+      _servicesTotalPages = response['totalPages'] ?? 1;
+      _servicesCurrentPage = response['currentPage'] ?? 1;
+      _servicesTotalCount = response['totalServices'] ?? 0;
+      _hasError = false;
     } else {
       _hasError = true;
       _message = response['message'];
@@ -98,6 +126,39 @@ class ServicesProvider with ChangeNotifier {
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  // New method: Load more services (pagination)
+  Future<void> loadMoreServices() async {
+    // Prevent multiple simultaneous requests
+    if (_isLoadingMoreServices || !hasMoreServices) return;
+
+    _isLoadingMoreServices = true;
+    notifyListeners();
+
+    try {
+      final response = await _service.getAllServices(
+        page: _servicesCurrentPage + 1,
+        limit: _servicesLimit,
+      );
+
+      if (!response['error']) {
+        // Append new services to existing list
+        _services.addAll(response['data'] ?? []);
+        _servicesCurrentPage = response['currentPage'] ?? _servicesCurrentPage + 1;
+        _servicesTotalPages = response['totalPages'] ?? _servicesTotalPages;
+        _servicesTotalCount = response['totalServices'] ?? _servicesTotalCount;
+        _message = response['message'];
+      } else {
+        // Optionally handle error
+        print('❌ Error loading more services: ${response['message']}');
+      }
+    } catch (e) {
+      print('💥 Exception loading more services: $e');
+    } finally {
+      _isLoadingMoreServices = false;
+      notifyListeners();
+    }
   }
 
   Future<void> fetchMyServices() async {
@@ -277,7 +338,7 @@ class ServicesProvider with ChangeNotifier {
     String? communityId,
   }) async {
     final serviceIndex =
-        _myServices.indexWhere((service) => service['_id'] == serviceId);
+    _myServices.indexWhere((service) => service['_id'] == serviceId);
     dynamic removedService;
 
     if (serviceIndex != -1) {
@@ -323,7 +384,7 @@ class ServicesProvider with ChangeNotifier {
         return service;
       }).toList();
       final service = _myServices.firstWhere(
-        (service) => service['_id'] == serviceId,
+            (service) => service['_id'] == serviceId,
         orElse: () => null,
       );
       if (service != null &&
@@ -358,7 +419,7 @@ class ServicesProvider with ChangeNotifier {
         return service;
       }).toList();
       final service = _myServices.firstWhere(
-        (service) => service['_id'] == serviceId,
+            (service) => service['_id'] == serviceId,
         orElse: () => null,
       );
       if (service != null &&
@@ -439,5 +500,208 @@ class ServicesProvider with ChangeNotifier {
 
     _isMyProductsLoading = false;
     notifyListeners();
+  }
+
+  // Payment properties
+  bool _isPaymentLoading = false;
+  bool _hasPaymentError = false;
+  String _paymentMessage = '';
+  Map<String, dynamic> _paymentOrder = {};
+  Map<String, dynamic> _booking = {};
+
+  // Payment getters
+  bool get isPaymentLoading => _isPaymentLoading;
+  bool get hasPaymentError => _hasPaymentError;
+  String get paymentMessage => _paymentMessage;
+  Map<String, dynamic> get paymentOrder => _paymentOrder;
+  Map<String, dynamic> get booking => _booking;
+
+  /// Create Payment Order
+  Future<Map<String, dynamic>> createPaymentOrder({
+    required num amount,
+  }) async {
+    _isPaymentLoading = true;
+    _hasPaymentError = false;
+    _paymentMessage = '';
+    _paymentOrder = {};
+    notifyListeners();
+
+    try {
+      final response = await _service.createPaymentOrder(amount: amount);
+
+      if (!response['err']) {
+        _paymentOrder = response['order'] ?? {};
+        _paymentMessage = response['message'] ?? 'Order created successfully';
+        _hasPaymentError = false;
+        print('✅ Payment order created: $_paymentOrder');
+      } else {
+        _hasPaymentError = true;
+        _paymentMessage = response['message'] ?? 'Failed to create payment order';
+        _paymentOrder = {};
+        print('❌ Failed to create payment order: $_paymentMessage');
+      }
+
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return response;
+    } catch (e) {
+      print('💥 Provider exception: $e');
+      _hasPaymentError = true;
+      _paymentMessage = 'Error: ${e.toString()}';
+      _paymentOrder = {};
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return {
+        'err': true,
+        'message': _paymentMessage,
+        'order': {}
+      };
+    }
+  }
+
+  /// Verify Payment and Create Booking
+  Future<Map<String, dynamic>> verifyPayment({
+    required Map<String, dynamic> response,
+    required String serviceId,
+    required num amount,
+    required String date,
+    required int slots,
+  }) async {
+    _isPaymentLoading = true;
+    _hasPaymentError = false;
+    _paymentMessage = '';
+    _booking = {};
+    notifyListeners();
+
+    try {
+      final result = await _service.verifyPayment(
+        response: response,
+        serviceId: serviceId,
+        amount: amount,
+        date: date,
+        slots: slots,
+      );
+
+      if (!result['err']) {
+        _booking = result['booking'] ?? {};
+        _paymentMessage = result['message'] ?? 'Payment verified successfully';
+        _hasPaymentError = false;
+        print('✅ Payment verified and booking created: $_booking');
+
+        // Optionally refresh services after booking
+        await fetchMyServices();
+      } else {
+        _hasPaymentError = true;
+        _paymentMessage = result['message'] ?? 'Failed to verify payment';
+        _booking = {};
+        print('❌ Payment verification failed: $_paymentMessage');
+      }
+
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return result;
+    } catch (e) {
+      print('💥 Provider exception: $e');
+      _hasPaymentError = true;
+      _paymentMessage = 'Error: ${e.toString()}';
+      _booking = {};
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return {
+        'err': true,
+        'message': _paymentMessage,
+        'booking': {}
+      };
+    }
+  }
+
+  // Bookings properties
+  List<dynamic> _myBookings = [];
+  bool _isLoadingBookings = false;
+  String _bookingsError = '';
+  int _currentPage = 1;
+  int _totalBookings = 0;
+  int _totalPages = 0;
+  String? _paymentStatusFilter;
+
+  // Bookings getters
+  List<dynamic> get myBookings => _myBookings;
+  bool get isLoadingBookings => _isLoadingBookings;
+  String get bookingsError => _bookingsError;
+  int get totalBookings => _totalBookings;
+  int get currentPage => _currentPage;
+  int get totalPages => _totalPages;
+  bool get hasMoreBookings => _currentPage < _totalPages;
+
+  Future<void> fetchMyBookings({
+    int? page,
+    String? paymentStatus,
+    bool loadMore = false,
+  }) async {
+    if (_isLoadingBookings) return;
+
+    _isLoadingBookings = true;
+    _bookingsError = '';
+
+    if (paymentStatus != null) _paymentStatusFilter = paymentStatus;
+
+    if (loadMore) {
+      _currentPage++;
+    } else if (page != null) {
+      _currentPage = page;
+    } else {
+      _currentPage = 1;
+      _myBookings.clear();
+    }
+
+    notifyListeners();
+
+    try {
+      final response = await _service.getMyBookings(
+        page: _currentPage,
+        limit: 10,
+        paymentStatus: _paymentStatusFilter,
+      );
+
+      if (response['error'] == true) {
+        _bookingsError = response['message'] ?? 'Failed to fetch bookings';
+      } else {
+        if (loadMore) {
+          _myBookings.addAll(response['data'] ?? []);
+        } else {
+          _myBookings = response['data'] ?? [];
+        }
+
+        _totalBookings = response['totalBookings'] ?? 0;
+        _totalPages = response['totalPages'] ?? 0;
+      }
+    } catch (e) {
+      _bookingsError = 'Error: ${e.toString()}';
+      print('💥 Provider Error: $e');
+    } finally {
+      _isLoadingBookings = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> loadMoreBookings() async {
+    if (hasMoreBookings && !_isLoadingBookings) {
+      await fetchMyBookings(loadMore: true);
+    }
+  }
+
+  Future<void> filterBookingsByStatus(String? status) async {
+    _paymentStatusFilter = status;
+    await fetchMyBookings();
+  }
+
+  Future<void> refreshBookings() async {
+    _currentPage = 1;
+    _myBookings.clear();
+    await fetchMyBookings();
   }
 }

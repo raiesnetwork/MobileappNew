@@ -116,20 +116,34 @@ class CommentProvider with ChangeNotifier {
 
   List<Comment> getCommentsForPost(String postId) {
     try {
-      final post = _posts.firstWhere((p) => p.id == postId);
-      return post.comments;
-    } catch (_) {
+      // First try regular posts
+      final postInMain = _posts.indexWhere((p) => p.id == postId);
+      if (postInMain != -1) {
+        return _posts[postInMain].comments;
+      }
+
+      // Then try community posts
+      final postInCommunity = _communityPosts.indexWhere((p) => p.id == postId);
+      if (postInCommunity != -1) {
+        return _communityPosts[postInCommunity].comments;
+      }
+
+      return [];
+    } catch (e) {
+      print("Error in getCommentsForPost: $e");
       return [];
     }
   }
+
 
   Future<bool> postComment({
     required String postId,
     required String commentContent,
     required int offset,
     required int limit,
+    String? communityId, // ✅ Add communityId parameter
   }) async {
-    _isPosting = true; // Set posting state
+    _isPosting = true;
     notifyListeners();
 
     try {
@@ -139,24 +153,38 @@ class CommentProvider with ChangeNotifier {
       );
 
       if (result['success']) {
-        // Fetch updated posts to get the new comment
-        await fetchAllPosts(offset: offset, limit: limit);
+        // ✅ Fetch based on feed type
+        if (communityId != null) {
+          await fetchCommunityPosts(
+            communityId: communityId,
+            offset: offset,
+            limit: limit,
+          );
+        } else {
+          await fetchAllPosts(offset: offset, limit: limit);
+        }
 
-        _isPosting = false; // ✅ Fixed: Reset posting state, not loading state
+        // Now call getCommentsForPost after posts are refreshed
+        final updatedComments = getCommentsForPost(postId);
+        print("Updated comments for $postId: $updatedComments");
+
+        _isPosting = false;
         notifyListeners();
+
         return true;
       } else {
-        _isPosting = false; // ✅ Fixed: Reset posting state on failure
+        _isPosting = false;
         notifyListeners();
         return false;
       }
     } catch (e) {
-      _isPosting = false; // ✅ Fixed: Always reset posting state in catch block
+      _isPosting = false;
       notifyListeners();
       print('Error posting comment: $e');
       return false;
     }
   }
+
 
   /// Fetch and update a single post (used after commenting)
   Future<void> fetchSinglePost(String postId) async {
@@ -345,7 +373,7 @@ class CommentProvider with ChangeNotifier {
     if (result['success']) {
       _posts.removeWhere((post) => post.id == postId);
       print(
-          "Deleting post with URL: https://api2.ixes.ai/api/post/delete/$postId");
+          "Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
 
 
       notifyListeners();
