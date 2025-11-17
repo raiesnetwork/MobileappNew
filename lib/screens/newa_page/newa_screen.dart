@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/providers/chat_provider.dart';
 
+import '../../animation.dart';
 import 'chat_history.dart';
 
 class NewaScreen extends StatefulWidget {
@@ -170,11 +172,32 @@ class _NewaScreenState extends State<NewaScreen> {
                             ),
                           ),
                           if (chatProvider.isLoading)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Text(
-                                "Please wait while we process your question...",
-                                style: TextStyle(color: Colors.grey),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+                              child: Column(
+                                children: [
+                                  const DnaLoadingAnimation(
+                                    width: 250,
+                                    height: 50,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  ShaderMask(
+                                    shaderCallback: (bounds) => const LinearGradient(
+                                      colors: [
+                                        Color(0xFF667eea),
+                                        Color(0xFF4facfe),
+                                      ],
+                                    ).createShader(bounds),
+                                    child: const Text(
+                                      "Processing your question...",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                         ],

@@ -43,29 +43,31 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
         shadowColor: Colors.grey[200],
         surfaceTintColor: Colors.transparent,
         actions: [
-          IconButton(
-            icon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset(
-                  'assets/icons/google_meet.png', // your Google Meet icon asset path
-                  width: 24,
-                  height: 24,
-                ),
-                const SizedBox(width: 7),
-                const Text(
-                  'Meet',
-                  style: TextStyle(fontSize: 15,color: Primary),
-                ),
-              ],
+          Container(
+            child: IconButton(
+              icon: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/icons/google_meet.png', // your Google Meet icon asset path
+                    width: 24,
+                    height: 24,
+                  ),
+                  const SizedBox(width: 7),
+                  const Text(
+                    'Meet',
+                    style: TextStyle(fontSize: 15, color: Primary),
+                  ),
+                ],
+              ),
+              onPressed: () {
+                // your Meet action
+              },
             ),
-            onPressed: () {
-              // your Meet action
-            },
           ),
           IconButton(
             icon: Image.asset(
-               'assets/icons/calendar.png', // your calendar icon asset path
+              'assets/icons/calendar.png', // your calendar icon asset path
               width: 20,
               height: 24,
             ),
@@ -75,7 +77,6 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
           ),
         ],
       ),
-
       body: Consumer<PersonalChatProvider>(
         builder: (context, provider, child) {
           if (provider.isLoading) {
@@ -254,7 +255,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                         MaterialPageRoute(
                           builder: (context) => ChatDetailScreen(
                             userId: chat['pairedUser']['_id']?.toString() ?? '',
-                            chatTitle: chat['pairedUser']['profile']['name'] ?? 'Chat',
+                            chatTitle:
+                                chat['pairedUser']['profile']['name'] ?? 'Chat',
                             userProfile: chat['pairedUser'],
                           ),
                         ),
@@ -267,59 +269,6 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          _showNewChatDialog(context);
-        },
-        backgroundColor: Theme.of(context).colorScheme.primary,
-        foregroundColor: Colors.white,
-        elevation: 4,
-        child: const Icon(Icons.add, size: 28),
-        tooltip: 'New Chat',
-      ),
-    );
-  }
-
-  void _showNewChatDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Text(
-            'New Chat',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
-            ),
-          ),
-          content: const Text(
-            'New chat functionality will be available soon.',
-            style: TextStyle(
-              fontSize: 16,
-              height: 1.4,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              ),
-              child: const Text(
-                'Got it',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 }
@@ -380,21 +329,26 @@ class ChatListItem extends StatelessWidget {
                   ),
                   child: CircleAvatar(
                     radius: 26,
-                    backgroundColor: Colors.transparent,
-                    backgroundImage: profileImage != null && profileImage.isNotEmpty
-                        ? (profileImage.startsWith('data:image/')
-                        ? MemoryImage(base64Decode(profileImage.split(',')[1]))
-                        : NetworkImage(profileImage))
-                        : null,
+                    backgroundColor:
+                        profileImage == null || profileImage.isEmpty
+                            ? Primary // Primary color when empty
+                            : Colors.transparent,
+                    backgroundImage:
+                        profileImage != null && profileImage.isNotEmpty
+                            ? (profileImage.startsWith('data:image/')
+                                ? MemoryImage(
+                                    base64Decode(profileImage.split(',')[1]))
+                                : NetworkImage(profileImage))
+                            : null,
                     child: profileImage == null || profileImage.isEmpty
                         ? Text(
-                      title.isNotEmpty ? title[0].toUpperCase() : 'U',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    )
+                            title.isNotEmpty ? title[0].toUpperCase() : 'U',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            ),
+                          )
                         : null,
                   ),
                 ),

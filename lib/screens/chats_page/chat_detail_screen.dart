@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -505,12 +506,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  colors: [
-                    Theme.of(context).colorScheme.primary,
-                    Theme.of(context).colorScheme.primary.withOpacity(0.8),
-                  ],
-                ),
+               color: Primary
               ),
               child: CircleAvatar(
                 radius: 18,
@@ -547,18 +543,40 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  Text(
-                    'Online',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                    ),
-                  ),
                 ],
               ),
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: Image.asset(
+              'assets/icons/call.png', // Replace with your asset path
+              width: 24,
+              height: 24,
+              color: Colors.grey[800], // Optional: to tint the icon
+            ),
+            onPressed: () {
+              // Handle audio call action
+              print('Audio call pressed');
+            },
+            tooltip: 'Audio Call',
+          ),SizedBox(width: 10,),
+          IconButton(
+            icon: Image.asset(
+              'assets/icons/video.png', // Replace with your asset path
+              width: 24,
+              height: 24,
+              color: Colors.grey[800], // Optional: to tint the icon
+            ),
+            onPressed: () {
+              // Handle video call action
+              print('Video call pressed');
+            },
+            tooltip: 'Video Call',
+          ),
+          const SizedBox(width:20),
+        ],
         backgroundColor: Colors.white,
         foregroundColor: Colors.grey[800],
         elevation: 0,
@@ -818,7 +836,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ),
                 child: SafeArea(
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(15),
                     child: Column(
                       children: [
                         if (_selectedFile != null)
@@ -861,97 +879,120 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                   color: Colors.grey[100],
                                   borderRadius: BorderRadius.circular(25),
                                 ),
-                                child:
-
-                                  TextField(
-                                    controller: _messageController,
-                                    decoration: InputDecoration(
-                                      hintText: _selectedFile != null
-                                          ? 'Add a caption...'
-                                          : 'Type a message...',
-                                      hintStyle: TextStyle(color: Colors.grey[500]),
-                                      border: InputBorder.none,
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 20,
-                                        vertical: 12,
+                                child: Row(
+                                  children: [
+                                    // TextField
+                                    Expanded(
+                                      child: TextField(
+                                        key: const ValueKey('message_input_field'),
+                                        controller: _messageController,
+                                        decoration: InputDecoration(
+                                          hintText: _selectedFile != null
+                                              ? 'Add a caption...'
+                                              : 'Type a message...',
+                                          hintStyle: TextStyle(color: Colors.grey[500]),
+                                          border: InputBorder.none,
+                                          enabledBorder: InputBorder.none,
+                                          focusedBorder: InputBorder.none,
+                                          contentPadding: const EdgeInsets.symmetric(
+                                            horizontal: 20,
+                                            vertical: 12,
+                                          ),
+                                        ),
+                                        maxLines: null,
+                                        textCapitalization: TextCapitalization.sentences,
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: Colors.grey[800],
+                                        ),
+                                        cursorColor: Primary,
+                                        enabled: !_isSending,
+                                        onSubmitted: (_) {
+                                          if (!_isSending && (_messageController.text.trim().isNotEmpty || _selectedFile != null)) {
+                                            _sendMessage();
+                                          }
+                                        },
                                       ),
                                     ),
-                                    maxLines: null,
-                                    textCapitalization: TextCapitalization.sentences,
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey[800],
+
+                                    // Action buttons (merged inside the same container)
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 4),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Voice message button
+                                          IconButton(
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 36,
+                                              minHeight: 36,
+                                            ),
+                                            icon: Icon(
+                                              _isRecording ? Icons.stop : Icons.mic,
+                                              size: 20,
+                                              color: _isRecording ? Colors.red : Primary,
+                                            ),
+                                            onPressed: _isSending
+                                                ? null
+                                                : (_isRecording ? _stopRecording : _startRecording),
+                                          ),
+
+                                          // File attachment button
+                                          IconButton(
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(
+                                              minWidth: 36,
+                                              minHeight: 36,
+                                            ),
+                                            icon: Icon(
+                                              Icons.attach_file,
+                                              size: 20,
+                                              color: (_selectedFile == null && !_isSending)
+                                                  ? Primary
+                                                  : Colors.grey[500],
+                                            ),
+                                            onPressed: (_selectedFile == null && !_isSending) ? _pickFile : null,
+                                          ),
+
+                                          const SizedBox(width: 4),
+
+                                          // Send button
+                                          Container(
+                                            width: 36,
+                                            height: 36,
+                                            decoration: BoxDecoration(
+                                              color: _isSending
+                                                  ? Colors.grey[400]
+                                                  : const Color(0xFF6C5CE7),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: _isSending
+                                                ? const Center(
+                                              child: SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child: CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                                ),
+                                              ),
+                                            )
+                                                : IconButton(
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(
+                                                minWidth: 36,
+                                                minHeight: 36,
+                                              ),
+                                              icon: const Icon(Icons.send, size: 18, color: Colors.white),
+                                              onPressed: _isSending ? null : _sendMessage,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    enabled: !_isSending, // Disable while sending
-                                    // IMPORTANT: Remove onSubmitted or add this check
-                                    onSubmitted: (_) {
-                                      if (!_isSending && (_messageController.text.trim().isNotEmpty || _selectedFile != null)) {
-                                        _sendMessage();
-                                      }
-                                    },
-                                  )
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-
-                            // Voice message button
-                            Container(
-                              decoration: BoxDecoration(
-                                color: _isRecording ? Colors.red[100] : Colors.grey[200],
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                icon: Icon(
-                                  _isRecording ? Icons.stop : Icons.mic,
-                                  color: _isRecording
-                                      ? Colors.red
-                                      : Theme.of(context).colorScheme.primary,
+                                  ],
                                 ),
-                                onPressed: _isSending
-                                    ? null
-                                    : (_isRecording ? _stopRecording : _startRecording),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-
-                            // File attachment button
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.grey[200],
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                icon: Icon(
-                                  Icons.attach_file,
-                                  color: (_selectedFile == null && !_isSending)
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.grey[500],
-                                ),
-                                onPressed: (_selectedFile == null && !_isSending) ? _pickFile : null,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-
-                            // Send button
-                            Container(
-                              decoration: BoxDecoration(
-                                color: _isSending
-                                    ? Colors.grey[400]
-                                    : Theme.of(context).colorScheme.primary,
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                icon: _isSending
-                                    ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                  ),
-                                )
-                                    : const Icon(Icons.send, color: Colors.white),
-                                onPressed: _isSending ? null : _sendMessage,
                               ),
                             ),
                           ],
