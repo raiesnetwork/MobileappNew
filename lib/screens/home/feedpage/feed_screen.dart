@@ -16,6 +16,7 @@ import '../../../providers/comment_provider.dart';
 
 import '../../../services/comment_service.dart';
 import '../CreatePost/create_post_screen.dart';
+import 'edit_post_screen.dart';
 
 class FeedScreen extends StatefulWidget {
   final String? postId;
@@ -70,9 +71,9 @@ class _FeedScreenState extends State<FeedScreen> {
 
       if (isCommunityFeed) {
         commentProvider.fetchCommunityPosts(
-            communityId: widget.communityId!, offset: 0, limit: 10);
+            communityId: widget.communityId!, offset: 0, limit: 5);
       } else {
-        commentProvider.fetchAllPosts(offset: 0, limit: 10);
+        commentProvider.fetchAllPosts(offset: 0, limit:5);
       }
     });
     // _refreshFeed(); // ❌ Remove this line
@@ -98,7 +99,7 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   // ✅ Modified to support community posts
-  Future<List<Post>> fetchAllPosts({int offset = 0, int limit = 10}) async {
+  Future<List<Post>> fetchAllPosts({int offset = 0, int limit = 5}) async {
     if (isCommunityFeed) {
       // Fetch community posts using the provider
       final provider = context.read<CommentProvider>();
@@ -493,8 +494,13 @@ class _FeedScreenState extends State<FeedScreen> {
         children: [
           SizedBox(height: MediaQuery.of(context).size.height * 0.3),
           Center(
-            child: Text(
-                isCommunityFeed ? "Loading community posts" : "Loading posts"),
+            child: Column(
+              children: [
+                CircularProgressIndicator(),
+                Text(
+                    isCommunityFeed ? "Loading community posts" : "Loading posts.."),
+              ],
+            ),
           ),
         ],
       ),
@@ -627,6 +633,62 @@ class _FeedScreenState extends State<FeedScreen> {
                     List<PopupMenuEntry> menuItems = [];
 
                     if (post.isAdmin == true) {
+                      // ✅ EDIT OPTION (for post owner only)
+                      // ==========================================
+// REPLACE THE EDIT MENU ITEM IN PopupMenuButton
+// ==========================================
+
+                      // ==========================================
+// REPLACE THE EDIT MENU ITEM IN PopupMenuButton
+// Now much simpler - data is already fetched before navigation
+// ==========================================
+
+                      menuItems.add(
+                        PopupMenuItem(
+                          child: InkWell(
+                            onTap: () async {
+                              Navigator.pop(context); // Close popup menu
+
+                              // Navigate to edit screen and wait for result
+                              final result = await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => EditPostScreen(
+                                    post: post,
+                                    communityId: widget.communityId,
+                                  ),
+                                ),
+                              );
+
+                              // ✅ Data is already fresh from the provider, just update local state
+                              if (result == true && mounted) {
+                                final provider = context.read<CommentProvider>();
+                                setState(() {
+                                  final currentPosts = isCommunityFeed
+                                      ? provider.communityPosts
+                                      : provider.posts;
+                                  posts = List.from(currentPosts);
+                                  _originalPosts = List.from(currentPosts);
+                                  _allPostsCache = List.from(currentPosts);
+                                });
+                              }
+                            },
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.edit,
+                                  size: 18,
+                                  color: Colors.blue,
+                                ),
+                                SizedBox(width: 8),
+                                Text('Edit'),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+
+                      // ✅ DELETE OPTION (for post owner only)
                       menuItems.add(
                         PopupMenuItem(
                           child: InkWell(
@@ -640,8 +702,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                 visiblePosts: posts,
                                 onUpdate: (updatedPosts) {
                                   setState(() {
-                                    final startIndex =
-                                        _currentPage * _postsPerPage;
+                                    final startIndex = _currentPage * _postsPerPage;
                                     final endIndex =
                                     (startIndex + updatedPosts.length)
                                         .clamp(0, posts.length);
@@ -667,6 +728,7 @@ class _FeedScreenState extends State<FeedScreen> {
                       );
                     }
 
+                    // ✅ REPORT OPTION (available to all users)
                     menuItems.add(
                       PopupMenuItem(
                         child: InkWell(
@@ -681,8 +743,7 @@ class _FeedScreenState extends State<FeedScreen> {
                               visiblePosts: posts,
                                   (updatedPosts) {
                                 setState(() {
-                                  final startIndex =
-                                      _currentPage * _postsPerPage;
+                                  final startIndex = _currentPage * _postsPerPage;
                                   final endIndex =
                                   (startIndex + updatedPosts.length)
                                       .clamp(0, posts.length);
@@ -703,6 +764,7 @@ class _FeedScreenState extends State<FeedScreen> {
                       ),
                     );
 
+                    // ✅ NOT INTERESTED OPTION (available to all users)
                     menuItems.add(
                       PopupMenuItem(
                         child: InkWell(
@@ -717,8 +779,7 @@ class _FeedScreenState extends State<FeedScreen> {
                               visiblePosts: posts,
                                   (updatedPosts) {
                                 setState(() {
-                                  final startIndex =
-                                      _currentPage * _postsPerPage;
+                                  final startIndex = _currentPage * _postsPerPage;
                                   final endIndex =
                                   (startIndex + updatedPosts.length)
                                       .clamp(0, posts.length);

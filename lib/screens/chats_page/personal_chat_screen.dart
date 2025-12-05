@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../constants/constants.dart';
 import '../../providers/personal_chat_provider.dart';
+import '../meeting/create_meeting_link_screen.dart';
+import '../meeting/meeting_list_screen.dart';
 import './chat_detail_screen.dart';
 import 'group_chat/getall_groups.dart'; // Import ChatDetailScreen
 
@@ -61,7 +63,29 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                 ],
               ),
               onPressed: () {
-                // your Meet action
+                Navigator.push(
+                  context,
+                  PageRouteBuilder(
+                    pageBuilder: (context, animation, secondaryAnimation) =>
+                        MeetingListScreen(),
+                    transitionsBuilder:
+                        (context, animation, secondaryAnimation, child) {
+                      const begin = Offset(1.0, 0.0);
+                      const end = Offset.zero;
+                      const curve = Curves.easeInOut;
+
+                      var tween = Tween(begin: begin, end: end).chain(
+                        CurveTween(curve: curve),
+                      );
+
+                      return SlideTransition(
+                        position: animation.drive(tween),
+                        child: child,
+                      );
+                    },
+                    transitionDuration: const Duration(milliseconds: 300),
+                  ),
+                );
               },
             ),
           ),
@@ -72,7 +96,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
               height: 24,
             ),
             onPressed: () {
-              // your calendar action
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (context) => CreateMeetScreen()));
             },
           ),
         ],

@@ -70,6 +70,7 @@ class ServiceRequestService {
     required String category,
     required String priority,
     String? communityId,
+    String? assignedTo, // Add this parameter
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -89,6 +90,7 @@ class ServiceRequestService {
         'category': category,
         'priority': priority,
         if (communityId != null) 'communityId': communityId,
+        if (assignedTo != null && assignedTo.isNotEmpty) 'assignedTo': assignedTo, // Add this
       };
 
       final uri = Uri.parse('${apiBaseUrl}api/service-requests');

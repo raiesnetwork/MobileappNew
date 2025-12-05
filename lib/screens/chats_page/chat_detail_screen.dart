@@ -8,6 +8,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../providers/personal_chat_provider.dart';
+import '../../providers/video_call_provider.dart';
+import '../../providers/voice_call_provider.dart';
+import '../video_call/video_call_initiate_.dart';
+import '../voice_call/outgoing_voice_call.dart';
 import './message_bubble_screen.dart';
 
 class ChatDetailScreen extends StatefulWidget {
@@ -548,34 +552,47 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
           ],
         ),
+        // In the AppBar actions section, replace the existing IconButtons:
+
         actions: [
-          IconButton(
-            icon: Image.asset(
-              'assets/icons/call.png', // Replace with your asset path
-              width: 24,
-              height: 24,
-              color: Colors.grey[800], // Optional: to tint the icon
-            ),
-            onPressed: () {
-              // Handle audio call action
-              print('Audio call pressed');
+          // Audio Call Button
+          Consumer<VoiceCallProvider>(
+            builder: (context, voiceCallProvider, child) {
+              return IconButton(
+                icon: Image.asset(
+                  'assets/icons/call.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.grey[800],
+                ),
+                tooltip: 'Audio Call',
+                onPressed: voiceCallProvider.isConnected
+                    ? () => _initiateVoiceCall()
+                    : null,
+              );
             },
-            tooltip: 'Audio Call',
-          ),SizedBox(width: 10,),
-          IconButton(
-            icon: Image.asset(
-              'assets/icons/video.png', // Replace with your asset path
-              width: 24,
-              height: 24,
-              color: Colors.grey[800], // Optional: to tint the icon
-            ),
-            onPressed: () {
-              // Handle video call action
-              print('Video call pressed');
-            },
-            tooltip: 'Video Call',
           ),
-          const SizedBox(width:20),
+
+          const SizedBox(width: 10),
+
+          // Video Call Button
+          Consumer<VideoCallProvider>(
+            builder: (context, videoCallProvider, child) {
+              return IconButton(
+                icon: Image.asset(
+                  'assets/icons/video.png',
+                  width: 24,
+                  height: 24,
+                  color: Colors.grey[800],
+                ),
+                onPressed: videoCallProvider.isConnected
+                    ? () => _handleVideoCall()
+                    : null,
+                tooltip: 'Video Call',
+              );
+            },
+          ),
+          const SizedBox(width: 20),
         ],
         backgroundColor: Colors.white,
         foregroundColor: Colors.grey[800],
@@ -1008,6 +1025,84 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ),
     );
   }
+  Future<void> _handleVideoCall() async {
+    final videoCallProvider = context.read<VideoCallProvider>();
+    final receiverId = widget.userProfile['_id'];
+    final receiverName = widget.chatTitle;
+
+    if (receiverId == null || receiverId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot initiate call: Invalid user'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Show loading dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      // Check if user is busy
+      final isBusy = await videoCallProvider.checkUserBusy(receiverId);
+
+      // Close loading dialog
+      if (mounted) Navigator.of(context).pop();
+
+      if (isBusy) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$receiverName is currently in another call'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // Initiate the call
+      await videoCallProvider.initiateCall(
+        receiverId: receiverId,
+        receiverName: receiverName,
+      );
+
+      // Check for errors
+      if (videoCallProvider.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(videoCallProvider.errorMessage!),
+            backgroundColor: Colors.red,
+          ),
+        );
+        videoCallProvider.clearMessages();
+        return;
+      }
+
+      // Navigate to calling screen
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => CallingScreen(),
+        ),
+      );
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to initiate call: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -1022,4 +1117,53 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     super.dispose();
   }
+  Future<void> _initiateVoiceCall() async {
+    final voiceCallProvider = context.read<VoiceCallProvider>();
+
+    final receiverId = widget.userProfile['_id'];
+    final receiverName = widget.chatTitle;
+
+    if (receiverId == null || receiverId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot initiate voice call: Invalid user'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Clear previous call messages
+    voiceCallProvider.clearMessages();
+
+    // Initiate call
+    await voiceCallProvider.initiateVoiceCall(
+      receiverId: receiverId,
+      receiverName: receiverName,
+      isConference: false,
+    );
+
+    // Handle states
+    if (voiceCallProvider.callState == VoiceCallState.calling) {
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const VoiceCallingScreen(),
+          ),
+        );
+      }
+    } else if (voiceCallProvider.errorMessage != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(voiceCallProvider.errorMessage!),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+
 }

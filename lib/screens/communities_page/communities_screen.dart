@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import '../../providers/communities_provider.dart';
+import '../service_request/service_request_screen.dart';
 import 'community_info_screen.dart';
 import 'create_community_screen.dart';
 
@@ -454,29 +455,57 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     const SizedBox(height: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: community['isPrivate'] == true
-                                            ? Colors.orange.withOpacity(0.1)
-                                            : Colors.green.withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        community['isPrivate'] == true
-                                            ? 'Private'
-                                            : 'Public',
-                                        style: TextStyle(
-                                          color: community['isPrivate'] == true
-                                              ? Colors.orange[700]
-                                              : Colors.green[700],
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w500,
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: community['isPrivate'] == true
+                                                ? Colors.orange.withOpacity(0.1)
+                                                : Colors.green.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            community['isPrivate'] == true
+                                                ? 'Private'
+                                                : 'Public',
+                                            style: TextStyle(
+                                              color: community['isPrivate'] == true
+                                                  ? Colors.orange[700]
+                                                  : Colors.green[700],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
                                         ),
-                                      ),
+                                        SizedBox(width: 25,),
+                                        const SizedBox(width: 8),
+                                        GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => AllServiceRequestsScreen(
+                                                  communityId: community['_id'] as String,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          child: const Text(
+                                            'Add Remark',
+                                            style: TextStyle(
+                                              color: Colors.red,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                              decoration: TextDecoration.underline,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),

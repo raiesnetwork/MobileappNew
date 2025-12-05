@@ -52,6 +52,7 @@ class ServiceRequestProvider extends ChangeNotifier {
     required String category,
     required String priority,
     String? communityId,
+    String? assignedTo, // Add this parameter
   }) async {
     _isLoading = true;
     _error = null;
@@ -64,6 +65,7 @@ class ServiceRequestProvider extends ChangeNotifier {
         category: category,
         priority: priority,
         communityId: communityId,
+        assignedTo: assignedTo, // Pass it to the service
       );
 
       if (response['error'] == false) {

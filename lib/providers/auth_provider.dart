@@ -170,49 +170,70 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Enhanced: Properly save user data as JSON string with more robust error handling
+  // Replace your _saveUserData method with this updated version
+
   Future<void> _saveUserData(User user) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
+
       print('💾 Attempting to save user data...');
       print('User object: ${user.toString()}');
-      
+
       // Save token separately
       if (user.token != null && user.token!.isNotEmpty) {
         await prefs.setString('auth_token', user.token!);
         print('✅ Token saved: ${user.token}');
       }
+
+      // Save user ID separately
       if (user.id != null && user.id!.isNotEmpty) {
         await prefs.setString('user_id', user.id!);
         print('✅ User ID saved: ${user.id}');
       }
-      
+
+      // ✅ ADD THIS: Save username separately for video call
+      if (user.username.isNotEmpty) {
+        await prefs.setString('user_name', user.username);
+        print('✅ Username saved: ${user.username}');
+      }
+
+      // ✅ ADD THIS: Save mobile separately (useful for other features)
+      if (user.mobile.isNotEmpty) {
+        await prefs.setString('user_mobile', user.mobile);
+        print('✅ Mobile saved: ${user.mobile}');
+      }
+
       // Convert user object to JSON
       final Map<String, dynamic> userMap = user.toJson();
       final String userJson = jsonEncode(userMap);
       await prefs.setString('user_data', userJson);
-      
+
       print('✅ User data saved successfully');
       print('JSON saved: $userJson');
-      
+
       // Verify the save worked
       final savedData = prefs.getString('user_data');
       final savedToken = prefs.getString('auth_token');
+      final savedUsername = prefs.getString('user_name');
       print('🔍 Verification - Saved data exists: ${savedData != null}');
       print('🔍 Verification - Saved token exists: ${savedToken != null}');
-      
+      print('🔍 Verification - Saved username exists: ${savedUsername != null}');
+
     } catch (e, stackTrace) {
       print('❌ Error saving user data: $e');
       print('Stack trace: $stackTrace');
     }
   }
 
+// Also update your _clearUserData method to clear the new fields
   Future<void> _clearUserData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
       await prefs.remove('user_data');
+      await prefs.remove('user_id');
+      await prefs.remove('user_name');  // ✅ ADD THIS
+      await prefs.remove('user_mobile'); // ✅ ADD THIS
       print('✅ User data cleared from SharedPreferences');
     } catch (e) {
       print('❌ Error clearing user data: $e');
@@ -268,27 +289,33 @@ Future<bool> sendForgotPasswordOTP({
 }
  
   // Enhanced: Load user data with better error handling and debugging
+  // Replace your loadUserFromStorage method with this updated version
+
   Future<void> loadUserFromStorage() async {
     try {
       print('🔄 Starting loadUserFromStorage...');
-      
+
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       final userDataString = prefs.getString('user_data');
-      
+      final userId = prefs.getString('user_id');
+      final userName = prefs.getString('user_name');
+
       print('🔍 Token from storage: ${token ?? 'null'}');
+      print('🔍 User ID from storage: ${userId ?? 'null'}');
+      print('🔍 Username from storage: ${userName ?? 'null'}');
       print('🔍 User data from storage: ${userDataString ?? 'null'}');
-      
+
       if (token != null && userDataString != null && userDataString.isNotEmpty) {
         try {
           // Parse the JSON string back to Map
           final Map<String, dynamic> userJson = jsonDecode(userDataString);
           print('🔍 Parsed JSON: $userJson');
-          
+
           // Create User object from JSON
           _user = User.fromJson(userJson);
           print('🔍 User object created: ${_user.toString()}');
-          
+
           // Ensure token is set
           if (_user!.token == null || _user!.token!.isEmpty) {
             print('🔧 Setting token from separate storage');
@@ -302,13 +329,13 @@ Future<bool> sendForgotPasswordOTP({
               token: token,
             );
           }
-          
+
           print('✅ User loaded successfully from storage');
           print('   - ID: ${_user!.id}');
           print('   - Username: ${_user!.username}');
           print('   - Mobile: ${_user!.mobile}');
           print('   - Token exists: ${_user!.token != null}');
-          
+
         } catch (parseError) {
           print('❌ Error parsing user data: $parseError');
           // Clear corrupted data
@@ -319,10 +346,10 @@ Future<bool> sendForgotPasswordOTP({
         print('ℹ️ No user data found in storage (token: ${token != null}, userData: ${userDataString != null})');
         _user = null;
       }
-      
+
       _isInitialized = true;
       notifyListeners();
-      
+
     } catch (e, stackTrace) {
       print('❌ Error in loadUserFromStorage: $e');
       print('Stack trace: $stackTrace');

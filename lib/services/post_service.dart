@@ -20,7 +20,7 @@ class PostService {
 
       // Convert offset to page number
       int pageNumber = (offset ~/ limit) + 1; // Convert offset to page number
-      final url = Uri.parse('https://api.ixes.ai/api/mobile/posts?page=$pageNumber&limit=$limit');
+      final url = Uri.parse('${apiBaseUrl}api/mobile/posts?page=$pageNumber&limit=$limit');
 
       print("Feed API URL: $url");
       print("Offset: $offset, Calculated Page: $pageNumber"); // Debug print
@@ -229,6 +229,158 @@ class PostService {
       }
     } catch (e) {
       print('❌ Error in createPost: $e');
+      return {
+        'success': false,
+        'message': 'Network error: $e',
+      };
+    }
+  }
+  static Future<Map<String, dynamic>> updatePost({
+    required String postId,
+    String? postContent,
+    String? mediaType,
+    String? deleteOldMediaUrl,
+    List<String>? newImagePaths,
+    String? newVideoPath,
+  }) async {
+    try {
+      // Get auth token
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? token = prefs.getString('auth_token');
+
+      if (token == null) {
+        return {
+          'success': false,
+          'message': 'Authentication token not found',
+        };
+      }
+
+      // Create multipart request
+      var request = http.MultipartRequest(
+        'PUT',
+        Uri.parse('${apiBaseUrl}api/post/update/$postId'),
+      );
+
+      // Add headers
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      });
+
+      // Add text fields (only if provided)
+      if (postContent != null && postContent.isNotEmpty) {
+        request.fields['postContent'] = postContent;
+      }
+
+      if (mediaType != null && mediaType.isNotEmpty) {
+        request.fields['mediaType'] = mediaType;
+      }
+
+      if (deleteOldMediaUrl != null && deleteOldMediaUrl.isNotEmpty) {
+        request.fields['deleteOldMediaUrl'] = deleteOldMediaUrl;
+      }
+
+      // Add new image files
+      if (newImagePaths != null && newImagePaths.isNotEmpty) {
+        for (int i = 0; i < newImagePaths.length; i++) {
+          final file = File(newImagePaths[i]);
+          if (await file.exists()) {
+            final multipartFile = await http.MultipartFile.fromPath(
+              'files',
+              file.path,
+              filename: 'image_$i.${file.path.split('.').last}',
+            );
+            request.files.add(multipartFile);
+          }
+        }
+      }
+
+      // Add new video file
+      if (newVideoPath != null) {
+        final file = File(newVideoPath);
+        if (await file.exists()) {
+          final multipartFile = await http.MultipartFile.fromPath(
+            'files',
+            file.path,
+            filename: 'video.${file.path.split('.').last}',
+          );
+          request.files.add(multipartFile);
+        }
+      }
+
+      print('📤 Update request prepared for post: $postId');
+      print('📤 Fields: ${request.fields}');
+      print('📤 Files count: ${request.files.length}');
+
+      // Send the request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      print('📥 Update response status: ${response.statusCode}');
+      print('📥 Update response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        // Success response
+        if (response.body.isEmpty || response.body.trim() == '' || response.body == 'null') {
+          return {
+            'success': true,
+            'message': 'Post updated successfully',
+            'post': null,
+          };
+        }
+
+        try {
+          final data = json.decode(response.body);
+
+          if (data['error'] == false) {
+            return {
+              'success': true,
+              'message': data['message'] ?? 'Post updated successfully',
+              'post': data['post'],
+            };
+          } else {
+            return {
+              'success': false,
+              'message': data['message'] ?? 'Failed to update post',
+            };
+          }
+        } catch (parseError) {
+          print('⚠️ Response parsing failed but request succeeded: $parseError');
+          return {
+            'success': true,
+            'message': 'Post updated successfully',
+            'post': null,
+          };
+        }
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'Post not found',
+        };
+      } else {
+        // Handle other error responses
+        try {
+          if (response.body.isNotEmpty && response.body != 'null') {
+            final errorData = json.decode(response.body);
+            return {
+              'success': false,
+              'message': errorData['message'] ?? 'Failed to update post: ${response.statusCode}',
+            };
+          } else {
+            return {
+              'success': false,
+              'message': 'Failed to update post: ${response.statusCode}',
+            };
+          }
+        } catch (parseError) {
+          return {
+            'success': false,
+            'message': 'Failed to update post: ${response.statusCode}',
+          };
+        }
+      }
+    } catch (e) {
+      print('❌ Error in updatePost: $e');
       return {
         'success': false,
         'message': 'Network error: $e',

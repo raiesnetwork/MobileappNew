@@ -186,6 +186,80 @@ class CommentProvider with ChangeNotifier {
   }
 
 
+  /// Update a post and refresh the feed
+  Future<bool> updatePost({
+    required BuildContext context,
+    required String postId,
+    String? postContent,
+    String? mediaType,
+    String? deleteOldMediaUrl,
+    List<String>? newImagePaths,
+    String? newVideoPath,
+    required int offset,
+    required int limit,
+    String? communityId,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final result = await PostService.updatePost(
+        postId: postId,
+        postContent: postContent,
+        mediaType: mediaType,
+        deleteOldMediaUrl: deleteOldMediaUrl,
+        newImagePaths: newImagePaths,
+        newVideoPath: newVideoPath,
+      );
+
+      _isLoading = false;
+
+      if (result['success']) {
+        // ✅ NO SNACKBAR HERE - Let the screen handle it
+        print('✅ Provider: Post updated successfully');
+
+        // Refresh the appropriate feed
+        if (communityId != null) {
+          await fetchCommunityPosts(
+            communityId: communityId,
+            offset: offset,
+            limit: limit,
+          );
+        } else {
+          await fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
+        }
+
+        notifyListeners();
+        return true;
+      } else {
+        // ❌ Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to update post'),
+            backgroundColor: Colors.red,
+          ),
+        );
+
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating post: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      print('❌ Error in updatePost provider: $e');
+      return false;
+    }
+  }
+
+
   /// Fetch and update a single post (used after commenting)
   Future<void> fetchSinglePost(String postId) async {
     try {

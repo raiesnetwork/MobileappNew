@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../providers/communities_provider.dart';
 import '../../providers/service_request_provider.dart';
+
 
 class CreateServiceRequestScreen extends StatefulWidget {
   final String? communityId;
@@ -19,7 +21,10 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
 
   String _selectedCategory = '';
   String _selectedPriority = '';
+  String _selectedAssignedTo = '';
   bool _isSubmitting = false;
+  bool _isLoadingMembers = true;
+  List<Map<String, dynamic>> _communityMembers = [];
 
   final List<String> _categories = [
     'Access_Request',
@@ -33,8 +38,8 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
     'Others',
     'Plumbing',
     'Software / IT',
-    'jhhh', // From SR-2025-029
-    'jhhhdfgffe', // From SR-2025-030
+    'jhhh',
+    'jhhhdfgffe',
   ];
 
   final List<Map<String, String>> _priorities = [
@@ -63,11 +68,58 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
   @override
   void initState() {
     super.initState();
+
     if (widget.request != null) {
       _subjectController.text = widget.request!['subject'] ?? '';
       _descriptionController.text = widget.request!['description'] ?? '';
       _selectedCategory = widget.request!['category'] ?? '';
       _selectedPriority = widget.request!['priority'] ?? '';
+      _selectedAssignedTo = widget.request!['assignedTo']?['_id'] ?? '';
+    }
+
+    // FIX: Delay API call until after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCommunityMembers();
+    });
+  }
+
+  Future<void> _loadCommunityMembers() async {
+    if (widget.communityId == null) {
+      setState(() {
+        _isLoadingMembers = false;
+      });
+      return;
+    }
+
+    try {
+      final communityProvider = Provider.of<CommunityProvider>(context, listen: false);
+      final result = await communityProvider.fetchCommunityUsers(widget.communityId!);
+
+      print('Community Users Result: $result'); // Debug print
+
+      if (result['error'] == false && result['data'] != null) {
+        final members = List<Map<String, dynamic>>.from(result['data']);
+        print('Number of members: ${members.length}'); // Debug print
+        if (members.isNotEmpty) {
+          print('First member structure: ${members[0]}'); // Debug print
+        }
+
+        setState(() {
+          _communityMembers = members;
+          _isLoadingMembers = false;
+        });
+      } else {
+        setState(() {
+          _communityMembers = [];
+          _isLoadingMembers = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading community members: $e');
+      setState(() {
+        _communityMembers = [];
+        _isLoadingMembers = false;
+      });
     }
   }
 
@@ -128,6 +180,8 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
                   _buildCategorySelector(),
                   const SizedBox(height: 14),
                   _buildPrioritySelector(),
+                  const SizedBox(height: 14),
+                  _buildAssignedToSelector(),
                 ],
               ),
               const SizedBox(height: 22),
@@ -339,6 +393,144 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
     );
   }
 
+  Widget _buildAssignedToSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        RichText(
+          text: TextSpan(
+            text: 'Assigned To',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        _isLoadingMembers
+            ? Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[700]!),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Loading members...',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        )
+            : DropdownButtonFormField<String>(
+          value: _selectedAssignedTo.isEmpty ? null : _selectedAssignedTo,
+          decoration: InputDecoration(
+            hintText: 'Select a member (optional)',
+            prefixIcon: Icon(Icons.person_outline, color: Colors.grey[600]),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(color: Colors.grey[300]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: const BorderSide(color: Colors.blue, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          ),
+          items: [
+            const DropdownMenuItem<String>(
+              value: '',
+              child: Text('Unassigned'),
+            ),
+            ..._communityMembers.map<DropdownMenuItem<String>>((member) {
+              final userData = member['userId'] as Map<String, dynamic>?;
+
+              // Extract name safely
+              String name = 'Unknown User';
+              if (userData != null) {
+                final profile = userData['profile'] as Map<String, dynamic>?;
+                if (profile != null && profile['name'] != null && profile['name'].toString().trim().isNotEmpty) {
+                  name = profile['name'].toString().trim();
+                } else if (userData['email'] != null) {
+                  name = userData['email'].toString().split('@').first; // fallback to email prefix
+                } else if (userData['email'] != null) {
+                  name = userData['email'].toString();
+                }
+              }
+
+              // Extract user ID
+              final String userId = userData?['_id']?.toString() ?? member['_id']?.toString() ?? '';
+
+              return DropdownMenuItem<String>(
+                value: userId,
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundImage: _getProfileImage(userData),
+                      backgroundColor: Colors.grey.shade300,
+                    ),
+
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+
+            }).toList(),
+          ],
+          onChanged: (value) {
+            setState(() {
+              _selectedAssignedTo = value ?? '';
+            });
+          },
+          isExpanded: true,
+        ),
+      ],
+    );
+
+  }
+  ImageProvider? _getProfileImage(Map<String, dynamic>? userData) {
+    if (userData == null) return null;
+    final profile = userData['profile'] as Map<String, dynamic>?;
+    final imageUrl = profile?['profileImage']?.toString();
+
+    if (imageUrl == null || imageUrl.isEmpty) return null;
+
+    if (imageUrl.startsWith('http')) {
+      return NetworkImage(imageUrl);
+    } else if (imageUrl.startsWith('data:image')) {
+      // Base64 image
+      final uri = UriData.parse(imageUrl);
+      return MemoryImage(uri.contentAsBytes());
+    }
+    return null;
+  }
+
   Widget _buildPrioritySelector() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -465,14 +657,15 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
       Map<String, dynamic> result;
 
       if (widget.request != null) {
-        // Update existing request using _id
+        // Update existing request
         result = await provider.updateServiceRequest(
-          requestId: widget.request!['_id'], // Use _id, not requestId
+          requestId: widget.request!['_id'],
           subject: _subjectController.text.trim(),
           description: _descriptionController.text.trim(),
           category: _selectedCategory,
           priority: _selectedPriority,
-          status: widget.request!['status'], // Preserve existing status
+          assignedTo: _selectedAssignedTo.isEmpty ? null : _selectedAssignedTo,
+          status: widget.request!['status'],
         );
       } else {
         // Create new request
@@ -481,6 +674,7 @@ class _CreateServiceRequestScreenState extends State<CreateServiceRequestScreen>
           description: _descriptionController.text.trim(),
           category: _selectedCategory,
           priority: _selectedPriority,
+          assignedTo: _selectedAssignedTo.isEmpty ? null : _selectedAssignedTo,
           communityId: widget.communityId,
         );
       }

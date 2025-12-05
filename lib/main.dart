@@ -1,27 +1,32 @@
+// main.dart
 import 'package:flutter/material.dart';
 import 'package:ixes.app/providers/announcement_provider.dart';
-
 import 'package:ixes.app/providers/campaign_provider.dart';
 import 'package:ixes.app/providers/chat_provider.dart';
 import 'package:ixes.app/providers/comment_provider.dart';
 import 'package:ixes.app/providers/communities_provider.dart';
 import 'package:ixes.app/providers/coupon_provider.dart';
+import 'package:ixes.app/providers/generate_link_provider.dart';
 import 'package:ixes.app/providers/group_provider.dart';
+import 'package:ixes.app/providers/meeting_provider.dart';
 import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:ixes.app/providers/personal_chat_provider.dart';
 import 'package:ixes.app/providers/service_provider.dart';
 import 'package:ixes.app/providers/service_request_provider.dart';
-
+import 'package:ixes.app/providers/video_call_provider.dart';
+import 'package:ixes.app/providers/voice_call_provider.dart';
+import 'package:ixes.app/screens/widgets/video_call.dart';
+import 'package:ixes.app/screens/widgets/voice_call.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
+
 import 'providers/auth_provider.dart';
 import 'providers/post_provider.dart';
 import 'screens/splash_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/BottomNaviagation.dart';
 import 'utils/app_theme.dart';
-import 'services/socket_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,27 +35,30 @@ void main() async {
   final token = prefs.getString('auth_token');
   final userId = prefs.getString('user_id');
 
-  debugPrint('🔐 Loaded token: $token');
-  debugPrint('👤 Loaded userId: $userId');
+  debugPrint('Loaded token: $token');
+  debugPrint('Loaded userId: $userId');
 
-  if (token != null && userId != null) {
-    debugPrint('📡 Connecting socket...');
-
-  } else {
-    debugPrint('⚠️ No token or userId found. Skipping socket.');
-  }
-
-  runApp(IxesApp(initialToken: token));
+  runApp(IxesApp(
+    initialToken: token,
+    initialUserId: userId,
+  ));
 }
 
-
-class IxesApp extends StatelessWidget {
-
+class IxesApp extends StatefulWidget {
   final String? initialToken;
+  final String? initialUserId;
 
-  const IxesApp({super.key, this.initialToken});
+  const IxesApp({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+  });
 
+  @override
+  State<IxesApp> createState() => _IxesAppState();
+}
 
+class _IxesAppState extends State<IxesApp> {
   @override
   Widget build(BuildContext context) {
     return Sizer(
@@ -70,20 +78,89 @@ class IxesApp extends StatelessWidget {
             ChangeNotifierProvider(create: (_) => CouponProvider()),
             ChangeNotifierProvider(create: (_) => PersonalChatProvider()),
             ChangeNotifierProvider(create: (_) => GroupChatProvider()),
+            ChangeNotifierProvider(create: (_) => VideoCallProvider()),
+            ChangeNotifierProvider(create: (_) => MeetProvider()),
+            ChangeNotifierProvider(create: (_) => MeetingProvider()),
+            ChangeNotifierProvider(create: (_) => VoiceCallProvider()),
           ],
-          child: MaterialApp(
-            title: 'Ixes',
-            theme: AppTheme.lightTheme,
-            debugShowCheckedModeBanner: false,
-            home: initialToken != null
-                ? const MainScreen(initialIndex: 0)
-                : const SplashScreen(),
-            routes: {
-              '/login': (context) => const LoginScreen(),
-              '/main': (context) => const MainScreen(initialIndex: 0),
+          child: Builder(
+            builder: (context) {
+              final authProvider = context.watch<AuthProvider>();
+
+              // Step 1: If auth not initialized → trigger load + show splash
+              if (!authProvider.isInitialized) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  context.read<AuthProvider>().loadUserFromStorage();
+                });
+                return _buildMaterialApp(home: const SplashScreen());
+              }
+
+              // Step 2: If user is authenticated → initialize call services with REAL username
+              if (authProvider.isAuthenticated && authProvider.user != null) {
+                final user = authProvider.user!;
+
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  final String displayName = user.username.isNotEmpty
+                      ? user.username
+                      : "User_${user.mobile.substring(user.mobile.length - 4)}";
+
+                  debugPrint('Initializing call services for: $displayName (${user.id})');
+
+                  // Initialize Video Call
+                  context.read<VideoCallProvider>().initialize(
+                    userId: user.id,
+                    userName: displayName,
+                    authToken: widget.initialToken,
+                  );
+
+                  // Initialize Voice Call
+                  context.read<VoiceCallProvider>().initialize(
+                    userId: user.id,
+                    userName: displayName,
+                    authToken: widget.initialToken,
+                  );
+
+                  // Initialize Meeting (if used)
+                  context.read<MeetingProvider>().initialize(
+                    userId: user.id,
+                    userName: displayName,
+                    authToken: widget.initialToken,
+                  );
+                });
+              }
+
+              // Step 3: Decide which screen to show
+              final bool isLoggedIn = authProvider.isAuthenticated;
+
+              return _buildMaterialApp(
+                home: isLoggedIn
+                    ? VoiceCallListener(
+                  child: IncomingCallListener(
+                    child: const MainScreen(initialIndex: 0),
+                  ),
+                )
+                    : const SplashScreen(),
+              );
             },
           ),
         );
+      },
+    );
+  }
+
+  Widget _buildMaterialApp({required Widget home}) {
+    return MaterialApp(
+      title: 'Ixes',
+      theme: AppTheme.lightTheme,
+      debugShowCheckedModeBanner: false,
+      home: home,
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/main': (context) => VoiceCallListener(
+          child: IncomingCallListener(
+            child: const MainScreen(initialIndex: 0),
+          ),
+        ),
       },
     );
   }
