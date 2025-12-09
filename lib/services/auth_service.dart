@@ -243,56 +243,156 @@ static Future<Map<String, dynamic>> forgotPassword({
     }
   }
 
+
+
   static Future<Map<String, dynamic>> changePassword({
     required String currentPassword,
     required String newPassword,
   }) async {
     try {
-      final response = await ApiService.put('/api/auth/password', {
+      print('🔐 =================================');
+      print('🔐 CHANGE PASSWORD - REQUEST STARTED');
+      print('🔐 =================================');
+      print('📤 Endpoint: /api/auth/password');
+      print('📤 Method: PUT');
+      print('📤 Current Password: ****${currentPassword.substring(currentPassword.length - 2)}');
+      print('📤 Current Password Length: ${currentPassword.length}');
+      print('📤 New Password Length: ${newPassword.length}');
+      print('📤 Auth Required: true');
+
+      // Get token to verify it exists
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+      final userId = prefs.getString('user_id');
+      final username = prefs.getString('user_name');
+
+      print('🔑 Token exists: ${token != null}');
+      print('🔑 Token length: ${token?.length ?? 0}');
+      print('🔑 User ID: ${userId ?? 'null'}');
+      print('🔑 Username: ${username ?? 'null'}');
+
+      if (token != null && token.length > 20) {
+        print('🔑 Token preview: ${token.substring(0, 20)}...');
+      } else if (token != null) {
+        print('🔑 Token: $token');
+      }
+
+      final requestBody = {
         'currentPassword': currentPassword,
         'newPassword': newPassword,
-      }, requireAuth: true);
+      };
+      print('📤 Request Body Keys: ${requestBody.keys.toList()}');
+
+      final response = await ApiService.put(
+          '/api/auth/password',
+          requestBody,
+          requireAuth: true
+      );
+
+      print('📥 Response Status Code: ${response.statusCode}');
+      print('📥 Response Body: ${response.body}');
+      print('📥 Response Headers: ${response.headers}');
 
       final data = json.decode(response.body);
-      
+      print('📥 Decoded Data: $data');
+      print('📥 Data Type: ${data.runtimeType}');
+      print('📥 Has "error" key: ${data.containsKey('error')}');
+      print('📥 Has "message" key: ${data.containsKey('message')}');
+
       if (response.statusCode == 200) {
+        print('✅ SUCCESS - Password changed successfully');
+        print('✅ Message: ${data['message']}');
         return {
           'success': true,
           'message': data['message'] ?? 'Password changed successfully',
         };
-      } else if (response.statusCode == 400) {
+      }
+      else if (response.statusCode == 400) {
+        print('❌ ERROR 400 - Bad Request');
+        print('❌ Reason: New password is required or invalid');
+        final errorMsg = data['error'] ?? data['message'] ?? 'New password is required';
+        print('❌ Error Message: $errorMsg');
         return {
           'success': false,
-          'message': data['error'] ?? 'New password is required',
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'success': false,
-          'message': data['error'] ?? 'Current password is incorrect',
-        };
-      } else if (response.statusCode == 404) {
-        return {
-          'success': false,
-          'message': data['error'] ?? 'User not found',
-        };
-      } else if (response.statusCode == 500) {
-        return {
-          'success': false,
-          'message': data['error'] ?? 'An error occurred',
-        };
-      } else {
-        return {
-          'success': false,
-          'message': data['error'] ?? 'Failed to change password',
+          'message': errorMsg,
         };
       }
-    } catch (e) {
+      else if (response.statusCode == 401) {
+        print('❌ ERROR 401 - Unauthorized');
+        print('❌ Reason: Current password is incorrect or invalid token');
+        final errorMsg = data['error'] ?? data['message'] ?? 'Current password is incorrect';
+        print('❌ Error Message: $errorMsg');
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+      else if (response.statusCode == 404) {
+        print('❌ ERROR 404 - Not Found');
+        print('❌ Reason: User not found in database');
+        final errorMsg = data['error'] ?? data['message'] ?? 'User not found';
+        print('❌ Error Message: $errorMsg');
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+      else if (response.statusCode == 500) {
+        print('❌ ERROR 500 - Internal Server Error');
+        print('❌ Reason: Backend server error');
+        print('❌ Error Field: ${data['error']}');
+        print('❌ Message Field: ${data['message']}');
+        print('❌ Full Response: $data');
+        print('⚠️  BACKEND ISSUE: Check server logs for the actual error');
+        print('⚠️  Possible causes:');
+        print('   - Database connection failure');
+        print('   - Password hashing error');
+        print('   - User lookup error');
+        print('   - Backend code exception');
+
+        final errorMsg = data['error'] ?? data['message'] ?? 'Server error occurred. Please try again later.';
+        print('❌ Returning Error: $errorMsg');
+
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+      else {
+        print('❌ ERROR ${response.statusCode} - Unexpected Status Code');
+        print('❌ Error Field: ${data['error']}');
+        print('❌ Message Field: ${data['message']}');
+        final errorMsg = data['error'] ?? data['message'] ?? 'Failed to change password';
+        print('❌ Error Message: $errorMsg');
+        return {
+          'success': false,
+          'message': errorMsg,
+        };
+      }
+    } catch (e, stackTrace) {
+      print('💥 =================================');
+      print('💥 CHANGE PASSWORD - EXCEPTION CAUGHT');
+      print('💥 =================================');
+      print('💥 Error Type: ${e.runtimeType}');
+      print('💥 Error Message: $e');
+      print('💥 Stack Trace:');
+      print(stackTrace);
+      print('💥 Possible causes:');
+      print('   - Network connection lost');
+      print('   - Invalid JSON response');
+      print('   - Timeout');
+      print('   - API service error');
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',
       };
+    } finally {
+      print('🔐 =================================');
+      print('🔐 CHANGE PASSWORD - REQUEST ENDED');
+      print('🔐 =================================\n');
     }
   }
+
   
   static Future<bool> logout() async {
     try {

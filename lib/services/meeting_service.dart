@@ -354,10 +354,6 @@ class MeetingService {
     debugPrint('📜 Requesting chat history for: $meetingId');
   }
 
-  // ============================================================================
-  // SOCKET EVENT LISTENERS
-  // ============================================================================
-
   void onConnect(Function() callback) {
     _socket?.onConnect((_) {
       debugPrint('✅ Meeting socket connected');

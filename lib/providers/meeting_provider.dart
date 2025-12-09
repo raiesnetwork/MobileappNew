@@ -52,10 +52,6 @@ class MeetingProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get chatMessages => _chatMessages;
   bool get isChatJoined => _isChatJoined;
 
-  // ============================================================================
-  // INITIALIZATION
-  // ============================================================================
-
   void initialize({
     required String userId,
     required String userName,
@@ -68,13 +64,12 @@ class MeetingProvider extends ChangeNotifier {
     _service.connectSocket();
     _setupListeners();
     _service.connect();
-
-    debugPrint('📞 Meeting provider initialized for user: $userName ($userId)');
   }
 
   void _setupListeners() {
     // Connection listeners
     _service.onConnect(() {
+      debugPrint('✅ Socket connected in provider');
       _isConnected = true;
       if (_currentUserId != null) {
         _service.joinAsUser(_currentUserId!);
@@ -83,33 +78,88 @@ class MeetingProvider extends ChangeNotifier {
     });
 
     _service.onDisconnect(() {
+      debugPrint('❌ Socket disconnected in provider');
       _isConnected = false;
       _safeNotifyListeners();
     });
 
     // Join request listeners
     _service.onPendingRequestsUpdate((data) {
-      debugPrint('📋 Pending requests updated: $data');
+      debugPrint('📋 ===== PENDING REQUESTS UPDATE IN PROVIDER =====');
+      debugPrint('📋 Raw data: $data');
+      debugPrint('📋 Data type: ${data.runtimeType}');
+
       if (data is List) {
+        debugPrint('📋 List length: ${data.length}');
         _pendingRequests = List<Map<String, dynamic>>.from(
-          data.map((item) => Map<String, dynamic>.from(item)),
+          data.map((item) {
+            debugPrint('📋 Processing item: $item');
+            if (item is Map) {
+              return Map<String, dynamic>.from(item);
+            }
+            return item as Map<String, dynamic>;
+          }),
         );
+        debugPrint('📋 ✅ Updated pending requests count: ${_pendingRequests.length}');
+        if (_pendingRequests.isNotEmpty) {
+          debugPrint('📋 Requests details:');
+          for (var req in _pendingRequests) {
+            debugPrint('   - ${req['name']} (${req['userId']})');
+          }
+        }
+        debugPrint('📋 ================================================');
         _safeNotifyListeners();
+      } else {
+        debugPrint('⚠️ Data is not a List! Type: ${data.runtimeType}');
       }
     });
 
     _service.onNewJoinRequest((data) {
-      debugPrint('🆕 New join request: $data');
+      debugPrint('🆕 ===== NEW JOIN REQUEST IN PROVIDER =====');
+      debugPrint('🆕 Data: $data');
+      debugPrint('🆕 Name: ${data['name']}');
+      debugPrint('🆕 UserId: ${data['userId']}');
+      debugPrint('🆕 MeetingId: ${data['meetingId']}');
+
       _successMessage = '${data['name']} wants to join the meeting';
+
+      // Add to pending requests if not already there
+      final requestId = '${data['meetingId']}-${data['userId']}';
+      final exists = _pendingRequests.any((req) =>
+      '${req['meetingId']}-${req['userId']}' == requestId
+      );
+
+      if (!exists) {
+        _pendingRequests.add(Map<String, dynamic>.from(data));
+        debugPrint('🆕 Added to pending requests. Total: ${_pendingRequests.length}');
+      }
+
       _safeNotifyListeners();
     });
 
-    _service.onJoinApproved((data) {
-      debugPrint('✅ Join approved: $data');
-      _joinStatus = JoinStatus.approved;
+    _service.onJoinApproved((data) async {
+      debugPrint('✅ ===== JOIN APPROVED IN PROVIDER =====');
+      debugPrint('✅ Data: $data');
+      debugPrint('✅ Meeting ID: ${data['meetingId']}');
+
       _currentMeetingId = data['meetingId'];
       _successMessage = 'Your join request was approved!';
+
+      // CRITICAL: Fetch access token immediately when approved
+      debugPrint('🎫 Fetching access token after approval...');
+      final tokenSuccess = await _fetchAccessToken(data['meetingId']);
+
+      if (tokenSuccess) {
+        debugPrint('✅ Token fetched successfully, setting status to approved');
+        _joinStatus = JoinStatus.approved;
+      } else {
+        debugPrint('❌ Failed to fetch token after approval');
+        _errorMessage = 'Failed to get access token after approval';
+        _joinStatus = JoinStatus.rejected;
+      }
+
       _safeNotifyListeners();
+      debugPrint('✅ ===== JOIN APPROVAL COMPLETE =====');
     });
 
     _service.onJoinRejected((data) {
@@ -123,24 +173,24 @@ class MeetingProvider extends ChangeNotifier {
     _service.onParticipantApproved((requestId) {
       debugPrint('✅ Participant approved: $requestId');
       _pendingRequests.removeWhere((req) =>
-      '${req['meetingId']}-${req['userId']}' == requestId
-      );
+      '${req['meetingId']}-${req['userId']}' == requestId);
+      debugPrint('📋 Remaining pending requests: ${_pendingRequests.length}');
       _safeNotifyListeners();
     });
 
     _service.onParticipantRejected((requestId) {
       debugPrint('❌ Participant rejected: $requestId');
       _pendingRequests.removeWhere((req) =>
-      '${req['meetingId']}-${req['userId']}' == requestId
-      );
+      '${req['meetingId']}-${req['userId']}' == requestId);
+      debugPrint('📋 Remaining pending requests: ${_pendingRequests.length}');
       _safeNotifyListeners();
     });
 
     _service.onParticipantCancelled((requestId) {
       debugPrint('🚫 Participant cancelled: $requestId');
       _pendingRequests.removeWhere((req) =>
-      '${req['meetingId']}-${req['userId']}' == requestId
-      );
+      '${req['meetingId']}-${req['userId']}' == requestId);
+      debugPrint('📋 Remaining pending requests: ${_pendingRequests.length}');
       _safeNotifyListeners();
     });
 
@@ -167,16 +217,12 @@ class MeetingProvider extends ChangeNotifier {
       }
     });
   }
-
-  // ============================================================================
-  // MEETING OPERATIONS - HOST
-  // ============================================================================
+  /// Fetch access token after approval (public method for waiting screen)
+  Future<bool> fetchAccessTokenAfterApproval(String meetingId) async {
+    return await _fetchAccessToken(meetingId);
+  }
 
   /// Join as meeting host
-  // Replace the existing joinAsMeetingHost method with this:
-
-  /// Create and join as meeting host
-  /// Join as meeting host (uses request-join endpoint)
   Future<void> joinAsMeetingHost(String meetingId) async {
     if (_currentUserId == null || _currentUserName == null) {
       _errorMessage = 'User not initialized';
@@ -188,15 +234,37 @@ class MeetingProvider extends ChangeNotifier {
     _currentRole = MeetingRole.host;
     _isHost = true;
 
-    debugPrint('🎬 Creating and joining meeting as host: $meetingId');
+    debugPrint('🎬 ===== CREATING AND JOINING MEETING AS HOST =====');
+    debugPrint('🎬 Meeting ID: $meetingId');
+    debugPrint('🎬 User: $_currentUserName ($_currentUserId)');
+    debugPrint('🔌 Socket connected? ${_service.socket?.connected}');
 
-    // Use request-join endpoint which will create the meeting and mark us as host
+    // Wait for socket connection if not connected
+    if (_service.socket?.connected != true) {
+      debugPrint('⚠️ Socket not connected, waiting for connection...');
+
+      bool connected = await _waitForConnection();
+
+      if (!connected) {
+        _errorMessage = 'Failed to establish socket connection';
+        _isHost = false;
+        _currentRole = null;
+        _currentMeetingId = null;
+        _safeNotifyListeners();
+        return;
+      }
+    }
+
+    // Create/join meeting via API
+    debugPrint('📡 Calling request-join API...');
     final result = await _service.requestToJoin(
       name: _currentUserName!,
       meetingId: meetingId,
       userId: _currentUserId!,
       authToken: _authToken,
     );
+
+    debugPrint('📦 Request-join result: $result');
 
     if (result['error'] == true) {
       _errorMessage = result['message'] ?? 'Failed to create meeting';
@@ -207,17 +275,94 @@ class MeetingProvider extends ChangeNotifier {
       return;
     }
 
-    // The response should indicate we're the host
     _isHost = result['isHost'] ?? true;
+    debugPrint('✅ Is host confirmed from API: $_isHost');
 
-    // Join as host via socket
+    // CRITICAL: Emit socket event to join as host
+    debugPrint('🔌 Emitting join-meeting-host socket event...');
     _service.joinAsMeetingHost(
       meetingId: meetingId,
       userId: _currentUserId!,
     );
+    debugPrint('✅ Socket event emitted');
+
+    // Wait for socket to process
+    await Future.delayed(const Duration(milliseconds: 1000));
+
+    debugPrint('📋 Pending requests after join: ${_pendingRequests.length}');
 
     // Get access token
-    await _fetchAccessToken(meetingId);
+    debugPrint('🎫 Fetching access token...');
+    final tokenSuccess = await _fetchAccessToken(meetingId);
+
+    if (tokenSuccess) {
+      debugPrint('✅ ===== HOST SETUP COMPLETE =====');
+      debugPrint('📊 Final state:');
+      debugPrint('   - Is Host: $_isHost');
+      debugPrint('   - Meeting ID: $_currentMeetingId');
+      debugPrint('   - Socket Connected: ${_service.socket?.connected}');
+      debugPrint('   - Pending Requests: ${_pendingRequests.length}');
+      debugPrint('================================');
+    } else {
+      debugPrint('❌ Failed to get access token');
+    }
+
+    _safeNotifyListeners();
+  }
+
+  /// Wait for socket connection with timeout
+  Future<bool> _waitForConnection({int maxAttempts = 20}) async {
+    int attempts = 0;
+
+    while (attempts < maxAttempts) {
+      if (_service.socket?.connected == true) {
+        debugPrint('✅ Socket connected after $attempts attempts');
+        return true;
+      }
+
+      await Future.delayed(const Duration(milliseconds: 500));
+      attempts++;
+      debugPrint('🔄 Connection attempt $attempts/$maxAttempts');
+    }
+
+    debugPrint('❌ Connection timeout after $attempts attempts');
+    return false;
+  }
+
+  /// Rejoin as host (for when entering meeting room screen)
+  Future<void> rejoinAsHost() async {
+    if (_currentMeetingId == null || _currentUserId == null || !_isHost) {
+      debugPrint('⚠️ Cannot rejoin as host: missing data or not host');
+      return;
+    }
+
+    debugPrint('🔄 ===== REJOINING AS HOST =====');
+    debugPrint('🔄 Meeting ID: $_currentMeetingId');
+    debugPrint('🔄 User ID: $_currentUserId');
+
+    // Ensure socket is connected
+    if (_service.socket?.connected != true) {
+      debugPrint('⚠️ Socket not connected, waiting...');
+      bool connected = await _waitForConnection();
+
+      if (!connected) {
+        debugPrint('❌ Cannot rejoin: socket not connected');
+        return;
+      }
+    }
+
+    // Emit join-meeting-host event
+    debugPrint('🔌 Emitting join-meeting-host...');
+    _service.joinAsMeetingHost(
+      meetingId: _currentMeetingId!,
+      userId: _currentUserId!,
+    );
+
+    // Wait for pending requests update
+    await Future.delayed(const Duration(milliseconds: 1000));
+
+    debugPrint('📋 Pending requests after rejoin: ${_pendingRequests.length}');
+    debugPrint('✅ ===== REJOIN COMPLETE =====');
   }
 
   /// Approve a join request (host only)
@@ -228,8 +373,8 @@ class MeetingProvider extends ChangeNotifier {
       return;
     }
 
-    _service.approveParticipant(requestId);
     debugPrint('✅ Approving request: $requestId');
+    _service.approveParticipant(requestId);
   }
 
   /// Reject a join request (host only)
@@ -240,8 +385,8 @@ class MeetingProvider extends ChangeNotifier {
       return;
     }
 
-    _service.rejectParticipant(requestId);
     debugPrint('❌ Rejecting request: $requestId');
+    _service.rejectParticipant(requestId);
   }
 
   /// Kick a participant (host only)
@@ -266,10 +411,6 @@ class MeetingProvider extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
-  // ============================================================================
-  // MEETING OPERATIONS - PARTICIPANT
-  // ============================================================================
-
   /// Request to join a meeting
   Future<void> requestToJoinMeeting(String meetingId) async {
     if (_currentUserId == null || _currentUserName == null) {
@@ -283,6 +424,8 @@ class MeetingProvider extends ChangeNotifier {
     _joinStatus = JoinStatus.requesting;
     _safeNotifyListeners();
 
+    debugPrint('🚪 Requesting to join meeting: $meetingId');
+
     // Send join request via REST API
     final result = await _service.requestToJoin(
       name: _currentUserName!,
@@ -290,6 +433,8 @@ class MeetingProvider extends ChangeNotifier {
       userId: _currentUserId!,
       authToken: _authToken,
     );
+
+    debugPrint('📦 Join request result: $result');
 
     if (result['error'] == true) {
       _errorMessage = result['message'];
@@ -302,10 +447,12 @@ class MeetingProvider extends ChangeNotifier {
     if (result['isHost'] == true || result['approved'] == true) {
       _isHost = result['isHost'] ?? false;
       _joinStatus = JoinStatus.approved;
+      debugPrint('✅ Auto-approved (is host: $_isHost)');
       await _fetchAccessToken(meetingId);
     } else {
       // Request sent, waiting for approval
       _successMessage = result['message'] ?? 'Join request sent to host';
+      debugPrint('⏳ Waiting for host approval');
 
       // Also send via socket for real-time updates
       _service.sendJoinRequest(
@@ -323,6 +470,7 @@ class MeetingProvider extends ChangeNotifier {
       return;
     }
 
+    debugPrint('🚫 Cancelling join request');
     _service.cancelJoinRequest(
       meetingId: _currentMeetingId!,
       userId: _currentUserId!,
@@ -350,6 +498,8 @@ class MeetingProvider extends ChangeNotifier {
       authToken: _authToken,
     );
 
+    debugPrint('📦 Access token result: $result');
+
     if (result['error'] == false && result['token'] != null) {
       _accessToken = result['token'];
       _isHost = result['isHost'] ?? false;
@@ -366,10 +516,6 @@ class MeetingProvider extends ChangeNotifier {
     }
   }
 
-  // ============================================================================
-  // CHAT OPERATIONS
-  // ============================================================================
-
   /// Join the chat room
   void joinChatRoom() {
     if (_currentMeetingId == null ||
@@ -380,6 +526,7 @@ class MeetingProvider extends ChangeNotifier {
       return;
     }
 
+    debugPrint('💬 Joining chat room');
     _service.joinChat(
       meetingId: _currentMeetingId!,
       userId: _currentUserId!,
@@ -418,10 +565,6 @@ class MeetingProvider extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
-  // ============================================================================
-  // UTILITY METHODS
-  // ============================================================================
-
   void _safeNotifyListeners() {
     if (hasListeners) {
       notifyListeners();
@@ -446,13 +589,10 @@ class MeetingProvider extends ChangeNotifier {
   }
 
   void leaveMeeting() {
+    debugPrint('🚪 Leaving meeting');
     _clearMeetingData();
     _safeNotifyListeners();
   }
-
-  // ============================================================================
-  // CLEANUP
-  // ============================================================================
 
   @override
   void dispose() {

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
-
-
 import 'meeting_rooom_screen.dart';
 
 class WaitingApprovalScreen extends StatefulWidget {
@@ -42,15 +40,26 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
 
     final meetingProvider = context.read<MeetingProvider>();
 
+    debugPrint('🔔 Status changed: ${meetingProvider.joinStatus}');
+    debugPrint('🔔 Has token? ${meetingProvider.accessToken != null}');
+
     if (meetingProvider.joinStatus == JoinStatus.approved) {
-      // Navigate to meeting room
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MeetingRoomScreen(meetingId: widget.meetingId),
-        ),
-      );
+      // Check if we have an access token
+      if (meetingProvider.accessToken != null) {
+        debugPrint('✅ Approved with token, navigating to meeting room');
+
+        // Navigate to meeting room
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => MeetingRoomScreen(meetingId: widget.meetingId),
+          ),
+        );
+      } else {
+        debugPrint('⚠️ Approved but no token yet, waiting...');
+      }
     } else if (meetingProvider.joinStatus == JoinStatus.rejected) {
+      debugPrint('❌ Join rejected, going back');
       // Show rejection and go back
       Navigator.pop(context);
 
@@ -168,13 +177,37 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
                 ),
                 const SizedBox(height: 32),
 
-                // Loading indicator
-                const SizedBox(
-                  height: 4,
-                  child: LinearProgressIndicator(
-                    backgroundColor: Colors.grey,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                  ),
+                // Loading indicator with status
+                Consumer<MeetingProvider>(
+                  builder: (context, provider, child) {
+                    final status = provider.joinStatus;
+                    String statusText = 'Waiting for approval...';
+
+                    if (status == JoinStatus.approved) {
+                      statusText = 'Approved! Joining meeting...';
+                    }
+
+                    return Column(
+                      children: [
+                        Text(
+                          statusText,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.grey[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const SizedBox(
+                          height: 4,
+                          child: LinearProgressIndicator(
+                            backgroundColor: Colors.grey,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
                 ),
 
                 const Spacer(),

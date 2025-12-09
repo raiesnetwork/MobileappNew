@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../constants/constants.dart';
 import '../../providers/personal_chat_provider.dart';
 import '../meeting/create_meeting_link_screen.dart';
+import '../meeting/create_meeting_screen.dart';
 import '../meeting/meeting_list_screen.dart';
 import './chat_detail_screen.dart';
 import 'group_chat/getall_groups.dart'; // Import ChatDetailScreen

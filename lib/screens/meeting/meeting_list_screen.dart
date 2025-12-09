@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
-import 'package:ixes.app/screens/meeting/create_meeting_link_screen.dart';
+import 'package:ixes.app/screens/meeting/create_meeting_link_screen.dart'; // This is your CreateMeetScreen
 import 'package:ixes.app/screens/meeting/join_meeting_screen.dart';
 
 import 'create_meeting_screen.dart';
@@ -54,7 +54,7 @@ class MeetingListScreen extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => const CreateMeetingScreen(),
+                                builder: (_) => const CreateMeetScreen(),
                               ),
                             );
                           },

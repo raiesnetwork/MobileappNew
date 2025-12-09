@@ -240,6 +240,8 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+// Add this method to your AuthProvider class
+
   Future<bool> changePassword({
     required String currentPassword,
     required String newPassword,
@@ -247,21 +249,57 @@ class AuthProvider with ChangeNotifier {
     _setLoading(true);
     _setError('');
 
-    final result = await AuthService.changePassword(
-      currentPassword: currentPassword,
-      newPassword: newPassword,
-    );
+    try {
+      final result = await AuthService.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
 
-    if (result['success']) {
-      print('✅ CHANGE PASSWORD SUCCESS - API Response:');
-      print(result);
-      _setLoading(false);
-      return true;
-    } else {
-      _setError(result['message']);
+      if (result['success']) {
+        print('✅ CHANGE PASSWORD SUCCESS - API Response:');
+        print(result);
+        _setLoading(false);
+        return true;
+      } else {
+        _setError(result['message'] ?? 'Failed to change password');
+        _setLoading(false);
+        return false;
+      }
+    } catch (e) {
+      print('❌ CHANGE PASSWORD ERROR: $e');
+      _setError('An error occurred while changing password');
       _setLoading(false);
       return false;
     }
+  }
+
+// Optional: Add a method to validate password strength
+  bool validatePassword(String password) {
+    // At least 8 characters, contains uppercase, lowercase, and number
+    if (password.length < 8) return false;
+
+    final hasUppercase = password.contains(RegExp(r'[A-Z]'));
+    final hasLowercase = password.contains(RegExp(r'[a-z]'));
+    final hasDigits = password.contains(RegExp(r'[0-9]'));
+
+    return hasUppercase && hasLowercase && hasDigits;
+  }
+
+// Optional: Add a method to get password strength message
+  String getPasswordStrengthMessage(String password) {
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters';
+    }
+    if (!password.contains(RegExp(r'[A-Z]'))) {
+      return 'Password must contain at least one uppercase letter';
+    }
+    if (!password.contains(RegExp(r'[a-z]'))) {
+      return 'Password must contain at least one lowercase letter';
+    }
+    if (!password.contains(RegExp(r'[0-9]'))) {
+      return 'Password must contain at least one number';
+    }
+    return 'Password is strong';
   }
   // AUTH PROVIDER METHOD
 Future<bool> sendForgotPasswordOTP({

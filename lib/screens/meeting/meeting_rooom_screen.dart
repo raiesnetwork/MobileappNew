@@ -17,12 +17,10 @@ class MeetingRoomScreen extends StatefulWidget {
 }
 
 class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
-  // LiveKit room and participants
   Room? _room;
   List<ParticipantTrack> _participantTracks = [];
   LocalParticipant? _localParticipant;
 
-  // UI state
   bool _isVideoEnabled = true;
   bool _isAudioEnabled = true;
   bool _isChatOpen = false;
@@ -30,7 +28,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   bool _isConnecting = true;
   String? _errorMessage;
 
-  // Chat
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
 
@@ -40,14 +37,40 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _initializeMeeting();
   }
 
+  // Replace your _initializeMeeting method in MeetingRoomScreen with this:
+
   Future<void> _initializeMeeting() async {
     final meetingProvider = context.read<MeetingProvider>();
 
+    debugPrint('🎬 ===== INITIALIZING MEETING ROOM =====');
+    debugPrint('🎬 Is Host: ${meetingProvider.isHost}');
+    debugPrint('🎬 Meeting ID: ${meetingProvider.currentMeetingId}');
+
+    // Connect to LiveKit room first
+    await _connectToRoom();
+
+    if (_room == null) {
+      debugPrint('❌ Failed to connect to room');
+      return;
+    }
+
+    debugPrint('✅ Connected to LiveKit room');
+
+    // If host, rejoin as host via socket to receive pending requests
+    if (meetingProvider.isHost) {
+      debugPrint('👑 User is host, rejoining as host via socket...');
+      await meetingProvider.rejoinAsHost();
+      debugPrint('📋 Pending requests after rejoin: ${meetingProvider.pendingRequests.length}');
+    }
+
+    // Small delay to ensure socket events are processed
+    await Future.delayed(const Duration(milliseconds: 500));
+
     // Join chat room
+    debugPrint('💬 Joining chat room...');
     meetingProvider.joinChatRoom();
 
-    // Initialize LiveKit room
-    await _connectToRoom();
+    debugPrint('✅ ===== MEETING INITIALIZATION COMPLETE =====');
   }
 
   Future<void> _connectToRoom() async {
@@ -63,14 +86,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (accessToken == null) {
         throw Exception('No access token available');
       }
-
-      // Create room
       _room = Room();
 
-      // Set up room listeners
       _setupRoomListeners();
 
-      // Connect to LiveKit server
       await _room!.connect(
         'wss://meet.ixes.ai',
         accessToken,
@@ -83,7 +102,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         ),
       );
 
-      // Enable local video and audio
+
       await _room!.localParticipant?.setCameraEnabled(_isVideoEnabled);
       await _room!.localParticipant?.setMicrophoneEnabled(_isAudioEnabled);
 
@@ -92,9 +111,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         _isConnecting = false;
       });
 
-      debugPrint('✅ Connected to LiveKit room');
+      if (meetingProvider.isHost && meetingProvider.currentMeetingId != null) {
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+
     } catch (e) {
-      debugPrint('❌ Error connecting to room: $e');
       setState(() {
         _errorMessage = 'Failed to connect to meeting: $e';
         _isConnecting = false;
@@ -147,9 +168,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     final tracks = <ParticipantTrack>[];
 
-    // Add local participant
+    // Add local participant VIDEO tracks only
     for (var trackPub in _room!.localParticipant!.trackPublications.values) {
-      if (trackPub.track != null) {
+      if (trackPub.track != null && trackPub.kind == TrackType.VIDEO) {  // ← ADD THIS CHECK
         tracks.add(ParticipantTrack(
           participant: _room!.localParticipant!,
           videoTrack: trackPub.track as VideoTrack?,
@@ -158,7 +179,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       }
     }
 
-    // Add remote participants
+    // Add remote participants VIDEO tracks only
     for (var participant in _room!.remoteParticipants.values) {
       for (var trackPub in participant.trackPublications.values) {
         if (trackPub.track != null && trackPub.kind == TrackType.VIDEO) {
@@ -188,8 +209,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         body: SafeArea(
           child: _isConnecting
               ? _buildLoadingState()
-              : _errorMessage != null
-              ? _buildErrorState()
+
+              // : _errorMessage != null
+              // ? _buildErrorState()
               : _buildMeetingUI(),
         ),
       ),
@@ -833,6 +855,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
+
   Widget _buildParticipantsPanel() {
     return Container(
       width: 320,
@@ -877,12 +900,25 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           Expanded(
             child: Consumer<MeetingProvider>(
               builder: (context, provider, child) {
+                // DEBUG PRINTS - Keep these to verify data
+                print('🔍 DEBUG: Is Host? ${provider.isHost}');
+                print('🔍 DEBUG: Pending requests count: ${provider.pendingRequests.length}');
+                print('🔍 DEBUG: Pending requests: ${provider.pendingRequests}');
+                print('🔍 DEBUG: Is Connected? ${provider.isConnected}');
+
+                // Calculate if we should show pending requests
+                final shouldShowPending = provider.isHost && provider.pendingRequests.isNotEmpty;
+
+                print('🔍 DEBUG: Should show pending? $shouldShowPending');
+
                 return SingleChildScrollView(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Pending requests (host only)
-                      if (provider.isHost &&
-                          provider.pendingRequests.isNotEmpty) ...[
+
+
+                      // Pending requests section - SIMPLIFIED LOGIC
+                      if (shouldShowPending)
                         Container(
                           padding: const EdgeInsets.all(16),
                           color: Colors.orange[50],
@@ -907,25 +943,81 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                                 ],
                               ),
                               const SizedBox(height: 12),
-                              ...provider.pendingRequests.map(
-                                    (request) => _buildPendingRequest(request),
+                              // Build each request
+                              ...provider.pendingRequests.map((request) {
+                                print('🔍 Building request widget for: ${request['name']}');
+                                return _buildPendingRequest(request);
+                              }),
+                            ],
+                          ),
+                        )
+                      else if (provider.isHost)
+                      // Show message if host but no requests
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              Icon(Icons.check_circle, color: Colors.green[300], size: 48),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No pending join requests',
+                                style: TextStyle(
+                                  color: Colors.grey[600],
+                                  fontSize: 14,
+                                ),
                               ),
                             ],
                           ),
+                        )
+                      else
+                      // Not a host
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'Participant view',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                          ),
                         ),
-                        const Divider(height: 1),
-                      ],
+
+                      const Divider(height: 1),
 
                       // Current participants
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _participantTracks.length,
-                        itemBuilder: (context, index) {
-                          final track = _participantTracks[index];
-                          return _buildParticipantListItem(track);
-                        },
-                      ),
+                      if (_participantTracks.isNotEmpty) ...[
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          color: Colors.grey[50],
+                          child: Text(
+                            'In Meeting (${_participantTracks.length})',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _participantTracks.length,
+                          itemBuilder: (context, index) {
+                            final track = _participantTracks[index];
+                            return _buildParticipantListItem(track);
+                          },
+                        ),
+                      ] else
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text(
+                            'No participants in meeting yet',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                     ],
                   ),
                 );
@@ -1139,7 +1231,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 }
 
-// Helper class for participant tracks
 class ParticipantTrack {
   final Participant participant;
   final VideoTrack? videoTrack;

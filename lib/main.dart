@@ -11,6 +11,7 @@ import 'package:ixes.app/providers/group_provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
 import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:ixes.app/providers/personal_chat_provider.dart';
+import 'package:ixes.app/providers/profile_provider.dart';
 import 'package:ixes.app/providers/service_provider.dart';
 import 'package:ixes.app/providers/service_request_provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
@@ -82,6 +83,7 @@ class _IxesAppState extends State<IxesApp> {
             ChangeNotifierProvider(create: (_) => MeetProvider()),
             ChangeNotifierProvider(create: (_) => MeetingProvider()),
             ChangeNotifierProvider(create: (_) => VoiceCallProvider()),
+            ChangeNotifierProvider(create: (_) => ProfileProvider()),
           ],
           child: Builder(
             builder: (context) {
@@ -95,16 +97,21 @@ class _IxesAppState extends State<IxesApp> {
                 return _buildMaterialApp(home: const SplashScreen());
               }
 
-              // Step 2: If user is authenticated → initialize call services with REAL username
+              // Step 2: If user is authenticated → initialize ALL services
               if (authProvider.isAuthenticated && authProvider.user != null) {
                 final user = authProvider.user!;
 
-                WidgetsBinding.instance.addPostFrameCallback((_) {
+                WidgetsBinding.instance.addPostFrameCallback((_) async {
                   final String displayName = user.username.isNotEmpty
                       ? user.username
                       : "User_${user.mobile.substring(user.mobile.length - 4)}";
 
-                  debugPrint('Initializing call services for: $displayName (${user.id})');
+                  debugPrint('🚀 Initializing all services for: $displayName (${user.id})');
+
+                  // ✅ CRITICAL: Initialize Personal Chat Provider (includes socket)
+                  final personalChatProvider = context.read<PersonalChatProvider>();
+                  await personalChatProvider.initialize();
+                  debugPrint('✅ Personal Chat Provider initialized');
 
                   // Initialize Video Call
                   context.read<VideoCallProvider>().initialize(
@@ -112,6 +119,7 @@ class _IxesAppState extends State<IxesApp> {
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
+                  debugPrint('✅ Video Call Provider initialized');
 
                   // Initialize Voice Call
                   context.read<VoiceCallProvider>().initialize(
@@ -119,6 +127,7 @@ class _IxesAppState extends State<IxesApp> {
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
+                  debugPrint('✅ Voice Call Provider initialized');
 
                   // Initialize Meeting (if used)
                   context.read<MeetingProvider>().initialize(
@@ -126,6 +135,7 @@ class _IxesAppState extends State<IxesApp> {
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
+                  debugPrint('✅ Meeting Provider initialized');
                 });
               }
 

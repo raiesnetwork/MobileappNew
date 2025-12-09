@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../services/generate_link_service.dart';
 
-
 class MeetProvider with ChangeNotifier {
   final MeetService _meetService = MeetService();
 
@@ -42,15 +41,21 @@ class MeetProvider with ChangeNotifier {
 
       _isLoading = false;
 
-      if (result['error'] == false) {
-        _successMessage = result['message'];
+      print('🔍 DEBUG Provider - Result: $result');
+
+      // FIXED: Check for either error field OR message field
+      // API returns {"message": "success"} without error field
+      if (result['error'] == false || result['message'] == 'success') {
+        _successMessage = result['message'] ?? 'Meeting link created successfully';
         _meetLinkData = result['data'];
         _errorMessage = null;
+        print('✅ DEBUG Provider - Returning TRUE');
         notifyListeners();
         return true;
       } else {
-        _errorMessage = result['message'];
+        _errorMessage = result['message'] ?? 'Failed to create meeting link';
         _successMessage = null;
+        print('❌ DEBUG Provider - Returning FALSE');
         notifyListeners();
         return false;
       }
@@ -58,6 +63,7 @@ class MeetProvider with ChangeNotifier {
       _isLoading = false;
       _errorMessage = 'An unexpected error occurred: ${e.toString()}';
       _successMessage = null;
+      print('💥 DEBUG Provider - Exception: $e');
       notifyListeners();
       return false;
     }
@@ -93,13 +99,14 @@ class MeetProvider with ChangeNotifier {
 
       _isLoading = false;
 
-      if (result['error'] == false) {
-        _successMessage = result['message'];
+      // FIXED: Check for either error field OR message field
+      if (result['error'] == false || result['message'] == 'success') {
+        _successMessage = result['message'] ?? 'Meeting link shared successfully';
         _errorMessage = null;
         notifyListeners();
         return true;
       } else {
-        _errorMessage = result['message'];
+        _errorMessage = result['message'] ?? 'Failed to share meeting link';
         _successMessage = null;
         notifyListeners();
         return false;
@@ -129,15 +136,16 @@ class MeetProvider with ChangeNotifier {
 
       _isLoading = false;
 
-      if (result['error'] == false) {
-        _successMessage = result['message'];
+      // FIXED: Check for either error field OR message field
+      if (result['error'] == false || result['message'] == 'success') {
+        _successMessage = result['message'] ?? 'Link validated successfully';
         _isLinkValid = result['isValid'] ?? false;
         _meetLinkData = result['data'];
         _errorMessage = null;
         notifyListeners();
         return true;
       } else {
-        _errorMessage = result['message'];
+        _errorMessage = result['message'] ?? 'Failed to validate link';
         _isLinkValid = false;
         _successMessage = null;
         notifyListeners();

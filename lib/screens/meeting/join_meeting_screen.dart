@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/meeting/waiting_approval_screeen.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
-
-
 import 'meeting_rooom_screen.dart';
 
 class JoinMeetingScreen extends StatefulWidget {
@@ -151,7 +149,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                       ),
                     )
                         : const Text(
-                      'Join Meeting',
+                      'Join Meeting45444',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -191,6 +189,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     );
   }
 
+
   Future<void> _joinMeeting(BuildContext context) async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -208,6 +207,8 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
 
     // Request to join
     await meetingProvider.requestToJoinMeeting(meetingId);
+
+
 
     setState(() {
       _isJoining = false;
