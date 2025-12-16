@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:provider/provider.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
+import 'dart:async';
 
 class MeetingRoomScreen extends StatefulWidget {
   final String meetingId;
@@ -30,14 +32,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _chatScrollController = ScrollController();
+  final Set<String> _displayedMessageIds = {}; // Track displayed messages
 
   @override
   void initState() {
     super.initState();
     _initializeMeeting();
   }
-
-  // Replace your _initializeMeeting method in MeetingRoomScreen with this:
 
   Future<void> _initializeMeeting() async {
     final meetingProvider = context.read<MeetingProvider>();
@@ -46,7 +47,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     debugPrint('🎬 Is Host: ${meetingProvider.isHost}');
     debugPrint('🎬 Meeting ID: ${meetingProvider.currentMeetingId}');
 
-    // Connect to LiveKit room first
     await _connectToRoom();
 
     if (_room == null) {
@@ -56,17 +56,14 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     debugPrint('✅ Connected to LiveKit room');
 
-    // If host, rejoin as host via socket to receive pending requests
     if (meetingProvider.isHost) {
       debugPrint('👑 User is host, rejoining as host via socket...');
       await meetingProvider.rejoinAsHost();
       debugPrint('📋 Pending requests after rejoin: ${meetingProvider.pendingRequests.length}');
     }
 
-    // Small delay to ensure socket events are processed
     await Future.delayed(const Duration(milliseconds: 500));
 
-    // Join chat room
     debugPrint('💬 Joining chat room...');
     meetingProvider.joinChatRoom();
 
@@ -102,7 +99,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         ),
       );
 
-
       await _room!.localParticipant?.setCameraEnabled(_isVideoEnabled);
       await _room!.localParticipant?.setMicrophoneEnabled(_isAudioEnabled);
 
@@ -114,7 +110,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       if (meetingProvider.isHost && meetingProvider.currentMeetingId != null) {
         await Future.delayed(const Duration(milliseconds: 300));
       }
-
     } catch (e) {
       setState(() {
         _errorMessage = 'Failed to connect to meeting: $e';
@@ -127,11 +122,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     _room?.addListener(_onRoomUpdate);
 
     _room?.createListener()
-      ?..on<RoomDisconnectedEvent>((event) {
-        debugPrint('🔌 Disconnected from room');
-        if (mounted) {
-          Navigator.pop(context);
-        }
+      ?..on<RoomDisconnectedEvent>((event) async {
+        debugPrint('Disconnected from room');
+
+        if (!mounted) return;
+
+        // Schedule navigation safely
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            // Use maybePop in case the route was already removed
+            Navigator.of(context).maybePop();
+          }
+        });
       })
       ..on<ParticipantConnectedEvent>((event) {
         debugPrint('👤 Participant connected: ${event.participant.identity}');
@@ -170,7 +172,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     // Add local participant VIDEO tracks only
     for (var trackPub in _room!.localParticipant!.trackPublications.values) {
-      if (trackPub.track != null && trackPub.kind == TrackType.VIDEO) {  // ← ADD THIS CHECK
+      if (trackPub.track != null && trackPub.kind == TrackType.VIDEO) {
         tracks.add(ParticipantTrack(
           participant: _room!.localParticipant!,
           videoTrack: trackPub.track as VideoTrack?,
@@ -205,13 +207,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         return false;
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
+        backgroundColor: const Color(0xFF1A1A1A),
         body: SafeArea(
           child: _isConnecting
               ? _buildLoadingState()
-
-              // : _errorMessage != null
-              // ? _buildErrorState()
               : _buildMeetingUI(),
         ),
       ),
@@ -223,7 +222,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const CircularProgressIndicator(color: Colors.white),
+          const CircularProgressIndicator(color: Colors.blue),
           const SizedBox(height: 24),
           Text(
             'Connecting to meeting...',
@@ -237,75 +236,41 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red,
-            ),
-            const SizedBox(height: 24),
-            Text(
-              _errorMessage ?? 'An error occurred',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-              ),
-              child: const Text('Leave Meeting'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildMeetingUI() {
     return Stack(
       children: [
-        // Video grid
         Column(
           children: [
-            // Header
             _buildHeader(),
-            // Participants grid
             Expanded(
               child: _buildParticipantsGrid(),
             ),
-            // Controls
             _buildControls(),
           ],
         ),
 
         // Chat panel
-        if (_isChatOpen)
+        // Replace both Positioned side panels with this single smart overlay
+        if (_isChatOpen || _isParticipantsOpen)
           Positioned(
-            right: 0,
             top: 0,
-            bottom: 80,
-            child: _buildChatPanel(),
-          ),
-
-        // Participants panel
-        if (_isParticipantsOpen)
-          Positioned(
+            bottom: 0,
             right: 0,
-            top: 0,
-            bottom: 80,
-            child: _buildParticipantsPanel(),
+            child: Material(
+              elevation: 12,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  // Max 90% of screen width, but never more than 400px
+                  maxWidth: MediaQuery.of(context).size.width * 0.9,
+                  minWidth: 300, // Minimum readable width
+                ).normalize(), // Ensures min ≤ max
+                child: Container(
+                  width: 380, // Ideal width
+                  color: Colors.white,
+                  child: _isChatOpen ? _buildChatPanel() : _buildParticipantsPanel(),
+                ),
+              ),
+            ),
           ),
       ],
     );
@@ -315,23 +280,32 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final meetingProvider = context.watch<MeetingProvider>();
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: Colors.black.withOpacity(0.7),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A2A2A),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: Row(
         children: [
-          // Meeting ID
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Meeting ID',
                   style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 10,
+                    color: Colors.white.withOpacity(0.6),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Row(
                   children: [
                     Flexible(
@@ -339,70 +313,88 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         widget.meetingId,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 12,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                           fontFamily: 'monospace',
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.copy, size: 16),
-                      color: Colors.white70,
-                      padding: const EdgeInsets.all(4),
-                      constraints: const BoxConstraints(),
-                      onPressed: () {
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () {
                         Clipboard.setData(ClipboardData(text: widget.meetingId));
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Meeting ID copied'),
-                            duration: Duration(seconds: 1),
+                          SnackBar(
+                            content: const Text('Meeting ID copied'),
+                            duration: const Duration(seconds: 2),
+                            backgroundColor: Colors.green,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                           ),
                         );
                       },
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Icon(
+                          Icons.copy,
+                          size: 16,
+                          color: Colors.white70,
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-
-          // Host badge
+          const SizedBox(width: 16),
           if (meetingProvider.isHost)
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.blue,
-                borderRadius: BorderRadius.circular(4),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF2196F3), Color(0xFF1976D2)],
+                ),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: const Text(
                 'HOST',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 10,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
+                  letterSpacing: 0.5,
                 ),
               ),
             ),
-
-          const SizedBox(width: 8),
-
-          // Participant count
+          const SizedBox(width: 12),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(4),
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.people, color: Colors.white, size: 14),
-                const SizedBox(width: 4),
+                const Icon(Icons.people, color: Colors.white, size: 16),
+                const SizedBox(width: 6),
                 Text(
                   '${_participantTracks.length}',
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ],
@@ -416,33 +408,45 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _buildParticipantsGrid() {
     if (_participantTracks.isEmpty) {
       return Center(
-        child: Text(
-          'No participants yet',
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.6),
-            fontSize: 16,
-          ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.people_outline,
+              size: 64,
+              color: Colors.white.withOpacity(0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Waiting for participants...',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 16,
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    // Calculate grid layout
     final count = _participantTracks.length;
     final columns = count == 1 ? 1 : count == 2 ? 2 : count <= 4 ? 2 : 3;
-    final rows = (count / columns).ceil();
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(8),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: columns,
-        childAspectRatio: 16 / 9,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+    return Container(
+      color: const Color(0xFF1A1A1A),
+      padding: const EdgeInsets.all(12),
+      child: GridView.builder(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
+          childAspectRatio: 16 / 9,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: _participantTracks.length,
+        itemBuilder: (context, index) {
+          return _buildParticipantTile(_participantTracks[index]);
+        },
       ),
-      itemCount: _participantTracks.length,
-      itemBuilder: (context, index) {
-        return _buildParticipantTile(_participantTracks[index]);
-      },
     );
   }
 
@@ -453,36 +457,44 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey[900],
+        color: const Color(0xFF2A2A2A),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isLocal ? Colors.blue : Colors.transparent,
+          color: isLocal ? const Color(0xFF2196F3) : Colors.transparent,
           width: 2,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // Video or placeholder
             if (videoTrack != null && !videoTrack.muted)
-              VideoTrackRenderer(videoTrack)
+              VideoTrackRenderer(
+                videoTrack,
+                fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              )
             else
               _buildVideoPlaceholder(participant),
 
-            // Participant info overlay
             Positioned(
-              left: 8,
-              bottom: 8,
+              left: 12,
+              bottom: 12,
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 4,
+                  horizontal: 10,
+                  vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(4),
+                  color: Colors.black.withOpacity(0.7),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -494,15 +506,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       color: participant.isMicrophoneEnabled()
                           ? Colors.white
                           : Colors.red,
-                      size: 14,
+                      size: 16,
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 6),
                     Text(
                       isLocal ? 'You' : participant.identity,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
@@ -522,16 +534,25 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         .toUpperCase();
 
     return Container(
-      color: Colors.grey[800],
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF2A2A2A),
+            const Color(0xFF1A1A1A),
+          ],
+        ),
+      ),
       child: Center(
         child: CircleAvatar(
-          radius: 40,
-          backgroundColor: Colors.blue,
+          radius: 48,
+          backgroundColor: const Color(0xFF2196F3),
           child: Text(
             initial,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 32,
+              fontSize: 36,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -542,39 +563,34 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Widget _buildControls() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
+        color: const Color(0xFF2A2A2A),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.3),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
+            blurRadius: 12,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Toggle video
           _buildControlButton(
             icon: _isVideoEnabled ? Icons.videocam : Icons.videocam_off,
             label: 'Camera',
             isActive: _isVideoEnabled,
             onPressed: _toggleVideo,
           ),
-
-          // Toggle audio
           _buildControlButton(
             icon: _isAudioEnabled ? Icons.mic : Icons.mic_off,
             label: 'Mic',
             isActive: _isAudioEnabled,
             onPressed: _toggleAudio,
           ),
-
-          // Chat
           _buildControlButton(
-            icon: Icons.chat,
+            icon: Icons.chat_bubble,
             label: 'Chat',
             isActive: _isChatOpen,
             onPressed: () {
@@ -585,8 +601,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             },
             badge: context.watch<MeetingProvider>().chatMessages.length,
           ),
-
-          // Participants
           _buildControlButton(
             icon: Icons.people,
             label: 'People',
@@ -601,14 +615,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 ? context.watch<MeetingProvider>().pendingRequests.length
                 : null,
           ),
-
-          // Leave
           _buildControlButton(
             icon: Icons.call_end,
             label: 'Leave',
             isActive: false,
             onPressed: _showLeaveDialog,
-            backgroundColor: Colors.red,
+            backgroundColor: const Color(0xFFE53935),
           ),
         ],
       ),
@@ -623,99 +635,135 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     Color? backgroundColor,
     int? badge,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: backgroundColor ??
-                    (isActive
-                        ? Colors.blue
-                        : Colors.white.withOpacity(0.2)),
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: Icon(icon),
-                color: Colors.white,
-                onPressed: onPressed,
-                iconSize: 24,
-              ),
-            ),
-            if (badge != null && badge > 0)
-              Positioned(
-                right: -4,
-                top: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                  constraints: const BoxConstraints(
-                    minWidth: 20,
-                    minHeight: 20,
-                  ),
-                  child: Center(
-                    child: Text(
-                      badge > 99 ? '99+' : badge.toString(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
+    return Flexible(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onPressed,
+                  borderRadius: BorderRadius.circular(28),
+                  child: Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: backgroundColor ??
+                          (isActive
+                              ? const Color(0xFF2196F3)
+                              : Colors.white.withOpacity(0.1)),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withOpacity(0.1),
+                        width: 1,
                       ),
+                    ),
+                    child: Icon(
+                      icon,
+                      color: Colors.white,
+                      size: 22,
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
+              if (badge != null && badge > 0)
+                Positioned(
+                  right: -2,
+                  top: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE53935),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF2A2A2A),
+                        width: 2,
+                      ),
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 20,
+                      minHeight: 20,
+                    ),
+                    child: Center(
+                      child: Text(
+                        badge > 99 ? '99+' : badge.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ),
-      ],
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.8),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildChatPanel() {
     return Container(
-      width: 320,
-      color: Colors.white,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(-4, 0),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          // Chat header
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Colors.white,
               border: Border(
-                bottom: BorderSide(color: Colors.grey[300]!),
+                bottom: BorderSide(color: Colors.grey[200]!),
               ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.chat),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.chat_bubble,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
                     'Chat',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A1A),
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.close, color: Color(0xFF666666)),
                   onPressed: () {
                     setState(() {
                       _isChatOpen = false;
@@ -725,8 +773,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               ],
             ),
           ),
-
-          // Messages
           Expanded(
             child: Consumer<MeetingProvider>(
               builder: (context, provider, child) {
@@ -734,22 +780,54 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
                 if (messages.isEmpty) {
                   return Center(
-                    child: Text(
-                      'No messages yet',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.chat_bubble_outline,
+                          size: 64,
+                          color: Colors.grey[300],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No messages yet',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Start the conversation!',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 }
 
+                // Filter out duplicate messages based on unique ID
+                final uniqueMessages = <Map<String, dynamic>>[];
+                final seenIds = <String>{};
+
+                for (var message in messages) {
+                  // Create unique ID from message content, userId, and timestamp
+                  final messageId = '${message['userId']}_${message['message']}_${message['timestamp']}';
+                  if (!seenIds.contains(messageId)) {
+                    seenIds.add(messageId);
+                    uniqueMessages.add(message);
+                  }
+                }
+
                 return ListView.builder(
                   controller: _chatScrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: messages.length,
+                  padding: const EdgeInsets.all(20),
+                  itemCount: uniqueMessages.length,
                   itemBuilder: (context, index) {
-                    final message = messages[index];
+                    final message = uniqueMessages[index];
                     final isMe = message['userId'] == provider.currentUserId;
 
                     return _buildChatMessage(
@@ -763,14 +841,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               },
             ),
           ),
-
-          // Input
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Colors.grey[50],
               border: Border(
-                top: BorderSide(color: Colors.grey[300]!),
+                top: BorderSide(color: Colors.grey[200]!),
               ),
             ),
             child: Row(
@@ -780,6 +856,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     controller: _chatController,
                     decoration: InputDecoration(
                       hintText: 'Type a message...',
+                      hintStyle: TextStyle(color: Colors.grey[400]),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                         borderSide: BorderSide.none,
@@ -787,18 +864,20 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       filled: true,
                       fillColor: Colors.white,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
+                        horizontal: 20,
+                        vertical: 12,
                       ),
                     ),
                     onSubmitted: (_) => _sendMessage(),
                     textInputAction: TextInputAction.send,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.blue,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF2196F3), Color(0xFF1976D2)],
+                    ),
                     shape: BoxShape.circle,
                   ),
                   child: IconButton(
@@ -822,7 +901,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     required bool isMe,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 16),
       child: Column(
         crossAxisAlignment:
         isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
@@ -832,20 +911,25 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: isMe ? Colors.blue : Colors.grey[200],
-              borderRadius: BorderRadius.circular(12),
+              gradient: isMe
+                  ? const LinearGradient(
+                colors: [Color(0xFF2196F3), Color(0xFF1976D2)],
+              )
+                  : null,
+              color: isMe ? null : Colors.grey[100],
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Text(
               message,
               style: TextStyle(
-                color: isMe ? Colors.white : Colors.black,
+                color: isMe ? Colors.white : const Color(0xFF1A1A1A),
                 fontSize: 14,
               ),
             ),
@@ -855,37 +939,55 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     );
   }
 
-
   Widget _buildParticipantsPanel() {
     return Container(
-      width: 320,
-      color: Colors.white,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(-4, 0),
+          ),
+        ],
+      ),
       child: Column(
         children: [
-          // Header
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Colors.white,
               border: Border(
-                bottom: BorderSide(color: Colors.grey[300]!),
+                bottom: BorderSide(color: Colors.grey[200]!),
               ),
             ),
             child: Row(
               children: [
-                const Icon(Icons.people),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.people,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
                     'Participants',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A1A),
                     ),
                   ),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close),
+                  icon: const Icon(Icons.close, color: Color(0xFF666666)),
                   onPressed: () {
                     setState(() {
                       _isParticipantsOpen = false;
@@ -895,105 +997,66 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               ],
             ),
           ),
-
-          // Participants list
           Expanded(
             child: Consumer<MeetingProvider>(
               builder: (context, provider, child) {
-                // DEBUG PRINTS - Keep these to verify data
-                print('🔍 DEBUG: Is Host? ${provider.isHost}');
-                print('🔍 DEBUG: Pending requests count: ${provider.pendingRequests.length}');
-                print('🔍 DEBUG: Pending requests: ${provider.pendingRequests}');
-                print('🔍 DEBUG: Is Connected? ${provider.isConnected}');
-
-                // Calculate if we should show pending requests
-                final shouldShowPending = provider.isHost && provider.pendingRequests.isNotEmpty;
-
-                print('🔍 DEBUG: Should show pending? $shouldShowPending');
+                final shouldShowPending =
+                    provider.isHost && provider.pendingRequests.isNotEmpty;
 
                 return SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-
-
-                      // Pending requests section - SIMPLIFIED LOGIC
                       if (shouldShowPending)
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(20),
                           color: Colors.orange[50],
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
-                                  const Icon(
-                                    Icons.hourglass_empty,
-                                    color: Colors.orange,
-                                    size: 20,
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.orange,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Icon(
+                                      Icons.hourglass_empty,
+                                      color: Colors.white,
+                                      size: 16,
+                                    ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: 10),
                                   Text(
                                     'Pending Requests (${provider.pendingRequests.length})',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 14,
+                                      fontSize: 15,
+                                      color: Color(0xFF1A1A1A),
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 12),
-                              // Build each request
+                              const SizedBox(height: 16),
                               ...provider.pendingRequests.map((request) {
-                                print('🔍 Building request widget for: ${request['name']}');
                                 return _buildPendingRequest(request);
                               }),
                             ],
                           ),
-                        )
-                      else if (provider.isHost)
-                      // Show message if host but no requests
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.green[300], size: 48),
-                              const SizedBox(height: 8),
-                              Text(
-                                'No pending join requests',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      else
-                      // Not a host
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'Participant view',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
                         ),
-
                       const Divider(height: 1),
-
-                      // Current participants
                       if (_participantTracks.isNotEmpty) ...[
                         Container(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(20),
                           color: Colors.grey[50],
                           child: Text(
                             'In Meeting (${_participantTracks.length})',
                             style: const TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 14,
+                              fontSize: 15,
+                              color: Color(0xFF1A1A1A),
                             ),
                           ),
                         ),
@@ -1008,14 +1071,24 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                         ),
                       ] else
                         Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'No participants in meeting yet',
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                            textAlign: TextAlign.center,
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.people_outline,
+                                size: 48,
+                                color: Colors.grey[300],
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No participants yet',
+                                style: TextStyle(
+                                  color: Colors.grey[500],
+                                  fontSize: 14,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -1034,20 +1107,31 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final requestId = '${request['meetingId']}-${request['userId']}';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.orange[200]!),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.orange[200]!, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.orange.withOpacity(0.1),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
           CircleAvatar(
             backgroundColor: Colors.orange,
+            radius: 20,
             child: Text(
               name.substring(0, 1).toUpperCase(),
-              style: const TextStyle(color: Colors.white),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -1055,24 +1139,42 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             child: Text(
               name,
               style: const TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+                color: Color(0xFF1A1A1A),
               ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.check, color: Colors.green),
-            onPressed: () {
-              context.read<MeetingProvider>().approveJoinRequest(requestId);
-            },
-            tooltip: 'Approve',
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.check, color: Colors.white, size: 20),
+              onPressed: () {
+                context.read<MeetingProvider>().approveJoinRequest(requestId);
+              },
+              tooltip: 'Approve',
+              padding: const EdgeInsets.all(8),
+              constraints: const BoxConstraints(),
+            ),
           ),
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.red),
-            onPressed: () {
-              context.read<MeetingProvider>().rejectJoinRequest(requestId);
-            },
-            tooltip: 'Reject',
+          const SizedBox(width: 8),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.red,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: Colors.white, size: 20),
+              onPressed: () {
+                context.read<MeetingProvider>().rejectJoinRequest(requestId);
+              },
+              tooltip: 'Reject',
+              padding: const EdgeInsets.all(8),
+              constraints: const BoxConstraints(),
+            ),
           ),
         ],
       ),
@@ -1083,58 +1185,133 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final participant = track.participant;
     final isLocal = participant is LocalParticipant;
     final name = isLocal ? 'You' : participant.identity;
+    final provider = context.watch<MeetingProvider>();
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: Colors.blue,
-        child: Text(
-          name.substring(0, 1).toUpperCase(),
-          style: const TextStyle(color: Colors.white),
-        ),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey[200]!),
       ),
-      title: Row(
+      child: Row(
         children: [
-          Expanded(
+          CircleAvatar(
+            backgroundColor: const Color(0xFF2196F3),
+            radius: 20,
             child: Text(
-              name,
-              style: const TextStyle(fontWeight: FontWeight.w500),
+              name.substring(0, 1).toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          if (context.watch<MeetingProvider>().isHost && isLocal)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.blue,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: const Text(
-                'HOST',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: Color(0xFF1A1A1A),
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (provider.isHost && isLocal)
+                      Container(
+                        margin: const EdgeInsets.only(left: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF2196F3), Color(0xFF1976D2)],
+                          ),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'HOST',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: participant.isMicrophoneEnabled()
+                      ? Colors.grey[100]
+                      : Colors.red[50],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  participant.isMicrophoneEnabled()
+                      ? Icons.mic
+                      : Icons.mic_off,
+                  size: 16,
+                  color: participant.isMicrophoneEnabled()
+                      ? Colors.grey[700]
+                      : Colors.red,
                 ),
               ),
-            ),
-        ],
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            participant.isMicrophoneEnabled() ? Icons.mic : Icons.mic_off,
-            size: 18,
-            color: participant.isMicrophoneEnabled()
-                ? Colors.grey[600]
-                : Colors.red,
-          ),
-          const SizedBox(width: 8),
-          Icon(
-            participant.isCameraEnabled() ? Icons.videocam : Icons.videocam_off,
-            size: 18,
-            color: participant.isCameraEnabled()
-                ? Colors.grey[600]
-                : Colors.red,
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: participant.isCameraEnabled()
+                      ? Colors.grey[100]
+                      : Colors.red[50],
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  participant.isCameraEnabled()
+                      ? Icons.videocam
+                      : Icons.videocam_off,
+                  size: 16,
+                  color: participant.isCameraEnabled()
+                      ? Colors.grey[700]
+                      : Colors.red,
+                ),
+              ),
+              // Add kick button for host (only for remote participants)
+              if (provider.isHost && !isLocal) ...[
+                const SizedBox(width: 8),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.red[50],
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.person_remove, size: 16),
+                    color: Colors.red,
+                    padding: const EdgeInsets.all(6),
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _kickParticipant(participant.identity),
+                    tooltip: 'Remove participant',
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),
@@ -1148,7 +1325,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     context.read<MeetingProvider>().sendChatMessage(message);
     _chatController.clear();
 
-    // Scroll to bottom
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_chatScrollController.hasClients) {
         _chatScrollController.animateTo(
@@ -1184,7 +1360,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Text('Leave Meeting?'),
+          title: const Text(
+            'Leave Meeting?',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           content: const Text(
             'Are you sure you want to leave this meeting?',
           ),
@@ -1193,12 +1372,18 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
-            TextButton(
+            ElevatedButton(
               onPressed: () {
-                Navigator.pop(context); // Close dialog
+                Navigator.pop(context);
                 _leaveMeeting();
               },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
               child: const Text('Leave'),
             ),
           ],
@@ -1208,25 +1393,139 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   }
 
   Future<void> _leaveMeeting() async {
-    // Disconnect from LiveKit
-    await _room?.disconnect();
+    try {
+      // Show loading indicator
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => WillPopScope(
+            onWillPop: () async => false,
+            child: const Center(
+              child: Card(
+                child: Padding(
+                  padding: EdgeInsets.all(20.0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Leaving meeting...'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
 
-    // Clear meeting data
-    if (mounted) {
-      context.read<MeetingProvider>().leaveMeeting();
+      // Disconnect room in background
+      final room = _room;
+      if (room != null) {
+        // Remove listener first to prevent callbacks
+        room.removeListener(_onRoomUpdate);
 
-      // Navigate back
-      Navigator.of(context).popUntil((route) => route.isFirst);
+        // Disconnect asynchronously
+        unawaited(room.disconnect());
+        unawaited(room.dispose());
+      }
+
+      // Clear meeting data on main thread
+      if (mounted) {
+        final provider = context.read<MeetingProvider>();
+
+        // Leave meeting via provider (socket disconnect, etc.)
+        provider.leaveMeeting();
+
+        // Small delay to ensure cleanup
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // Navigate back
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error leaving meeting: $e');
+      // Force navigation even if error
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+  Future<void> _kickParticipant(String participantIdentity) async {
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            'Remove Participant?',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'Are you sure you want to remove $participantIdentity from the meeting?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Remove'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await context.read<MeetingProvider>().kickParticipant(participantIdentity);
+
+      // Show success/error message
+      final provider = context.read<MeetingProvider>();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              provider.errorMessage ?? provider.successMessage ?? 'Participant removed',
+            ),
+            backgroundColor: provider.errorMessage != null ? Colors.red : Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
     }
   }
 
   @override
   void dispose() {
+    // Clean up controllers
     _chatController.dispose();
     _chatScrollController.dispose();
-    _room?.removeListener(_onRoomUpdate);
-    _room?.disconnect();
-    _room?.dispose();
+
+    // Clean up room - do this asynchronously to avoid blocking
+    if (_room != null) {
+      _room!.removeListener(_onRoomUpdate);
+      unawaited(_room!.disconnect());
+      unawaited(_room!.dispose());
+    }
+
     super.dispose();
   }
 }

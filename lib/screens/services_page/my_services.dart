@@ -239,34 +239,45 @@ class _MyServicesScreenState extends State<MyServicesScreen> {
   }
 
   Widget _buildServiceImage(String? image) {
-    // Helper function to check if a string is a valid Base64
-    bool isBase64(String str) {
-      try {
-        final base64Str = str.contains(',') ? str.split(',').last : str;
-        base64Decode(base64Str);
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-
-    if (image != null && image.isNotEmpty && isBase64(image)) {
-      try {
-        final base64Str = image.contains(',')
-            ? image.split(',').last
-            : image;
-        final imageData = base64Decode(base64Str);
+    if (image != null && image.isNotEmpty) {
+      // Check if it's a URL (starts with http:// or https://)
+      if (image.startsWith('http://') || image.startsWith('https://')) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.memory(
-            imageData,
+          child: Image.network(
+            image,
             width: 80,
             height: 80,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => _buildDefaultImagePlaceholder(),
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    value: loadingProgress.expectedTotalBytes != null
+                        ? loadingProgress.cumulativeBytesLoaded /
+                        loadingProgress.expectedTotalBytes!
+                        : null,
+                    valueColor: AlwaysStoppedAnimation<Color>(Primary),
+                    strokeWidth: 2,
+                  ),
+                ),
+              );
+            },
+            errorBuilder: (context, error, stackTrace) {
+              print('Error loading image: $error');
+              return _buildDefaultImagePlaceholder();
+            },
           ),
         );
-      } catch (e) {
+      } else {
+        // If it's not a URL, show default placeholder
         return _buildDefaultImagePlaceholder();
       }
     } else {

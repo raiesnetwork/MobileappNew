@@ -5,17 +5,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/apiConstants.dart';
 
 class CampaignService {
-  Future<Map<String, dynamic>> getAllCampaigns(
-      {required int page, int limit = 10}) async {
+  Future<Map<String, dynamic>> getAllCampaigns({
+    required int page,
+    int limit = 10,
+  }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
+
       if (token == null || token.isEmpty) {
-        print("token $token");
+        print("Token missing");
         return {
           'error': true,
           'message': 'Authentication token is missing',
-          'campaigns': []
+          'campaigns': [],
+          'hasMore': false,
         };
       }
 
@@ -27,32 +31,37 @@ class CampaignService {
         },
       );
 
-      print('getAllCampaigns - Status Code: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      print('getAllCampaigns - Page: $page, Status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         List<dynamic> campaignsList = [];
 
+        // Handle different response structures
         if (decoded is List) {
           campaignsList = decoded;
-        } else if (decoded is Map && decoded.containsKey('campaigns')) {
-          campaignsList = decoded['campaigns'] ?? [];
-        } else if (decoded is Map && decoded.containsKey('data')) {
-          campaignsList = decoded['data'] ?? [];
+        } else if (decoded is Map) {
+          campaignsList = decoded['campaigns'] ??
+              decoded['data'] ??
+              decoded['results'] ??
+              [];
         }
+
+        print('Fetched ${campaignsList.length} campaigns for page $page');
 
         return {
           'error': false,
           'message': 'Campaigns fetched successfully',
-          'campaigns': campaignsList
+          'campaigns': campaignsList,
+          'hasMore': campaignsList.length == limit, // If we got full page, there might be more
         };
       } else {
         final decoded = _safeJsonDecode(response.body);
         return {
           'error': true,
           'message': decoded['message'] ?? 'Failed to fetch campaigns',
-          'campaigns': []
+          'campaigns': [],
+          'hasMore': false,
         };
       }
     } catch (e) {
@@ -60,8 +69,17 @@ class CampaignService {
       return {
         'error': true,
         'message': 'Error fetching campaigns: ${e.toString()}',
-        'campaigns': []
+        'campaigns': [],
+        'hasMore': false,
       };
+    }
+  }
+
+  Map<String, dynamic> _safeJsonDecode(String body) {
+    try {
+      return jsonDecode(body);
+    } catch (e) {
+      return {'message': 'Invalid response format'};
     }
   }
 
@@ -164,14 +182,7 @@ class CampaignService {
       };
     }
   }
-  Map<String, dynamic> _safeJsonDecode(String body) {
-    try {
-      return jsonDecode(body) as Map<String, dynamic>;
-    } catch (e) {
-      print('Error decoding JSON: $e');
-      return {'message': 'Failed to parse response'};
-    }
-  }
+
 
   Future<Map<String, dynamic>> getCampaignDetails(String campaignId) async {
     try {

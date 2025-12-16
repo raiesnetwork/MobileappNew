@@ -11,11 +11,7 @@ class MeetingService {
   IO.Socket? _socket;
   IO.Socket? get socket => _socket;
 
-  // ============================================================================
-  // SOCKET CONNECTION
-  // ============================================================================
 
-  /// Initialize and configure socket connection
   void connectSocket() {
     _socket = IO.io(
       baseUrl,
@@ -35,7 +31,6 @@ class MeetingService {
     debugPrint('🔌 Connecting to meeting socket...');
   }
 
-  /// Disconnect from socket
   void disconnect() {
     _socket?.disconnect();
     debugPrint('🔌 Disconnected from meeting socket');
@@ -47,12 +42,6 @@ class MeetingService {
     debugPrint('🗑️ Meeting socket disposed');
   }
 
-  // ============================================================================
-  // REST API METHODS
-  // ============================================================================
-
-  /// Get access token for joining a meeting
-  /// GET /get-token?name={name}&meetingId={meetingId}&userId={userId}
   Future<Map<String, dynamic>> getAccessToken({
     required String name,
     required String meetingId,
@@ -101,8 +90,7 @@ class MeetingService {
     }
   }
 
-  /// Request to join a meeting
-  /// POST /request-join
+
   Future<Map<String, dynamic>> requestToJoin({
     required String name,
     required String meetingId,
@@ -150,8 +138,7 @@ class MeetingService {
     }
   }
 
-  /// Kick a participant from the meeting (host only)
-  /// POST /kick
+
   Future<Map<String, dynamic>> kickParticipant({
     required String roomId,
     required String identity,
@@ -196,10 +183,6 @@ class MeetingService {
       };
     }
   }
-  // Add this after the kickParticipant method in meeting_service.dart
-
-  /// Create a new meeting
-  /// POST /create-meeting
   Future<Map<String, dynamic>> createMeeting({
     required String meetingId,
     required String hostName,
@@ -309,9 +292,6 @@ class MeetingService {
     debugPrint('🚫 Cancelled join request: $data');
   }
 
-  // ============================================================================
-  // CHAT SOCKET METHODS
-  // ============================================================================
 
   /// Join chat room
   void joinChat({

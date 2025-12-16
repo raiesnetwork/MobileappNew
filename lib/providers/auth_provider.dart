@@ -273,35 +273,8 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-// Optional: Add a method to validate password strength
-  bool validatePassword(String password) {
-    // At least 8 characters, contains uppercase, lowercase, and number
-    if (password.length < 8) return false;
 
-    final hasUppercase = password.contains(RegExp(r'[A-Z]'));
-    final hasLowercase = password.contains(RegExp(r'[a-z]'));
-    final hasDigits = password.contains(RegExp(r'[0-9]'));
 
-    return hasUppercase && hasLowercase && hasDigits;
-  }
-
-// Optional: Add a method to get password strength message
-  String getPasswordStrengthMessage(String password) {
-    if (password.length < 8) {
-      return 'Password must be at least 8 characters';
-    }
-    if (!password.contains(RegExp(r'[A-Z]'))) {
-      return 'Password must contain at least one uppercase letter';
-    }
-    if (!password.contains(RegExp(r'[a-z]'))) {
-      return 'Password must contain at least one lowercase letter';
-    }
-    if (!password.contains(RegExp(r'[0-9]'))) {
-      return 'Password must contain at least one number';
-    }
-    return 'Password is strong';
-  }
-  // AUTH PROVIDER METHOD
 Future<bool> sendForgotPasswordOTP({
   required String email,
   required String mobile,

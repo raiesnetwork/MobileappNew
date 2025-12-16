@@ -88,30 +88,75 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   Widget _buildImageWidget(String? imageData, {bool isProfileImage = false}) {
     if (imageData == null || imageData.isEmpty) {
       return isProfileImage
-          ? const Icon(Icons.person, color: Colors.white, size: 20)
+          ? CircleAvatar(
+        radius: 25,
+        backgroundColor: Colors.grey[400],
+        child: const Icon(Icons.person, color: Colors.white, size: 28),
+      )
           : const SizedBox();
     }
-    if (imageData.startsWith('data:')) {
-      final base64Data = imageData.split(',')[1];
-      return Image.memory(
-        base64Decode(base64Data),
-        fit: BoxFit.cover,
-        width: isProfileImage ? 60 : double.infinity,
-        height: isProfileImage ? 60 : 300,
-        errorBuilder: (context, error, stackTrace) => isProfileImage
-            ? const Icon(Icons.person, color: Colors.white, size: 20)
-            : const SizedBox(),
+
+    if (isProfileImage) {
+      // Circular avatar for profile images
+      ImageProvider? imageProvider;
+
+      try {
+        if (imageData.startsWith('data:')) {
+          final base64Data = imageData.split(',')[1];
+          imageProvider = MemoryImage(base64Decode(base64Data));
+        } else {
+          imageProvider = NetworkImage(imageData);
+        }
+      } catch (e) {
+        imageProvider = null;
+      }
+
+      return CircleAvatar(
+        radius: 25,
+        backgroundColor: Colors.grey[300],
+        backgroundImage: imageProvider,
+        child: imageProvider == null
+            ? const Icon(Icons.person, color: Colors.white, size: 28)
+            : null,
+      );
+    } else {
+      // Regular image for non-profile images
+      if (imageData.startsWith('data:')) {
+        final base64Data = imageData.split(',')[1];
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.memory(
+            base64Decode(base64Data),
+            fit: BoxFit.cover,
+            width: double.infinity,
+            height: 300,
+            errorBuilder: (context, error, stackTrace) => Container(
+              height: 300,
+              color: Colors.grey[200],
+              child: const Center(
+                child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+              ),
+            ),
+          ),
+        );
+      }
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.network(
+          imageData,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: 300,
+          errorBuilder: (context, error, stackTrace) => Container(
+            height: 300,
+            color: Colors.grey[200],
+            child: const Center(
+              child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+            ),
+          ),
+        ),
       );
     }
-    return Image.network(
-      imageData,
-      fit: BoxFit.cover,
-      width: isProfileImage ? 50 : double.infinity,
-      height: isProfileImage ? 50 : 300,
-      errorBuilder: (context, error, stackTrace) => isProfileImage
-          ? const Icon(Icons.person, color: Colors.white, size: 20)
-          : const SizedBox(),
-    );
   }
 
   String _getActionText(Map<String, dynamic> community) {
@@ -376,37 +421,22 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                           padding: const EdgeInsets.all(16),
                           child: Row(
                             children: [
-                              Container(
-                                width: 60,
-                                height: 60,
-                                decoration: BoxDecoration(
-                                  color: Primary.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: community['profileImage']?.isNotEmpty ?? false
-                                      ? _buildImageWidget(
-                                    community['profileImage'],
-                                    isProfileImage: true,
-                                  )
-                                      : Container(
-                                    decoration: BoxDecoration(
-                                      color: Primary,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Center(
-                                      child: Text(
-                                        community['name']?.isNotEmpty ?? false
-                                            ? community['name'][0].toUpperCase()
-                                            : 'C',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 22,
-                                        ),
-                                      ),
-                                    ),
+                              community['profileImage']?.isNotEmpty ?? false
+                                  ? _buildImageWidget(
+                                community['profileImage'],
+                                isProfileImage: true,
+                              )
+                                  : CircleAvatar(
+                                radius: 30,
+                                backgroundColor: Primary,
+                                child: Text(
+                                  community['name']?.isNotEmpty ?? false
+                                      ? community['name'][0].toUpperCase()
+                                      : 'C',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 22,
                                   ),
                                 ),
                               ),
@@ -483,28 +513,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                                           ),
                                         ),
                                         SizedBox(width: 25,),
-                                        const SizedBox(width: 8),
-                                        GestureDetector(
-                                          onTap: () {
-                                            Navigator.push(
-                                              context,
-                                              MaterialPageRoute(
-                                                builder: (context) => AllServiceRequestsScreen(
-                                                  communityId: community['_id'] as String,
-                                                ),
-                                              ),
-                                            );
-                                          },
-                                          child: const Text(
-                                            'Add Remark',
-                                            style: TextStyle(
-                                              color: Colors.red,
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w500,
-                                              decoration: TextDecoration.underline,
-                                            ),
-                                          ),
-                                        ),
+
                                       ],
                                     ),
                                   ],

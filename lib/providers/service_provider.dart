@@ -12,6 +12,8 @@ class ServicesProvider with ChangeNotifier {
   bool _isServiceActionLoading = false;
   bool _isServiceDetailsLoading = false;
   bool _isMyProductsLoading = false;
+  String _razorpayKeyId = 'rzp_test_R9SkYwGQh6HuUF';
+  Map<String, dynamic> _orderData = {};
 
   // Separate error states
   bool _hasError = false;
@@ -561,7 +563,7 @@ class ServicesProvider with ChangeNotifier {
     }
   }
 
-  /// Verify Payment and Create Booking
+
   Future<Map<String, dynamic>> verifyPayment({
     required Map<String, dynamic> response,
     required String serviceId,
@@ -704,4 +706,133 @@ class ServicesProvider with ChangeNotifier {
     _myBookings.clear();
     await fetchMyBookings();
   }
+  /// Create Partner Order
+  Future<Map<String, dynamic>> createPartnerOrder({
+    required String dealerId,
+    required num amount,
+    required Map<String, dynamic> customerDetails,
+  }) async {
+    _isPaymentLoading = true;
+    _hasPaymentError = false;
+    _paymentMessage = '';
+    _paymentOrder = {};
+    notifyListeners();
+
+    try {
+      final response = await _service.createPartnerOrder(
+        dealerId: dealerId,
+        amount: amount,
+        customerDetails: customerDetails,
+      );
+
+      if (!response['err']) {
+        _paymentOrder = response['order'] ?? {};
+        _razorpayKeyId = response['key_id'] ?? '';
+        _paymentMessage = response['message'] ?? 'Order created successfully';
+        _hasPaymentError = false;
+        print('✅ Partner payment order created: $_paymentOrder');
+        print('🔑 Razorpay Key ID: $_razorpayKeyId');
+      } else {
+        _hasPaymentError = true;
+        _paymentMessage = response['message'] ?? 'Failed to create partner order';
+        _paymentOrder = {};
+        _razorpayKeyId = '';
+        print('❌ Failed to create partner order: $_paymentMessage');
+      }
+
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return response;
+    } catch (e) {
+      print('💥 Provider exception: $e');
+      _hasPaymentError = true;
+      _paymentMessage = 'Error: ${e.toString()}';
+      _paymentOrder = {};
+      _razorpayKeyId = '';
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return {
+        'err': true,
+        'message': _paymentMessage,
+        'order': {},
+        'key_id': ''
+      };
+    }
+  }
+
+  /// Verify Payment and Create Order
+  Future<Map<String, dynamic>> verifyPaymentAndCreateOrder({
+    required Map<String, dynamic> response,
+    required List<Map<String, dynamic>> productDetails,
+    required num totalAmount,
+    required String paymentMethod,
+    required String addressId,
+    Map<String, dynamic>? couponData,
+    required String type,
+    String? businessDealerId,
+    required String courierId,
+    required String dealerId,
+  }) async {
+    _isPaymentLoading = true;
+    _hasPaymentError = false;
+    _paymentMessage = '';
+    _orderData = {};
+    notifyListeners();
+
+    try {
+      final result = await _service.verifyPaymentAndCreateOrder(
+        response: response,
+        productDetails: productDetails,
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod,
+        addressId: addressId,
+        couponData: couponData,
+        type: type,
+        businessDealerId: businessDealerId,
+        courierId: courierId,
+        dealerId: dealerId,
+      );
+
+      if (!result['err']) {
+        _orderData = result['data'] ?? {};
+        _paymentMessage = result['message'] ?? 'Payment verified and order created successfully';
+        _hasPaymentError = false;
+        print('✅ Payment verified and order created: $_orderData');
+
+        // Optionally refresh orders after creation
+        // await fetchMyOrders();
+      } else {
+        _hasPaymentError = true;
+        _paymentMessage = result['message'] ?? 'Failed to verify payment';
+        _orderData = {};
+        print('❌ Payment verification failed: $_paymentMessage');
+      }
+
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return result;
+    } catch (e) {
+      print('💥 Provider exception: $e');
+      _hasPaymentError = true;
+      _paymentMessage = 'Error: ${e.toString()}';
+      _orderData = {};
+      _isPaymentLoading = false;
+      notifyListeners();
+
+      return {
+        'err': true,
+        'message': _paymentMessage,
+        'data': {}
+      };
+    }
+  }
+
+// Getter for Razorpay Key ID
+  String get razorpayKeyId => _razorpayKeyId;
+
+// Getter for Order Data
+  Map<String, dynamic> get orderData => _orderData;
 }

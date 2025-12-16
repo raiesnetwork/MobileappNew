@@ -3,16 +3,14 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../constants/constants.dart';
 import '../../providers/personal_chat_provider.dart';
-import '../meeting/create_meeting_link_screen.dart';
 import '../meeting/create_meeting_screen.dart';
 import '../meeting/meeting_list_screen.dart';
 import './chat_detail_screen.dart';
-import 'group_chat/getall_groups.dart'; // Import ChatDetailScreen
 
 class PersonalChatScreen extends StatefulWidget {
   const PersonalChatScreen({
-    Key? key,
-  }) : super(key: key);
+    super.key,
+  });
 
   @override
   State<PersonalChatScreen> createState() => _PersonalChatScreenState();
@@ -31,7 +29,7 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         title: const Text(
           'Personal Chats',
@@ -46,59 +44,77 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
         shadowColor: Colors.grey[200],
         surfaceTintColor: Colors.transparent,
         actions: [
-          Container(
-            child: IconButton(
-              icon: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/icons/google_meet.png', // your Google Meet icon asset path
-                    width: 24,
-                    height: 24,
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Material(
+              color: const Color(0xFFE3F2FD),
+              borderRadius: BorderRadius.circular(8),
+              child: InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    PageRouteBuilder(
+                      pageBuilder: (context, animation, secondaryAnimation) =>
+                          MeetingListScreen(),
+                      transitionsBuilder:
+                          (context, animation, secondaryAnimation, child) {
+                        const begin = Offset(1.0, 0.0);
+                        const end = Offset.zero;
+                        const curve = Curves.easeInOut;
+                        var tween = Tween(begin: begin, end: end).chain(
+                          CurveTween(curve: curve),
+                        );
+                        return SlideTransition(
+                          position: animation.drive(tween),
+                          child: child,
+                        );
+                      },
+                      transitionDuration: const Duration(milliseconds: 300),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                      color: Primary.withOpacity(0.3),
+                      width: 1,
+                    ),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  const SizedBox(width: 7),
-                  const Text(
-                    'Meet',
-                    style: TextStyle(fontSize: 15, color: Primary),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/icons/google_meet.png',
+                        width: 22,
+                        height: 22,
+                      ),
+                      const SizedBox(width: 6),
+                      const Text(
+                        'Meet',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  PageRouteBuilder(
-                    pageBuilder: (context, animation, secondaryAnimation) =>
-                        MeetingListScreen(),
-                    transitionsBuilder:
-                        (context, animation, secondaryAnimation, child) {
-                      const begin = Offset(1.0, 0.0);
-                      const end = Offset.zero;
-                      const curve = Curves.easeInOut;
-
-                      var tween = Tween(begin: begin, end: end).chain(
-                        CurveTween(curve: curve),
-                      );
-
-                      return SlideTransition(
-                        position: animation.drive(tween),
-                        child: child,
-                      );
-                    },
-                    transitionDuration: const Duration(milliseconds: 300),
-                  ),
-                );
-              },
             ),
           ),
           IconButton(
             icon: Image.asset(
-              'assets/icons/calendar.png', // your calendar icon asset path
+              'assets/icons/calendar.png',
               width: 20,
               height: 24,
             ),
             onPressed: () {
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (context) => CreateMeetScreen()));
+              // Navigator.push(context,
+              //     MaterialPageRoute(builder: (context) => CreateMeetScreen()));
             },
           ),
         ],
@@ -267,12 +283,12 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             color: Theme.of(context).colorScheme.primary,
             backgroundColor: Colors.white,
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: chats.length,
               itemBuilder: (context, index) {
                 final chat = chats[index];
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: 10),
                   child: ChatListItem(
                     chat: chat,
                     onTap: () {
@@ -282,7 +298,7 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                           builder: (context) => ChatDetailScreen(
                             userId: chat['pairedUser']['_id']?.toString() ?? '',
                             chatTitle:
-                                chat['pairedUser']['profile']['name'] ?? 'Chat',
+                            chat['pairedUser']['profile']['name'] ?? 'Chat',
                             userProfile: chat['pairedUser'],
                           ),
                         ),
@@ -320,13 +336,28 @@ class ChatListItem extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFFFFFFFF), // Pure white
+            Color(0xFFF8F9FE), // Very light blue-white
+            Color(0xFFFAFBFF), // Slightly blue-tinted white
+          ],
+          stops: [0.0, 0.5, 1.0],
+        ),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.08),
+            color: Colors.blue.withOpacity(0.08),
             spreadRadius: 0,
-            blurRadius: 8,
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.05),
+            spreadRadius: 0,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -335,50 +366,51 @@ class ChatListItem extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                // Profile Avatar
+                // Profile Avatar without border
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 54,
+                  height: 54,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [
-                        Theme.of(context).colorScheme.primary,
-                        Theme.of(context).colorScheme.primary.withOpacity(0.8),
-                      ],
-                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Primary.withOpacity(0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                   child: CircleAvatar(
-                    radius: 26,
+                    radius: 27,
                     backgroundColor:
-                        profileImage == null || profileImage.isEmpty
-                            ? Primary // Primary color when empty
-                            : Colors.transparent,
+                    profileImage == null || profileImage.isEmpty
+                        ? Primary
+                        : Colors.transparent,
                     backgroundImage:
-                        profileImage != null && profileImage.isNotEmpty
-                            ? (profileImage.startsWith('data:image/')
-                                ? MemoryImage(
-                                    base64Decode(profileImage.split(',')[1]))
-                                : NetworkImage(profileImage))
-                            : null,
+                    profileImage != null && profileImage.isNotEmpty
+                        ? (profileImage.startsWith('data:image/')
+                        ? MemoryImage(
+                        base64Decode(profileImage.split(',')[1]))
+                        : NetworkImage(profileImage))
+                        : null,
                     child: profileImage == null || profileImage.isEmpty
                         ? Text(
-                            title.isNotEmpty ? title[0].toUpperCase() : 'U',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 20,
-                            ),
-                          )
+                      title.isNotEmpty ? title[0].toUpperCase() : 'U',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    )
                         : null,
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
 
                 // Chat Info
                 Expanded(
@@ -393,33 +425,12 @@ class ChatListItem extends StatelessWidget {
                               style: TextStyle(
                                 fontWeight: FontWeight.w600,
                                 fontSize: 16,
-                                color: Colors.grey[800],
+                                color: Colors.grey[900],
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (unreadCount > 0) ...[
-                            const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                unreadCount > 99 ? '99+' : '$unreadCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 6),
@@ -434,7 +445,7 @@ class ChatListItem extends StatelessWidget {
                                 children: [
                                   Icon(
                                     Icons.email_outlined,
-                                    size: 14,
+                                    size: 13,
                                     color: Colors.grey[500],
                                   ),
                                   const SizedBox(width: 6),
@@ -445,19 +456,19 @@ class ChatListItem extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: Colors.grey[600],
-                                        fontSize: 13,
+                                        fontSize: 12,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             if (mobile.isNotEmpty) ...[
-                              if (email.isNotEmpty) const SizedBox(height: 2),
+                              if (email.isNotEmpty) const SizedBox(height: 3),
                               Row(
                                 children: [
                                   Icon(
                                     Icons.phone_outlined,
-                                    size: 14,
+                                    size: 13,
                                     color: Colors.grey[500],
                                   ),
                                   const SizedBox(width: 6),
@@ -468,7 +479,7 @@ class ChatListItem extends StatelessWidget {
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: Colors.grey[600],
-                                        fontSize: 13,
+                                        fontSize: 12,
                                       ),
                                     ),
                                   ),
@@ -481,26 +492,53 @@ class ChatListItem extends StatelessWidget {
                   ),
                 ),
 
-                // Timestamp and Arrow
+                // Timestamp and Badge
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     if (timestamp.isNotEmpty)
                       Text(
                         _formatTimestamp(timestamp),
                         style: TextStyle(
-                          fontSize: 12,
+                          fontSize: 11,
                           color: Colors.grey[500],
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                    const SizedBox(height: 8),
-                    Icon(
-                      Icons.chevron_right,
-                      color: Colors.grey[400],
-                      size: 20,
-                    ),
+                    if (unreadCount > 0) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Theme.of(context).colorScheme.primary,
+                              Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          unreadCount > 99 ? '99+' : '$unreadCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],

@@ -24,7 +24,7 @@ def flutterVersionName = localProperties.getProperty("flutter.versionName") ?: "
 android {
     namespace = "com.ixes.app"
     compileSdk = 35
-    ndkVersion = "25.2.9519653"
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.ixes.app"

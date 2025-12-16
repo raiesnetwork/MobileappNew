@@ -1,5 +1,6 @@
 // main.dart
 import 'package:flutter/material.dart';
+import 'package:ixes.app/constants/apiConstants.dart';
 import 'package:ixes.app/providers/announcement_provider.dart';
 import 'package:ixes.app/providers/campaign_provider.dart';
 import 'package:ixes.app/providers/chat_provider.dart';
@@ -31,6 +32,7 @@ import 'utils/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
 
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString('auth_token');

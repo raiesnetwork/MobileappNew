@@ -11,8 +11,6 @@ import '../services/socket_service.dart';
 class PersonalChatProvider with ChangeNotifier {
   final PersonalChatService _chatService = PersonalChatService();
   late SocketService _socketService;
-
-  // Socket event subscriptions
   StreamSubscription? _newMessageSubscription;
   StreamSubscription? _messageDeletedSubscription;
   StreamSubscription? _messageEditedSubscription;
@@ -252,32 +250,21 @@ class PersonalChatProvider with ChangeNotifier {
 
     // Process file URLs
     if (messageMap['isFile'] == true && messageMap['fileUrl'] != null) {
-      final fileUrl = messageMap['fileUrl'] as String;
-      if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
-        const String baseUrl = '$apiBaseUrl'; // Update this!
-        String cleanPath = fileUrl;
-        if (!cleanPath.startsWith('/')) {
-          cleanPath = '/$cleanPath';
-        }
-        messageMap['fileUrl'] = '$baseUrl$cleanPath';
-      }
+      final rawUrl = messageMap['fileUrl'] as String;
+      messageMap['fileUrl'] = constructFullUrl(rawUrl);
+      print('📎 Processed file URL: ${messageMap['fileUrl']}');
     }
 
     // Process audio URLs
     if (messageMap['isAudio'] == true && messageMap['audioUrl'] != null) {
-      final audioUrl = messageMap['audioUrl'] as String;
-      if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
-        const String baseUrl = '$apiBaseUrl'; // Update this!
-        String cleanPath = audioUrl;
-        if (!cleanPath.startsWith('/')) {
-          cleanPath = '/$cleanPath';
-        }
-        messageMap['audioUrl'] = '$baseUrl$cleanPath';
-      }
+      final rawUrl = messageMap['audioUrl'] as String;
+      messageMap['audioUrl'] = constructFullUrl(rawUrl);
+      print('🎤 Processed audio URL: ${messageMap['audioUrl']}');
     }
 
     return messageMap;
   }
+
 
   /// Fetch personal chats/friends list
   Future<void> fetchPersonalChats() async {
@@ -450,9 +437,6 @@ class PersonalChatProvider with ChangeNotifier {
     }
   }
 
-  /// Send file message with socket integration
-  // STEP 4: Replace the sendFileMessage method in PersonalChatProvider class
-// Location: Inside PersonalChatProvider class
 
   Future<Map<String, dynamic>?> sendFileMessage({
     required File file,

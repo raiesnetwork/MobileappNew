@@ -32,6 +32,12 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
         }
       });
     });
+
+    // Fetch campaigns after build is complete
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<CommunityProvider>(context, listen: false)
+          .fetchCommunityCampaigns(widget.communityId);
+    });
   }
 
   @override
@@ -43,9 +49,6 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<CommunityProvider>(context, listen: false);
-    final campaignsFuture = provider.fetchCommunityCampaigns(widget.communityId);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
@@ -104,7 +107,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide:  BorderSide(color: Primary.withOpacity(0.5), width: 2),
+                  borderSide: BorderSide(color: Primary.withOpacity(0.5), width: 2),
                 ),
               ),
               onTap: () {
@@ -113,10 +116,9 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
             ),
           ),
           Expanded(
-            child: FutureBuilder<Map<String, dynamic>>(
-              future: campaignsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+            child: Consumer<CommunityProvider>(
+              builder: (context, provider, _) {
+                if (provider.isLoadingCampaigns) {
                   return Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -153,7 +155,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
                   );
                 }
 
-                if (snapshot.hasError || provider.campaignsError != null) {
+                if (provider.campaignsError != null) {
                   return Center(
                     child: Container(
                       margin: const EdgeInsets.all(20),
@@ -353,7 +355,10 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
                     itemBuilder: (context, index) {
                       final campaign = filteredCampaigns[index];
                       final isCompleted = campaign['isCompleted'] ?? false;
-                      final isUserPaid = campaign['isUserPaid'] ?? false;
+                      // Fixed: Handle isUserPaid which can be Map or bool
+                      final isUserPaid = campaign['isUserPaid'] is Map
+                          ? true
+                          : (campaign['isUserPaid'] == true);
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 16),
@@ -596,7 +601,10 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
     final progress = (campaign['progress'] ?? 0).toDouble();
     final isCompleted = campaign['isCompleted'] ?? false;
     final isUserAdmin = campaign['isUserAdmin'] ?? false;
-    final isUserPaid = campaign['isUserPaid'] ?? false;
+    // Fixed: Handle isUserPaid which can be Map or bool
+    final isUserPaid = campaign['isUserPaid'] is Map
+        ? true
+        : (campaign['isUserPaid'] == true);
     final totalMembers = campaign['totalMembers'] ?? 0;
     final paidUsers = campaign['paidUsers'] ?? 0;
 
@@ -808,7 +816,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
                           ],
                         ),
                       ),
-                      if (isUserPaid && campaign['userPaymentDetails'] != null) ...[
+                      if (isUserPaid && campaign['isUserPaid'] is Map) ...[
                         const SizedBox(height: 24),
                         const Text(
                           'Your Payment',
@@ -845,7 +853,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen> {
                               ),
                               const SizedBox(width: 12),
                               Text(
-                                '₹${campaign['userPaymentDetails']['paidAmount'] ?? 0}',
+                                '₹${(campaign['isUserPaid'] as Map)['amountPaid'] ?? 0}',
                                 style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w700,

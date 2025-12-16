@@ -17,70 +17,113 @@ class WaitingApprovalScreen extends StatefulWidget {
 
 class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _animationController;
+  late AnimationController _controller;
+  bool _hasNavigated = false;
+  MeetingProvider? _meetingProvider; // Save provider reference
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
+
+    _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
-    )..repeat();
-
-    _setupListener();
+      lowerBound: 0.95,
+      upperBound: 1.05,
+    )..repeat(reverse: true);
   }
 
-  void _setupListener() {
-    final meetingProvider = context.read<MeetingProvider>();
-    meetingProvider.addListener(_handleJoinStatusChange);
-  }
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
 
-  void _handleJoinStatusChange() {
-    if (!mounted) return;
-
-    final meetingProvider = context.read<MeetingProvider>();
-
-    debugPrint('🔔 Status changed: ${meetingProvider.joinStatus}');
-    debugPrint('🔔 Has token? ${meetingProvider.accessToken != null}');
-
-    if (meetingProvider.joinStatus == JoinStatus.approved) {
-      // Check if we have an access token
-      if (meetingProvider.accessToken != null) {
-        debugPrint('✅ Approved with token, navigating to meeting room');
-
-        // Navigate to meeting room
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => MeetingRoomScreen(meetingId: widget.meetingId),
-          ),
-        );
-      } else {
-        debugPrint('⚠️ Approved but no token yet, waiting...');
-      }
-    } else if (meetingProvider.joinStatus == JoinStatus.rejected) {
-      debugPrint('❌ Join rejected, going back');
-      // Show rejection and go back
-      Navigator.pop(context);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Your request was rejected by the host'),
-          backgroundColor: Colors.red,
-        ),
-      );
+    // Save provider reference safely
+    if (_meetingProvider == null) {
+      _meetingProvider = context.read<MeetingProvider>();
+      _meetingProvider!.addListener(_handleStatus);
     }
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
-    try {
-      context.read<MeetingProvider>().removeListener(_handleJoinStatusChange);
-    } catch (e) {
-      debugPrint('Error removing listener: $e');
-    }
+    _controller.dispose();
+    // Use saved provider reference instead of context.read
+    _meetingProvider?.removeListener(_handleStatus);
     super.dispose();
+  }
+
+  void _handleStatus() {
+    if (_hasNavigated || !mounted || _meetingProvider == null) return;
+
+    final provider = _meetingProvider!;
+
+    // Handle approval - navigate to meeting room
+    if (provider.joinStatus == JoinStatus.approved &&
+        provider.accessToken != null) {
+      _hasNavigated = true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MeetingRoomScreen(meetingId: widget.meetingId),
+            ),
+          );
+        }
+      });
+    }
+
+    // Handle rejection - show dialog and navigate back
+    if (provider.joinStatus == JoinStatus.rejected) {
+      _hasNavigated = true;
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        // Show rejection dialog
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.cancel, color: Colors.red.shade700, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  "Request Rejected",
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            content: const Text(
+              "Your request to join this meeting was rejected by the host.",
+              style: TextStyle(fontSize: 15),
+            ),
+            actions: [
+              TextButton(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.red.shade700,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                ),
+                onPressed: () {
+                  Navigator.pop(dialogContext); // Close dialog
+                  Navigator.pop(context); // Go back to previous screen
+                },
+                child: const Text("OK"),
+              ),
+            ],
+          ),
+        );
+      });
+    }
   }
 
   @override
@@ -96,70 +139,89 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
           child: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Spacer(),
 
-                // Animated icon
+                // ✨ Animated Icon
                 AnimatedBuilder(
-                  animation: _animationController,
+                  animation: _controller,
                   builder: (context, child) {
                     return Transform.scale(
-                      scale: 1.0 + (_animationController.value * 0.1),
+                      scale: _controller.value,
                       child: Container(
-                        padding: const EdgeInsets.all(32),
+                        padding: const EdgeInsets.all(36),
                         decoration: BoxDecoration(
-                          color: Colors.orange[50],
+                          color: Colors.amber.shade50,
                           shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.amber.shade100,
+                              blurRadius: 25,
+                              spreadRadius: 2,
+                            )
+                          ],
                         ),
                         child: Icon(
-                          Icons.hourglass_empty,
-                          size: 80,
-                          color: Colors.orange[700],
+                          Icons.hourglass_top_rounded,
+                          size: 72,
+                          color: Colors.orange.shade700,
                         ),
                       ),
                     );
                   },
                 ),
-                const SizedBox(height: 48),
 
-                // Title
+                const SizedBox(height: 40),
+
+                // 📝 Title
                 const Text(
-                  'Waiting for Host Approval',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  "Waiting for Host Approval",
                   textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.3,
+                  ),
                 ),
-                const SizedBox(height: 16),
 
-                // Description
+                const SizedBox(height: 12),
+
+                // 📄 Subtitle
                 Text(
-                  'The meeting host will approve your request shortly',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                  ),
+                  "The meeting host will approve your request shortly.\nPlease wait...",
                   textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.grey.shade600,
+                    height: 1.5,
+                  ),
                 ),
-                const SizedBox(height: 48),
 
-                // Meeting ID
+                const SizedBox(height: 40),
+
+                // 🆔 Meeting ID Card
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 18),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[300]!),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.grey.withOpacity(0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                    border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: Column(
                     children: [
                       Text(
-                        'Meeting ID',
+                        "Meeting ID",
                         style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -167,42 +229,42 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
                       SelectableText(
                         widget.meetingId,
                         style: const TextStyle(
-                          fontSize: 16,
+                          fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          fontFamily: 'monospace',
+                          fontFamily: "monospace",
                         ),
                       ),
                     ],
                   ),
                 ),
+
                 const SizedBox(height: 32),
 
-                // Loading indicator with status
+                // 🔄 Loading Status Message
                 Consumer<MeetingProvider>(
-                  builder: (context, provider, child) {
-                    final status = provider.joinStatus;
-                    String statusText = 'Waiting for approval...';
-
-                    if (status == JoinStatus.approved) {
-                      statusText = 'Approved! Joining meeting...';
+                  builder: (_, provider, __) {
+                    String msg = "Waiting for approval...";
+                    if (provider.joinStatus == JoinStatus.approved) {
+                      msg = "Approved! Joining meeting...";
                     }
 
                     return Column(
                       children: [
                         Text(
-                          statusText,
+                          msg,
                           style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700],
+                            fontSize: 15,
+                            color: Colors.grey.shade700,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        const SizedBox(
-                          height: 4,
-                          child: LinearProgressIndicator(
-                            backgroundColor: Colors.grey,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                        const SizedBox(height: 14),
+                        LinearProgressIndicator(
+                          minHeight: 5,
+                          borderRadius: BorderRadius.circular(6),
+                          backgroundColor: Colors.grey.shade300,
+                          valueColor: AlwaysStoppedAnimation(
+                            Colors.orange.shade700,
                           ),
                         ),
                       ],
@@ -212,20 +274,21 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
 
                 const Spacer(),
 
-                // Cancel button
+                // ❌ Cancel button
                 TextButton(
                   onPressed: _showCancelDialog,
                   style: TextButton.styleFrom(
-                    foregroundColor: Colors.red,
+                    foregroundColor: Colors.red.shade700,
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
+                      horizontal: 40,
                       vertical: 16,
                     ),
+                    textStyle: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  child: const Text(
-                    'Cancel Request',
-                    style: TextStyle(fontSize: 16),
-                  ),
+                  child: const Text("Cancel Request"),
                 ),
               ],
             ),
@@ -238,43 +301,41 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
   void _showCancelDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        title: const Text(
+          "Cancel Join Request?",
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        content: const Text(
+          "Are you sure you want to cancel your request to join this meeting?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("No, Wait"),
           ),
-          title: const Text('Cancel Join Request?'),
-          content: const Text(
-            'Are you sure you want to cancel your request to join this meeting?',
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Colors.red,
+            ),
+            onPressed: () {
+              _meetingProvider?.cancelJoinRequest();
+              Navigator.pop(context); // Close dialog
+              Navigator.pop(context); // Go back to previous screen
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Join request cancelled"),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            },
+            child: const Text("Yes, Cancel"),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('No, Wait'),
-            ),
-            TextButton(
-              onPressed: () {
-                // Cancel the request
-                context.read<MeetingProvider>().cancelJoinRequest();
-
-                // Close dialog
-                Navigator.pop(context);
-
-                // Go back to previous screen
-                Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Join request cancelled'),
-                  ),
-                );
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('Yes, Cancel'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }

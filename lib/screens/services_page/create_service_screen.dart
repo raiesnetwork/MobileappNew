@@ -502,7 +502,7 @@ class _CreateServiceScreenState extends State<CreateServiceScreen> {
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: _isSubmitting ? null : _createService,
+                  onPressed:_createService,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Primary,
                     foregroundColor: Colors.white,

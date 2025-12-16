@@ -9,9 +9,19 @@ class CampaignProvider with ChangeNotifier {
   bool isLoading = false;
   bool hasMoreCampaigns = true;
   String? errorMessage;
+  int _currentPage = 0; // Track current page
 
   Future<void> fetchAllCampaigns({required int page, int limit = 10}) async {
-    if (isLoading || !hasMoreCampaigns) return;
+    // Prevent duplicate calls
+    if (page == _currentPage && page != 1) {
+      print('Already loaded page $page, skipping');
+      return;
+    }
+
+    if (isLoading) {
+      print('Already loading, skipping');
+      return;
+    }
 
     isLoading = true;
     errorMessage = null;
@@ -25,23 +35,35 @@ class CampaignProvider with ChangeNotifier {
       final newCampaigns = response['campaigns'] as List<dynamic>;
       print('Fetched ${newCampaigns.length} campaigns');
 
-      // Convert to proper Map objects if needed
+      // Convert to proper Map objects
       final List<Map<String, dynamic>> typedCampaigns = newCampaigns
           .map((campaign) => Map<String, dynamic>.from(campaign as Map))
           .toList();
 
       if (page == 1) {
         campaigns = typedCampaigns;
+        _currentPage = 1;
       } else {
-        campaigns.addAll(typedCampaigns);
+        // Remove duplicates based on _id
+        final existingIds = campaigns.map((c) => c['_id']).toSet();
+        final uniqueNewCampaigns = typedCampaigns
+            .where((c) => !existingIds.contains(c['_id']))
+            .toList();
+
+        campaigns.addAll(uniqueNewCampaigns);
+        _currentPage = page;
+        print('Added ${uniqueNewCampaigns.length} new unique campaigns');
       }
 
-      hasMoreCampaigns = newCampaigns.length == limit;
+      hasMoreCampaigns = response['hasMore'] ?? (newCampaigns.length == limit);
       print('Has more campaigns? $hasMoreCampaigns');
       print('Total campaigns now: ${campaigns.length}');
     } else {
       errorMessage = response['message'];
       print('Error fetching campaigns: ${response['message']}');
+      if (page == 1) {
+        hasMoreCampaigns = false;
+      }
     }
 
     isLoading = false;
@@ -62,14 +84,11 @@ class CampaignProvider with ChangeNotifier {
     if (!response['error']) {
       final newCampaign = response['campaign'];
       if (newCampaign != null) {
-        // Ensure it's a proper Map<String, dynamic>
         final Map<String, dynamic> typedCampaign =
         Map<String, dynamic>.from(newCampaign as Map);
 
-        // Add to the beginning of the list
         campaigns.insert(0, typedCampaign);
         print('Campaign created and added to list. New total: ${campaigns.length}');
-        print('Added campaign: ${typedCampaign['id']} - ${typedCampaign['title']}');
       } else {
         print('Warning: Campaign was created but campaign object is null');
         errorMessage = 'Campaign created but not returned from server';
@@ -84,40 +103,33 @@ class CampaignProvider with ChangeNotifier {
     return response;
   }
 
-// HELPER METHOD FOR IMAGE DISPLAY
+  // UPDATED: Simplified image URL method - expects URL from backend
   String? getCampaignImageUrl(Map<String, dynamic> campaign) {
-    // Check different possible image fields
-    if (campaign['coverImageUrl'] != null && campaign['coverImageUrl'].toString().isNotEmpty) {
-      String imageUrl = campaign['coverImageUrl'].toString();
-      if (imageUrl.startsWith('http')) {
-        return imageUrl;
-      } else if (imageUrl.isNotEmpty) {
-        return '${apiBaseUrl}$imageUrl';
-      }
-    }
+    // Priority order: coverImage > coverImageUrl > image
+    final imageFields = ['coverImage', 'coverImageUrl', 'image'];
 
-    if (campaign['coverImage'] != null && campaign['coverImage'].toString().isNotEmpty) {
-      String imageUrl = campaign['coverImage'].toString();
-      if (imageUrl.startsWith('http')) {
-        return imageUrl;
-      } else if (imageUrl.isNotEmpty) {
-        return '${apiBaseUrl}$imageUrl';
-      }
-    }
+    for (final field in imageFields) {
+      if (campaign[field] != null && campaign[field].toString().isNotEmpty) {
+        String imageUrl = campaign[field].toString();
 
-    if (campaign['image'] != null && campaign['image'].toString().isNotEmpty) {
-      String imageUrl = campaign['image'].toString();
-      if (imageUrl.startsWith('http')) {
-        return imageUrl;
-      } else if (imageUrl.isNotEmpty) {
-        return '${apiBaseUrl}$imageUrl';
+        // If it's already a full URL, return it
+        if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+          return imageUrl;
+        }
+
+        // If it's a relative path, prepend base URL
+        if (imageUrl.isNotEmpty) {
+          // Remove leading slash if present to avoid double slashes
+          imageUrl = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
+          return '${apiBaseUrl}$imageUrl';
+        }
       }
     }
 
     return null;
   }
 
-// WIDGET FOR DISPLAYING CAMPAIGN IMAGE
+  // UPDATED: Simplified image widget builder
   Widget buildCampaignImage(Map<String, dynamic> campaign, {double? width, double? height}) {
     final imageUrl = getCampaignImageUrl(campaign);
 
@@ -129,30 +141,42 @@ class CampaignProvider with ChangeNotifier {
         fit: BoxFit.cover,
         errorBuilder: (context, error, stackTrace) {
           print('Error loading image: $imageUrl, Error: $error');
-          return Container(
-            width: width,
-            height: height,
-            color: Colors.grey[300],
-            child: const Icon(Icons.image_not_supported, color: Colors.grey),
-          );
+          return _buildImagePlaceholder(width, height, true);
         },
         loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) return child;
-          return Container(
-            width: width,
-            height: height,
-            color: Colors.grey[300],
-            child: const Center(child: CircularProgressIndicator()),
-          );
+          return _buildImagePlaceholder(width, height, false, loadingProgress: loadingProgress);
         },
       );
     }
 
+    return _buildImagePlaceholder(width, height, false);
+  }
+
+  Widget _buildImagePlaceholder(double? width, double? height, bool isError, {ImageChunkEvent? loadingProgress}) {
     return Container(
       width: width,
       height: height,
-      color: Colors.grey[300],
-      child: const Icon(Icons.image, color: Colors.grey),
+      color: Colors.grey[200],
+      child: Center(
+        child: isError
+            ? Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_not_supported_outlined, color: Colors.grey[400], size: 32),
+            const SizedBox(height: 4),
+            Text('Failed to load', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+          ],
+        )
+            : loadingProgress != null
+            ? CircularProgressIndicator(
+          value: loadingProgress.expectedTotalBytes != null
+              ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+              : null,
+          strokeWidth: 2,
+        )
+            : Icon(Icons.image_outlined, color: Colors.grey[400], size: 32),
+      ),
     );
   }
 
@@ -168,24 +192,14 @@ class CampaignProvider with ChangeNotifier {
     notifyListeners();
 
     final response =
-        await _campaignService.editCampaign(campaignId, campaignData);
+    await _campaignService.editCampaign(campaignId, campaignData);
 
     if (!response['error'] && response['campaign'] != null) {
       final index = campaigns.indexWhere((c) => c['_id'] == campaignId);
       if (index != -1) {
-        campaigns[index] = {
-          '_id': campaignId,
-          'title': campaignData['title'],
-          'description': campaignData['description'],
-          'totalAmountNeeded': campaignData['totalAmountNeeded'],
-          'currency': campaignData['currency'],
-          'endDate': campaignData['endDate'],
-          'coverImage': campaignData['coverImage'],
-          'progress': campaigns[index]['progress'], // Preserve progress
-          'community': campaigns[index]['community'], // Preserve community
-          'isUserAdmin': campaigns[index]
-              ['isUserAdmin'], // Preserve isUserAdmin
-        };
+        // Get updated campaign from response
+        final updatedCampaign = Map<String, dynamic>.from(response['campaign'] as Map);
+        campaigns[index] = updatedCampaign;
         print('Campaign updated in list at index $index');
       }
     } else {
@@ -217,6 +231,8 @@ class CampaignProvider with ChangeNotifier {
   }
 
   Future<void> refreshCampaigns() async {
+    print('Refreshing campaigns...');
+    _currentPage = 0;
     campaigns.clear();
     hasMoreCampaigns = true;
     await fetchAllCampaigns(page: 1);

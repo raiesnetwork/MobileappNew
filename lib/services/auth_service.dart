@@ -6,7 +6,6 @@ import 'api_service.dart';
 import '../models/user_model.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-
 class AuthService {
   static Future<Map<String, dynamic>> signup({
     required String mobile,
@@ -16,13 +15,16 @@ class AuthService {
     required bool agreement,
   }) async {
     try {
-      final response = await ApiService.post('/api/auth/signup', {
-        'mobile': mobile,
-        'username': username,
-        'password': password,
-        'isFamilyHead': isFamilyHead,
-        'agreement': agreement,
-      }, requireAuth: false);
+      final response = await ApiService.post(
+          '/api/auth/signup',
+          {
+            'mobile': mobile,
+            'username': username,
+            'password': password,
+            'isFamilyHead': isFamilyHead,
+            'agreement': agreement,
+          },
+          requireAuth: false);
       final data = json.decode(response.body);
       if (response.statusCode == 200) {
         return {
@@ -43,7 +45,7 @@ class AuthService {
       };
     }
   }
-  
+
   static Future<Map<String, dynamic>> login({
     required String mobile,
     String? password,
@@ -53,10 +55,11 @@ class AuthService {
       if (password != null) {
         body['password'] = password;
       }
-      
-      final response = await ApiService.post('/api/auth/login', body, requireAuth: false);
+
+      final response =
+          await ApiService.post('/api/auth/login', body, requireAuth: false);
       final data = json.decode(response.body);
-      
+
       if (response.statusCode == 200) {
         return {
           'success': true,
@@ -82,6 +85,7 @@ class AuthService {
       };
     }
   }
+
   static Future<Map<String, dynamic>> loginWithOTP({
     required String mobile,
     required String otp,
@@ -152,12 +156,15 @@ class AuthService {
 
   static Future<Map<String, dynamic>> sendOTP(String mobile) async {
     try {
-      final response = await ApiService.post('/api/auth/sendOTP', {
-        'mobile': mobile,
-      }, requireAuth: false);
-print(response);
+      final response = await ApiService.post(
+          '/api/auth/sendOTP',
+          {
+            'mobile': mobile,
+          },
+          requireAuth: false);
+      print(response);
       final data = json.decode(response.body);
-    print(data);
+      print(data);
       if (response.statusCode == 201) {
         return {
           'success': true,
@@ -176,47 +183,53 @@ print(response);
       };
     }
   }
- // AUTH SERVICE METHOD
-static Future<Map<String, dynamic>> forgotPassword({
-  required String mobile,
-  required String email,
-}) async {
-  try {
-    final response = await ApiService.post('/api/forgot-password', {
-      'mobile': mobile,
-      'email': email,
-    }, requireAuth: false);
-    
-    print('API Response: ${response.body}');
-    final data = json.decode(response.body);
-    print('Parsed Data: $data');
-    
-    if (response.statusCode == 200 || response.statusCode == 201) {
-      return {
-        'success': true,
-        'message': data['message'] ?? 'OTP sent successfully',
-        'data': data,
-      };
-    } else {
+
+  // AUTH SERVICE METHOD
+  static Future<Map<String, dynamic>> forgotPassword({
+    required String mobile,
+    required String email,
+  }) async {
+    try {
+      final response = await ApiService.post(
+          '/api/forgot-password',
+          {
+            'mobile': mobile,
+            'email': email,
+          },
+          requireAuth: false);
+
+      print('API Response: ${response.body}');
+      final data = json.decode(response.body);
+      print('Parsed Data: $data');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'success': true,
+          'message': data['message'] ?? 'OTP sent successfully',
+          'data': data,
+        };
+      } else {
+        return {
+          'success': false,
+          'message': data['message'] ?? data['error'] ?? 'Failed to send OTP',
+        };
+      }
+    } catch (e) {
+      print('Network error: ${e.toString()}');
       return {
         'success': false,
-        'message': data['message'] ?? data['error'] ?? 'Failed to send OTP',
+        'message': 'Network error: ${e.toString()}',
       };
     }
-  } catch (e) {
-    print('Network error: ${e.toString()}');
-    return {
-      'success': false,
-      'message': 'Network error: ${e.toString()}',
-    };
   }
-}
-  
+
   static Future<Map<String, dynamic>> checkMobileExists(String mobile) async {
     try {
-      final response = await ApiService.get('/api/auth/utils/checkUserExists/$mobile', requireAuth: false);
+      final response = await ApiService.get(
+          '/api/auth/utils/checkUserExists/$mobile',
+          requireAuth: false);
       final data = json.decode(response.body);
-      
+
       if (response.statusCode == 200) {
         return {
           'success': true,
@@ -243,33 +256,16 @@ static Future<Map<String, dynamic>> forgotPassword({
     }
   }
 
-
-
   static Future<Map<String, dynamic>> changePassword({
     required String currentPassword,
     required String newPassword,
   }) async {
     try {
-      print('🔐 =================================');
-      print('🔐 CHANGE PASSWORD - REQUEST STARTED');
-      print('🔐 =================================');
-      print('📤 Endpoint: /api/auth/password');
-      print('📤 Method: PUT');
-      print('📤 Current Password: ****${currentPassword.substring(currentPassword.length - 2)}');
-      print('📤 Current Password Length: ${currentPassword.length}');
-      print('📤 New Password Length: ${newPassword.length}');
-      print('📤 Auth Required: true');
-
       // Get token to verify it exists
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
       final username = prefs.getString('user_name');
-
-      print('🔑 Token exists: ${token != null}');
-      print('🔑 Token length: ${token?.length ?? 0}');
-      print('🔑 User ID: ${userId ?? 'null'}');
-      print('🔑 Username: ${username ?? 'null'}');
 
       if (token != null && token.length > 20) {
         print('🔑 Token preview: ${token.substring(0, 20)}...');
@@ -283,21 +279,12 @@ static Future<Map<String, dynamic>> forgotPassword({
       };
       print('📤 Request Body Keys: ${requestBody.keys.toList()}');
 
-      final response = await ApiService.put(
-          '/api/auth/password',
+      final response = await ApiService.post(
+          '/api/auth/change-password', // ✅ Correct endpoint
           requestBody,
-          requireAuth: true
-      );
-
-      print('📥 Response Status Code: ${response.statusCode}');
-      print('📥 Response Body: ${response.body}');
-      print('📥 Response Headers: ${response.headers}');
+          requireAuth: true);
 
       final data = json.decode(response.body);
-      print('📥 Decoded Data: $data');
-      print('📥 Data Type: ${data.runtimeType}');
-      print('📥 Has "error" key: ${data.containsKey('error')}');
-      print('📥 Has "message" key: ${data.containsKey('message')}');
 
       if (response.statusCode == 200) {
         print('✅ SUCCESS - Password changed successfully');
@@ -306,28 +293,23 @@ static Future<Map<String, dynamic>> forgotPassword({
           'success': true,
           'message': data['message'] ?? 'Password changed successfully',
         };
-      }
-      else if (response.statusCode == 400) {
-        print('❌ ERROR 400 - Bad Request');
-        print('❌ Reason: New password is required or invalid');
-        final errorMsg = data['error'] ?? data['message'] ?? 'New password is required';
+      } else if (response.statusCode == 400) {
+        final errorMsg =
+            data['error'] ?? data['message'] ?? 'New password is required';
         print('❌ Error Message: $errorMsg');
         return {
           'success': false,
           'message': errorMsg,
         };
-      }
-      else if (response.statusCode == 401) {
-        print('❌ ERROR 401 - Unauthorized');
-        print('❌ Reason: Current password is incorrect or invalid token');
-        final errorMsg = data['error'] ?? data['message'] ?? 'Current password is incorrect';
+      } else if (response.statusCode == 401) {
+        final errorMsg =
+            data['error'] ?? data['message'] ?? 'Current password is incorrect';
         print('❌ Error Message: $errorMsg');
         return {
           'success': false,
           'message': errorMsg,
         };
-      }
-      else if (response.statusCode == 404) {
+      } else if (response.statusCode == 404) {
         print('❌ ERROR 404 - Not Found');
         print('❌ Reason: User not found in database');
         final errorMsg = data['error'] ?? data['message'] ?? 'User not found';
@@ -336,33 +318,22 @@ static Future<Map<String, dynamic>> forgotPassword({
           'success': false,
           'message': errorMsg,
         };
-      }
-      else if (response.statusCode == 500) {
-        print('❌ ERROR 500 - Internal Server Error');
-        print('❌ Reason: Backend server error');
-        print('❌ Error Field: ${data['error']}');
-        print('❌ Message Field: ${data['message']}');
-        print('❌ Full Response: $data');
-        print('⚠️  BACKEND ISSUE: Check server logs for the actual error');
-        print('⚠️  Possible causes:');
-        print('   - Database connection failure');
-        print('   - Password hashing error');
-        print('   - User lookup error');
-        print('   - Backend code exception');
-
-        final errorMsg = data['error'] ?? data['message'] ?? 'Server error occurred. Please try again later.';
+      } else if (response.statusCode == 500) {
+        final errorMsg = data['error'] ??
+            data['message'] ??
+            'Server error occurred. Please try again later.';
         print('❌ Returning Error: $errorMsg');
 
         return {
           'success': false,
           'message': errorMsg,
         };
-      }
-      else {
+      } else {
         print('❌ ERROR ${response.statusCode} - Unexpected Status Code');
         print('❌ Error Field: ${data['error']}');
         print('❌ Message Field: ${data['message']}');
-        final errorMsg = data['error'] ?? data['message'] ?? 'Failed to change password';
+        final errorMsg =
+            data['error'] ?? data['message'] ?? 'Failed to change password';
         print('❌ Error Message: $errorMsg');
         return {
           'success': false,
@@ -370,30 +341,13 @@ static Future<Map<String, dynamic>> forgotPassword({
         };
       }
     } catch (e, stackTrace) {
-      print('💥 =================================');
-      print('💥 CHANGE PASSWORD - EXCEPTION CAUGHT');
-      print('💥 =================================');
-      print('💥 Error Type: ${e.runtimeType}');
-      print('💥 Error Message: $e');
-      print('💥 Stack Trace:');
-      print(stackTrace);
-      print('💥 Possible causes:');
-      print('   - Network connection lost');
-      print('   - Invalid JSON response');
-      print('   - Timeout');
-      print('   - API service error');
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',
       };
-    } finally {
-      print('🔐 =================================');
-      print('🔐 CHANGE PASSWORD - REQUEST ENDED');
-      print('🔐 =================================\n');
-    }
+    } finally {}
   }
 
-  
   static Future<bool> logout() async {
     try {
       await ApiService.post('/api/auth/logout', {});
@@ -402,6 +356,4 @@ static Future<Map<String, dynamic>> forgotPassword({
       return false;
     }
   }
-
-
 }

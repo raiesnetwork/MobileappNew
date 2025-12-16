@@ -168,6 +168,14 @@ class _BookingScreenState extends State<BookingScreen> {
     print('Order ID: ${response.orderId}');
     print('Signature: ${response.signature}');
 
+    // Store the payment details before any async operations
+    final paymentId = response.paymentId;
+    final orderId = response.orderId;
+    final signature = response.signature;
+
+    // Use a small delay to ensure Razorpay activity has fully closed
+    await Future.delayed(const Duration(milliseconds: 500));
+
     // Check if widget is still mounted before proceeding
     if (!mounted) {
       print('⚠️ Widget unmounted, cannot proceed');
@@ -181,9 +189,9 @@ class _BookingScreenState extends State<BookingScreen> {
 
       final verifyResult = await provider.verifyPayment(
         response: {
-          'razorpay_payment_id': response.paymentId,
-          'razorpay_order_id': response.orderId,
-          'razorpay_signature': response.signature,
+          'razorpay_payment_id': paymentId,
+          'razorpay_order_id': orderId,
+          'razorpay_signature': signature,
         },
         serviceId: widget.serviceId,
         amount: totalAmount,
@@ -200,23 +208,32 @@ class _BookingScreenState extends State<BookingScreen> {
       setState(() => _isProcessing = false);
 
       print('🔍 Verify Result: $verifyResult');
+      print('🔍 Error flag type: ${verifyResult['err'].runtimeType}');
+      print('🔍 Error flag value: ${verifyResult['err']}');
 
-      // Check the error flag properly
-      if (verifyResult['err'] == false) {
-        // Success
+      // Check the error flag - handle both boolean and string types
+      final hasError = verifyResult['err'] == true ||
+          verifyResult['err'] == 'true' ||
+          verifyResult['err'] == null;
+
+      if (!hasError) {
+        // Success - err is false
         final booking = verifyResult['booking'];
         if (booking != null && booking.isNotEmpty) {
           _showSuccessDialog(booking);
         } else {
+          print('⚠️ Booking data: $booking');
           _showSnackBar('Payment successful but booking data is missing', isError: true);
         }
       } else {
-        // Error
+        // Error - err is true
         final message = verifyResult['message'] ?? 'Payment verification failed';
+        print('❌ Verification failed: $message');
         _showSnackBar(message, isError: true);
       }
     } catch (e) {
       print('💥 Error in _handlePaymentSuccess: $e');
+      print('💥 Error stack trace: ${StackTrace.current}');
 
       if (!mounted) return;
 
@@ -226,27 +243,34 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   void _handlePaymentError(PaymentFailureResponse response) {
-    if (!mounted) return;
-
-    setState(() => _isProcessing = false);
-
     print('❌ Payment Error:');
     print('Code: ${response.code}');
     print('Message: ${response.message}');
 
-    _showSnackBar(
-      'Payment failed: ${response.message ?? "Unknown error"}',
-      isError: true,
-    );
+    // Use a small delay to ensure Razorpay activity has fully closed
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+
+      setState(() => _isProcessing = false);
+
+      _showSnackBar(
+        'Payment failed: ${response.message ?? "Unknown error"}',
+        isError: true,
+      );
+    });
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
-    if (!mounted) return;
-
-    setState(() => _isProcessing = false);
-
     print('🔗 External Wallet: ${response.walletName}');
-    _showSnackBar('External wallet selected: ${response.walletName}');
+
+    // Use a small delay to ensure Razorpay activity has fully closed
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
+
+      setState(() => _isProcessing = false);
+
+      _showSnackBar('External wallet selected: ${response.walletName}');
+    });
   }
 
   void _showSuccessDialog(Map<String, dynamic> booking) {

@@ -20,14 +20,13 @@ class CampaignsScreen extends StatefulWidget {
 
 class _CampaignsScreenState extends State<CampaignsScreen> {
   final ScrollController _scrollController = ScrollController();
-  int _currentPage = 1;
-  static const int _campaignsPerPage = 10;
+  bool _isLoadingMore = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CampaignProvider>().fetchAllCampaigns(page: _currentPage);
+      context.read<CampaignProvider>().fetchAllCampaigns(page: 1);
     });
     _setupScrollListener();
   }
@@ -40,22 +39,38 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >=
-          _scrollController.position.maxScrollExtent - 200) {
+      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
         _loadMoreCampaigns();
       }
     });
   }
 
-  void _loadMoreCampaigns() {
+  void _loadMoreCampaigns() async {
     final provider = context.read<CampaignProvider>();
-    if (!provider.isLoading && provider.hasMoreCampaigns) {
-      _currentPage++;
-      provider.fetchAllCampaigns(page: _currentPage);
+
+    // Prevent multiple simultaneous calls
+    if (_isLoadingMore || provider.isLoading || !provider.hasMoreCampaigns) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    // Calculate next page based on current campaigns count
+    final currentPage = (provider.campaigns.length / 10).ceil();
+    final nextPage = currentPage + 1;
+
+    print('Loading more campaigns - Current count: ${provider.campaigns.length}, Loading page: $nextPage');
+
+    await provider.fetchAllCampaigns(page: nextPage);
+
+    if (mounted) {
+      setState(() {
+        _isLoadingMore = false;
+      });
     }
   }
-
-
 
   void _editCampaign(dynamic campaign) async {
     print('Editing campaign: $campaign');
@@ -136,93 +151,21 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
     );
   }
 
-  // Helper method to determine image type and get the appropriate widget
-  // Helper method to determine image type and get the appropriate widget
-  Widget _buildCampaignImage(String imageData) {
+  // Build image - now handles multipart URL responses
+  Widget _buildCampaignImage(String imageUrl) {
     try {
-      // Debug print to see what we're working with
-      print('Processing image data length: ${imageData.length}');
-      print('Image data starts with: ${imageData.length > 20 ? imageData.substring(0, 20) : imageData}...');
+      if (imageUrl.isEmpty) {
+        return _buildImageErrorWidget();
+      }
 
-      // Check if it's a data URL (contains data:image/)
-      if (imageData.startsWith('data:image/')) {
-        // Extract base64 part after comma
-        final base64String = imageData.split(',').last;
-        print('Data URL detected, base64 length: ${base64String.length}');
-        return Image.memory(
-          base64Decode(base64String),
-          fit: BoxFit.cover,
-          width: double.infinity,
-          height: double.infinity,
-          errorBuilder: (context, error, stackTrace) {
-            print('Error loading data URL image: $error');
-            return _buildImageErrorWidget();
-          },
-        );
-      }
-      // Check if it looks like base64 (try to decode it directly)
-      else if (_isBase64String(imageData)) {
-        print('Base64 image detected, length: ${imageData.length}');
-        try {
-          final decodedBytes = base64Decode(imageData);
-          print('Successfully decoded ${decodedBytes.length} bytes');
-          return Image.memory(
-            decodedBytes,
-            fit: BoxFit.cover,
-            width: double.infinity,
-            height: double.infinity,
-            errorBuilder: (context, error, stackTrace) {
-              print('Error displaying decoded image: $error');
-              return _buildImageErrorWidget();
-            },
-          );
-        } catch (decodeError) {
-          print('Failed to decode base64: $decodeError');
-          return _buildImageErrorWidget();
-        }
-      }
-      // Assume it's a URL and use the buildImageWidget
-      else {
-        print('Treating as URL: $imageData');
-        return widget.buildImageWidget(imageData, isProfileImage: false);
-      }
+      // Use the buildImageWidget for URL-based images
+      return widget.buildImageWidget(imageUrl, isProfileImage: false);
     } catch (e) {
       print('Error processing campaign image: $e');
       return _buildImageErrorWidget();
     }
   }
 
-// Improved helper method to check if a string is a valid base64
-  bool _isBase64String(String str) {
-    try {
-      // Basic check: base64 strings should be divisible by 4 after padding
-      // and contain only valid base64 characters
-      if (str.isEmpty || str.length < 20) return false; // Minimum reasonable size
-
-      // Add padding if needed
-      String paddedStr = str;
-      while (paddedStr.length % 4 != 0) {
-        paddedStr += '=';
-      }
-
-      // Check for valid base64 characters
-      final base64RegExp = RegExp(r'^[A-Za-z0-9+/]*={0,3}');
-          if (!base64RegExp.hasMatch(paddedStr)) return false;
-
-    // Try to decode to verify it's valid base64
-    final decoded = base64Decode(paddedStr);
-
-    // Additional check: decoded data should be reasonable size for an image
-    if (decoded.length < 100) return false; // Too small to be a real image
-
-    return true;
-    } catch (e) {
-    print('Base64 validation error: $e');
-    return false;
-    }
-  }
-
-  // Helper widget for image loading errors
   Widget _buildImageErrorWidget() {
     return Container(
       color: Colors.grey.shade100,
@@ -249,13 +192,6 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
         ),
         backgroundColor: const Color(0xFFF8FAFC),
         elevation: 0,
-        actions: [
-          SizedBox(
-            height: 40,
-
-
-          ),
-        ],
       ),
       body: Consumer<CampaignProvider>(
         builder: (context, provider, _) {
@@ -357,8 +293,6 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                     const Text('No Campaigns Yet', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: Colors.black87)),
                     const SizedBox(height: 8),
                     const Text('Create your first campaign to get started', style: TextStyle(fontSize: 16, color: Colors.black54)),
-                    const SizedBox(height: 24),
-
                   ],
                 ),
               ),
@@ -389,7 +323,8 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   }
 
   Widget _buildCampaignCard(dynamic campaign, int index) {
-    final String coverImage = campaign['coverImageBase64'] ?? campaign['coverImage'] ?? '';
+    // Get cover image URL from the response
+    final String coverImage = campaign['coverImage'] ?? '';
     final String schedule = (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
     final String communityName = campaign['community']?['name'] ?? 'Unknown';
 
@@ -452,7 +387,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                         children: [
                           // Title
                           Padding(
-                            padding: const EdgeInsets.only(right:15),
+                            padding: const EdgeInsets.only(right: 15),
                             child: Text(
                               campaign['title'] ?? 'Untitled Campaign',
                               style: const TextStyle(
@@ -542,7 +477,6 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
           ),
         ),
 
-
         if (campaign['isUserAdmin'] == true)
           Positioned(
             top: 3,
@@ -599,43 +533,6 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
           ),
       ],
     );
-  }
-
-
-  Widget _buildInfoChip(String label, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: color)),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(dynamic dateString) {
-    try {
-      if (dateString == null || dateString.toString().isEmpty) return 'N/A';
-      if (!_isValidDate(dateString)) return 'Invalid Date';
-      final date = DateTime.parse(dateString.toString());
-      return DateFormat('MMM dd, yyyy').format(date);
-    } catch (e) {
-      return 'Invalid Date';
-    }
-  }
-
-  bool _isValidDate(String? dateString) {
-    if (dateString == null || dateString.isEmpty) return false;
-    return !RegExp(r'^(one_time|daily|weekly|monthly|quarterly|half_yearly|yearly|2_day)$', caseSensitive: false)
-        .hasMatch(dateString);
   }
 
   Widget _buildLoadingMoreIndicator() {

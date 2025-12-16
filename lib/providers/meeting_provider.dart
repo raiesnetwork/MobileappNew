@@ -122,8 +122,6 @@ class MeetingProvider extends ChangeNotifier {
       debugPrint('🆕 MeetingId: ${data['meetingId']}');
 
       _successMessage = '${data['name']} wants to join the meeting';
-
-      // Add to pending requests if not already there
       final requestId = '${data['meetingId']}-${data['userId']}';
       final exists = _pendingRequests.any((req) =>
       '${req['meetingId']}-${req['userId']}' == requestId
@@ -389,7 +387,6 @@ class MeetingProvider extends ChangeNotifier {
     _service.rejectParticipant(requestId);
   }
 
-  /// Kick a participant (host only)
   Future<void> kickParticipant(String participantIdentity) async {
     if (!_isHost || _currentMeetingId == null) {
       _errorMessage = 'Only host can kick participants';
@@ -411,7 +408,6 @@ class MeetingProvider extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
-  /// Request to join a meeting
   Future<void> requestToJoinMeeting(String meetingId) async {
     if (_currentUserId == null || _currentUserName == null) {
       _errorMessage = 'User not initialized';

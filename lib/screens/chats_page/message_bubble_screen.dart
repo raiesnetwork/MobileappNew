@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ixes.app/constants/constants.dart';
+import 'package:ixes.app/screens/chats_page/view_file_screen.dart';
 import 'package:open_file/open_file.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -715,98 +716,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       return;
     }
 
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext context) {
-          return const AlertDialog(
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 16),
-                Text('Opening file...'),
-              ],
-            ),
-          );
-        },
-      );
-
-      File? fileToOpen;
-
-      if (widget.localFilePath != null && widget.localFilePath!.isNotEmpty) {
-        final localFile = File(widget.localFilePath!);
-        if (await localFile.exists()) {
-          fileToOpen = localFile;
-        }
-      }
-
-      if (fileToOpen == null && widget.fileUrl != null) {
-        if (_isUrl(widget.fileUrl!)) {
-          final tempDir = await getTemporaryDirectory();
-          final tempFilePath = '${tempDir.path}/${widget.fileName!}';
-          final tempFile = File(tempFilePath);
-
-          if (await tempFile.exists()) {
-            final fileSize = await tempFile.length();
-            if (fileSize > 0) {
-              fileToOpen = tempFile;
-            } else {
-              await tempFile.delete();
-            }
-          }
-
-          if (fileToOpen == null) {
-            final response = await http.get(Uri.parse(widget.fileUrl!));
-            if (response.statusCode == 200) {
-              if (response.bodyBytes.isEmpty) {
-                throw Exception('Downloaded file is empty');
-              }
-              await tempFile.writeAsBytes(response.bodyBytes);
-              fileToOpen = tempFile;
-            } else {
-              throw Exception('Failed to download file: HTTP ${response.statusCode}');
-            }
-          }
-        } else {
-          fileToOpen = File(widget.fileUrl!);
-          if (!await fileToOpen.exists()) {
-            throw Exception('File not found at path: ${widget.fileUrl}');
-          }
-        }
-      }
-
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      if (fileToOpen == null) {
-        throw Exception('Unable to locate file');
-      }
-
-      final result = await OpenFile.open(fileToOpen.path);
-      if (result.type != ResultType.done) {
-        String errorMessage = result.message ?? 'Cannot open file';
-        if (result.type == ResultType.noAppToOpen) {
-          errorMessage = 'No app available to open this file type (.${widget.fileName!.split('.').last})';
-        }
-        throw Exception(errorMessage);
-      }
-
-    } catch (e) {
-      if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop();
-      }
-
-      _scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Error opening file: ${e.toString().replaceFirst('Exception: ', '')}'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    }
+    // Use the new FileViewerHelper
+    await FileViewerHelper.openFile(
+      context: context,
+      fileUrl: widget.fileUrl!,
+      fileName: widget.fileName!,
+      localFilePath: widget.localFilePath,
+    );
   }
 
   bool _isUrl(String path) {

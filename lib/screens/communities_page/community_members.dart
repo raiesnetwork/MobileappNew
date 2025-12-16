@@ -15,6 +15,8 @@ class CommunityMembersScreen extends StatefulWidget {
 
 class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
   bool isViewerAdmin = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -34,12 +36,18 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
     });
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _showSnackBar(BuildContext context, String message, bool isError) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           message,
-          style: TextStyle(
+          style: const TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.w500,
           ),
@@ -54,10 +62,401 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
     );
   }
 
+  List<dynamic> _getFilteredMembers(List<dynamic> membersList) {
+    if (_searchQuery.isEmpty) {
+      return membersList;
+    }
+
+    return membersList.where((member) {
+      final user = member['userId'] as Map<String, dynamic>? ?? {};
+      final profile = user['profile'] as Map<String, dynamic>? ?? {};
+      final userName = (profile['name'] as String? ?? '').toLowerCase();
+      final userRole = (member['userRole'] as String? ?? '').toLowerCase();
+      final userMobile = (user['mobile'] as String? ?? '').toLowerCase();
+      final query = _searchQuery.toLowerCase();
+
+      return userName.contains(query) ||
+          userRole.contains(query) ||
+          userMobile.contains(query);
+    }).toList();
+  }
+
+  void _showMemberDetails(BuildContext context, Map<String, dynamic> member) {
+    final user = member['userId'] as Map<String, dynamic>? ?? {};
+    final profile = user['profile'] as Map<String, dynamic>? ?? {};
+    final userName = profile['name'] as String? ?? 'Unknown User';
+    final userRole = member['userRole'] as String? ?? 'Member';
+    final isAdmin = member['isAdmin'] as bool? ?? false;
+    final status = member['status'] as String? ?? 'UNKNOWN';
+    final profileImage = profile['profileImage'] as String? ?? '';
+    final userEmail = user['email'] as String? ?? '';
+    final userMobile = user['mobile'] as String? ?? '';
+    final createdAt = member['createdAt'] as String? ?? '';
+    final superAdmin = member['superAdmin'] as bool? ?? false;
+    final userId = user['_id'] as String? ?? '';
+    String currentUserId = '667ef2f47487c7d72afd9645';
+    bool showMenu = isViewerAdmin && userId != currentUserId && !superAdmin;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        child: Column(
+          children: [
+            // Handle bar
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    // Header with Avatar
+                    Stack(
+                      children: [
+                        Column(
+                          children: [
+                            Stack(
+                              children: [
+                                Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Primary,
+                                      width: 3,
+                                    ),
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: 50,
+                                    backgroundImage: profileImage.isNotEmpty
+                                        ? profileImage.startsWith('data:image')
+                                        ? MemoryImage(
+                                      Uri.parse(profileImage).data!.contentAsBytes(),
+                                    )
+                                        : NetworkImage(profileImage) as ImageProvider
+                                        : null,
+                                    child: profileImage.isEmpty
+                                        ? Text(
+                                      userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+                                      style: const TextStyle(
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                        : null,
+                                  ),
+                                ),
+                                Positioned(
+                                  right: 0,
+                                  bottom: 0,
+                                  child: Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      color: _getStatusColor(status),
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 3),
+                                    ),
+                                    child: Icon(
+                                      _getStatusIcon(status),
+                                      size: 14,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              userName,
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.black87,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Primary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    userRole,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Primary,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                if (superAdmin)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Colors.purple,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Text(
+                                      'SUPER ADMIN',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  )
+                                else if (isAdmin)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Primary,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Text(
+                                      'ADMIN',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        if (showMenu)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, color: Colors.grey),
+                              onSelected: (value) async {
+                                final provider = Provider.of<CommunityProvider>(context, listen: false);
+                                if (value == 'toggle_admin') {
+                                  final result = await provider.updateAdminStatusProvider(
+                                    widget.communityId,
+                                    userId,
+                                    !isAdmin,
+                                  );
+                                  if (mounted) {
+                                    Navigator.pop(context);
+                                    _showSnackBar(
+                                      context,
+                                      result['message'] as String,
+                                      result['error'] as bool,
+                                    );
+                                  }
+                                } else if (value == 'remove') {
+                                  Navigator.pop(context);
+                                  bool? confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Confirm Removal'),
+                                      content: const Text('Are you sure you want to remove this user from the community?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, true),
+                                          child: const Text('Remove'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    final result = await provider.removeUserFromCommunityProvider(
+                                      widget.communityId,
+                                      userId,
+                                    );
+                                    if (mounted) {
+                                      _showSnackBar(
+                                        context,
+                                        result['message'] as String,
+                                        result['error'] as bool,
+                                      );
+                                    }
+                                  }
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'toggle_admin',
+                                  child: Text(isAdmin ? 'Remove Admin' : 'Make Admin'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('Remove from Community'),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // Details Section
+                    Column(
+                      children: [
+                        if (userEmail.isNotEmpty)
+                          _buildDetailItem(
+                            icon: Icons.email_outlined,
+                            label: 'Email',
+                            value: userEmail,
+                            iconColor: Colors.blue,
+                          ),
+
+                        if (userMobile.isNotEmpty)
+                          _buildDetailItem(
+                            icon: Icons.phone_outlined,
+                            label: 'Phone',
+                            value: userMobile,
+                            iconColor: Colors.green,
+                          ),
+
+                        if (profile['birthdate'] != null)
+                          _buildDetailItem(
+                            icon: Icons.cake_outlined,
+                            label: 'Birthday',
+                            value: _formatDate(profile['birthdate']),
+                            iconColor: Colors.orange,
+                          ),
+
+                        if (profile['location'] != null)
+                          _buildDetailItem(
+                            icon: Icons.location_on_outlined,
+                            label: 'Location',
+                            value: profile['location'],
+                            iconColor: Colors.red,
+                          ),
+
+                        if (profile['address'] != null)
+                          _buildDetailItem(
+                            icon: Icons.home_outlined,
+                            label: 'Address',
+                            value: profile['address'],
+                            iconColor: Colors.indigo,
+                          ),
+
+                        _buildDetailItem(
+                          icon: Icons.person_outline,
+                          label: 'Status',
+                          value: status,
+                          iconColor: _getStatusColor(status),
+                        ),
+
+                        if (createdAt.isNotEmpty)
+                          _buildDetailItem(
+                            icon: Icons.calendar_today_outlined,
+                            label: 'Joined',
+                            value: _formatDate(createdAt),
+                            iconColor: Colors.indigo,
+                            showDivider: false,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailItem({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color iconColor,
+    bool showDivider = true,
+  }) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: iconColor),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      value,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (showDivider)
+          Divider(
+            color: Colors.grey.shade200,
+            height: 1,
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<CommunityProvider>(context);
     final membersList = (provider.communityUsers['data'] as List<dynamic>?) ?? [];
+    final filteredMembers = _getFilteredMembers(membersList);
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -66,7 +465,7 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
         title: const Text(
           'Community Members',
           style: TextStyle(
-            fontSize: 24,
+            fontSize: 20,
             fontWeight: FontWeight.w700,
             color: Primary,
           ),
@@ -193,332 +592,207 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
             ),
           ),
 
+          // Search Bar
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
+                decoration: InputDecoration(
+                  hintText: 'Search by name, role, or phone...',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade400,
+                    fontSize: 14,
+                  ),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                    icon: Icon(Icons.clear, color: Colors.grey.shade400),
+                    onPressed: () {
+                      setState(() {
+                        _searchController.clear();
+                        _searchQuery = '';
+                      });
+                    },
+                  )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Members List
           Expanded(
-            child: ListView.builder(
+            child: filteredMembers.isEmpty
+                ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.search_off,
+                    size: 64,
+                    color: Colors.grey.shade400,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No members found',
+                    style: TextStyle(
+                      fontSize: 18,
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Try adjusting your search',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ),
+            )
+                : ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              itemCount: membersList.length,
+              itemCount: filteredMembers.length,
               itemBuilder: (context, index) {
-                final member = membersList[index] as Map<String, dynamic>;
+                final member = filteredMembers[index] as Map<String, dynamic>;
                 final user = member['userId'] as Map<String, dynamic>? ?? {};
                 final profile = user['profile'] as Map<String, dynamic>? ?? {};
                 final userName = profile['name'] as String? ?? 'Unknown User';
                 final userRole = member['userRole'] as String? ?? 'Member';
                 final isAdmin = member['isAdmin'] as bool? ?? false;
-                final status = member['status'] as String? ?? 'UNKNOWN';
-                final profileImage = profile['profileImage'] as String? ?? '';
-                final userEmail = user['email'] as String? ?? '';
-                final userMobile = user['mobile'] as String? ?? '';
-                final createdAt = member['createdAt'] as String? ?? '';
-                final isFamilyHead = profile['isFamilyHead'] as bool? ?? false;
                 final superAdmin = member['superAdmin'] as bool? ?? false;
+                final profileImage = profile['profileImage'] as String? ?? '';
+                final userMobile = user['mobile'] as String? ?? '';
+
                 final userId = user['_id'] as String? ?? '';
-
-                String currentUserId = '667ef2f47487c7d72afd9645'; // Placeholder
-
+                final status = member['status'] as String? ?? 'UNKNOWN';
+                String currentUserId = '667ef2f47487c7d72afd9645';
                 bool showMenu = isViewerAdmin && userId != currentUserId && !superAdmin;
 
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.08),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Stack(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Column(
+                return GestureDetector(
+                  onTap: () => _showMemberDetails(context, member),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        Row(
                           children: [
-                            // Header Row with Avatar and Basic Info
-                            Row(
-                              children: [
-                                // Enhanced Avatar with Status Indicator
-                                Stack(
-                                  children: [
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          width: 0.2,
-                                        ),
-                                      ),
-                                      child: CircleAvatar(
-                                        radius: 32,
-                                        backgroundImage: profileImage.isNotEmpty
-                                            ? profileImage.startsWith('data:image')
-                                            ? MemoryImage(
-                                          Uri.parse(profileImage).data!.contentAsBytes(),
-                                        )
-                                            : NetworkImage(profileImage) as ImageProvider
-                                            : null,
-                                        child: profileImage.isEmpty
-                                            ? Text(
-                                          userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
-                                          style: const TextStyle(
-                                            fontSize: 24,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                            : null,
-                                      ),
-                                    ),
-                                    // Status Indicator
-                                    Positioned(
-                                      right: 0,
-                                      bottom: 0,
-                                      child: Container(
-                                        width: 20,
-                                        height: 20,
-                                        decoration: BoxDecoration(
-                                          color: _getStatusColor(status),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Colors.white, width: 2),
-                                        ),
-                                        child: Icon(
-                                          _getStatusIcon(status),
-                                          size: 12,
-                                          color: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(width: 16),
-
-                                // Name and Role
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              userName,
-                                              style: const TextStyle(
-                                                fontSize: 20,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                          ),
-                                          if (superAdmin)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Colors.purple,
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: const Text(
-                                                'SUPER',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                          if (isAdmin && !superAdmin)
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: Primary,
-                                                borderRadius: BorderRadius.circular(12),
-                                              ),
-                                              child: const Text(
-                                                'ADMIN',
-                                                style: TextStyle(
-                                                  color: Colors.white,
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Primary.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(20),
-                                        ),
-                                        child: Text(
-                                          userRole,
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            color: Primary,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 20),
-
-                            // Divider
+                            // Avatar
                             Container(
-                              height: 1,
-                              color: Colors.grey.shade200,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Primary.withOpacity(0.2),
+                                  width: 2,
+                                ),
+                              ),
+                              child: CircleAvatar(
+                                radius: 28,
+                                backgroundImage: profileImage.isNotEmpty
+                                    ? profileImage.startsWith('data:image')
+                                    ? MemoryImage(
+                                  Uri.parse(profileImage).data!.contentAsBytes(),
+                                )
+                                    : NetworkImage(profileImage) as ImageProvider
+                                    : null,
+                                child: profileImage.isEmpty
+                                    ? Text(
+                                  userName.isNotEmpty ? userName[0].toUpperCase() : 'U',
+                                  style: const TextStyle(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                  ),
+                                )
+                                    : null,
+                              ),
                             ),
+                            const SizedBox(width: 16),
 
-                            const SizedBox(height: 16),
-
-                            // Member Details in Grid
-                            Column(
-                              children: [
-                                if (userEmail.isNotEmpty || userMobile.isNotEmpty)
-                                  Row(
-                                    children: [
-                                      if (userEmail.isNotEmpty)
-                                        Expanded(
-                                          child: _buildEnhancedInfoItem(
-                                            icon: Icons.email_outlined,
-                                            label: 'Email',
-                                            value: userEmail,
-                                            iconColor: Colors.blue,
-                                          ),
-                                        ),
-                                      if (userEmail.isNotEmpty && userMobile.isNotEmpty)
-                                        const SizedBox(width: 12),
-                                      if (userMobile.isNotEmpty)
-                                        Expanded(
-                                          child: _buildEnhancedInfoItem(
-                                            icon: Icons.phone_outlined,
-                                            label: 'Phone',
-                                            value: userMobile,
-                                            iconColor: Colors.green,
-                                          ),
-                                        ),
-                                    ],
+                            // Name and Role
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    userName,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.black87,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-
-                                if ((userEmail.isNotEmpty || userMobile.isNotEmpty) &&
-                                    (profile['birthdate'] != null || profile['location'] != null))
-                                  const SizedBox(height: 12),
-
-                                if (profile['birthdate'] != null || profile['location'] != null)
-                                  Row(
-                                    children: [
-                                      if (profile['birthdate'] != null)
-                                        Expanded(
-                                          child: _buildEnhancedInfoItem(
-                                            icon: Icons.cake_outlined,
-                                            label: 'Birthday',
-                                            value: _formatDate(profile['birthdate']),
-                                            iconColor: Colors.orange,
-                                          ),
-                                        ),
-                                      if (profile['birthdate'] != null && profile['location'] != null)
-                                        const SizedBox(width: 12),
-                                      if (profile['location'] != null)
-                                        Expanded(
-                                          child: _buildEnhancedInfoItem(
-                                            icon: Icons.location_on_outlined,
-                                            label: 'Location',
-                                            value: profile['location'],
-                                            iconColor: Colors.red,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-
-                                if (profile['address'] != null) ...[
-                                  const SizedBox(height: 12),
-                                  _buildEnhancedInfoItem(
-                                    icon: Icons.home_outlined,
-                                    label: 'Address',
-                                    value: profile['address'],
-                                    iconColor: Colors.indigo,
-                                    fullWidth: true,
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    userRole,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.green,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ],
-
-                                // Member Status and Dates
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _buildEnhancedInfoItem(
-                                        icon: Icons.person_outline,
-                                        label: 'Status',
-                                        value: status,
-                                        iconColor: _getStatusColor(status),
-                                      ),
-                                    ),
-                                    if (createdAt.isNotEmpty) ...[
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: _buildEnhancedInfoItem(
-                                          icon: Icons.calendar_today_outlined,
-                                          label: 'Joined',
-                                          value: _formatDate(createdAt),
-                                          iconColor: Colors.indigo,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ],
+                              ),
                             ),
+
+                            const SizedBox(width: 40),
                           ],
                         ),
-                      ),
-                      if (showMenu)
-                        Positioned(
-                          top: 16,
-                          right: 16,
-                          child: PopupMenuButton<String>(
-                            icon: const Icon(Icons.more_vert, color: Colors.grey),
-                            onSelected: (value) async {
-                              if (value == 'toggle_admin') {
-                                final result = await provider.updateAdminStatusProvider(
-                                  widget.communityId,
-                                  userId,
-                                  !isAdmin,
-                                );
-                                if (mounted) {
-                                  _showSnackBar(
-                                    context,
-                                    result['message'] as String,
-                                    result['error'] as bool,
-                                  );
-                                }
-                              } else if (value == 'remove') {
-                                bool? confirm = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Confirm Removal'),
-                                    content: const Text('Are you sure you want to remove this user from the community?'),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, false),
-                                        child: const Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context, true),
-                                        child: const Text('Remove'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (confirm == true) {
-                                  final result = await provider.removeUserFromCommunityProvider(
+
+                        // Three Dots Menu on Top Right
+                        if (showMenu)
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+                              padding: EdgeInsets.zero,
+                              onSelected: (value) async {
+                                final provider = Provider.of<CommunityProvider>(context, listen: false);
+                                if (value == 'toggle_admin') {
+                                  final result = await provider.updateAdminStatusProvider(
                                     widget.communityId,
                                     userId,
+                                    !isAdmin,
                                   );
                                   if (mounted) {
                                     _showSnackBar(
@@ -527,22 +801,91 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
                                       result['error'] as bool,
                                     );
                                   }
+                                } else if (value == 'remove') {
+                                  bool? confirm = await showDialog<bool>(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Confirm Removal'),
+                                      content: const Text('Are you sure you want to remove this user from the community?'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, false),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context, true),
+                                          child: const Text('Remove'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                  if (confirm == true) {
+                                    final result = await provider.removeUserFromCommunityProvider(
+                                      widget.communityId,
+                                      userId,
+                                    );
+                                    if (mounted) {
+                                      _showSnackBar(
+                                        context,
+                                        result['message'] as String,
+                                        result['error'] as bool,
+                                      );
+                                    }
+                                  }
                                 }
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              PopupMenuItem(
-                                value: 'toggle_admin',
-                                child: Text(isAdmin ? 'Remove Admin' : 'Make Admin'),
-                              ),
-                              const PopupMenuItem(
-                                value: 'remove',
-                                child: Text('Remove from Community'),
-                              ),
-                            ],
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'toggle_admin',
+                                  child: Text(isAdmin ? 'Remove Admin' : 'Make Admin'),
+                                ),
+                                const PopupMenuItem(
+                                  value: 'remove',
+                                  child: Text('Remove from Community'),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
+
+                        // Badge on Bottom Right
+                        if (superAdmin || isAdmin)
+                          Positioned(
+                            bottom: 0,
+                            right: 0,
+                            child: superAdmin
+                                ? Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.purple,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'SUPER',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            )
+                                : Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Primary,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'ADMIN',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 );
               },
@@ -579,53 +922,6 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildEnhancedInfoItem({
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color iconColor,
-    bool fullWidth = false,
-  }) {
-    return Container(
-      width: fullWidth ? double.infinity : null,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: iconColor),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.black87,
-              fontWeight: FontWeight.w500,
-            ),
-            maxLines: fullWidth ? 2 : 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
     );
   }
 

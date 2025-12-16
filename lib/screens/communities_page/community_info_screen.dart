@@ -989,8 +989,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
             () => _confirmDeleteCommunity(communityId),
       ),
       const SizedBox(width: 8),
-      _buildActionButton(Icons.copy),
-      const SizedBox(width: 8),
       _buildActionButton(Icons.add_circle_outlined, Colors.orange),
       const SizedBox(width: 8),
       _buildActionButton(
@@ -1094,35 +1092,51 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
       },
       {
         'icon': Icons.safety_check,
-        'title': 'Service Stastistics',
+        'title': 'Service Statistics',
         'screen': CommunityStatsScreen(communityId: widget.communityId)
       },
     ];
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.7 // Changed to make cards square and smaller
-        ),
-        itemCount: gridItems.length,
-        itemBuilder: (context, index) {
-          final item = gridItems[index];
-          return _buildGridItem(
-            context,
-            icon: item['icon'] as IconData,
-            title: item['title'] as String,
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => item['screen'] as Widget),
+      padding: const EdgeInsets.all(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
             ),
-          );
-        },
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 16,
+              mainAxisSpacing: 24,
+              childAspectRatio: 0.9,
+            ),
+            itemCount: gridItems.length,
+            itemBuilder: (context, index) {
+              final item = gridItems[index];
+              return _buildGridItem(
+                context,
+                icon: item['icon'] as IconData,
+                title: item['title'] as String,
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => item['screen'] as Widget),
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -1133,44 +1147,38 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: Primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(14),
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, size: 20, color: Primary),
+            child: Icon(
+              icon,
+              size: 26,
+              color: Primary,
             ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF1a1a1a),
+              letterSpacing: -0.1,
+              height: 1.2,
             ),
-          ],
-        ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }

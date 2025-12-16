@@ -24,7 +24,7 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   Set<String> _selectedCategories = {};
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  final ScrollController _scrollController = ScrollController(); // ✅ ADDED
+  final ScrollController _scrollController = ScrollController();
 
   final List<String> _categories = [
     'All',
@@ -46,8 +46,6 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
     });
 
     _selectedCategories = {'All'};
-
-    // ✅ ADDED: Scroll listener for pagination
     _scrollController.addListener(_onScroll);
   }
 
@@ -55,17 +53,15 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _scrollController.dispose(); // ✅ ADDED
+    _scrollController.dispose();
     super.dispose();
   }
 
-  // ✅ ADDED: Scroll listener method for pagination
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
       final provider = Provider.of<ServicesProvider>(context, listen: false);
 
-      // Only load more if not searching/filtering
       if (_searchQuery.isEmpty &&
           (_selectedCategories.isEmpty || _selectedCategories.contains('All'))) {
         provider.loadMoreServices();
@@ -76,9 +72,8 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   List<dynamic> _getFilteredServices(List<dynamic> services) {
     List<dynamic> filteredServices = services;
 
-    // Handle 'All' category
     if (_selectedCategories.contains('All') || _selectedCategories.isEmpty) {
-      // If 'All' is selected or no categories are selected, return all services (possibly filtered by search)
+      // Return all services
     } else {
       filteredServices = filteredServices.where((service) {
         if (service is! Map<String, dynamic>) return false;
@@ -93,7 +88,6 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
       }).toList();
     }
 
-    // Filter by search query
     if (_searchQuery.isNotEmpty) {
       filteredServices = filteredServices.where((service) {
         if (service is! Map<String, dynamic>) return false;
@@ -113,7 +107,6 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   }
 
   void _showFilterDialog() {
-    // Create a local copy of selected categories to manage dialog state
     Set<String> tempSelectedCategories = Set.from(_selectedCategories);
 
     showDialog(
@@ -540,6 +533,26 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
     );
   }
 
+  // ✅ CHANGED: New method to get image URL from service data
+  String? _getImageUrl(dynamic imageData) {
+    if (imageData == null) return null;
+
+    // Handle List of images
+    if (imageData is List && imageData.isNotEmpty) {
+      final firstImage = imageData[0];
+      if (firstImage is String && firstImage.isNotEmpty) {
+        return firstImage;
+      }
+    }
+
+    // Handle single string URL
+    if (imageData is String && imageData.isNotEmpty) {
+      return imageData;
+    }
+
+    return null;
+  }
+
   Widget _buildServiceCard({
     required dynamic service,
   }) {
@@ -548,65 +561,80 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
     }
 
     final serviceMap = service as Map<String, dynamic>;
-    String? base64Image = serviceMap['image']?.toString();
+
+    // ✅ CHANGED: Get image URL instead of base64
+    String? imageUrl = _getImageUrl(serviceMap['image']);
     Widget imageWidget;
 
-    if (base64Image != null && base64Image.isNotEmpty) {
-      if (base64Image.startsWith('data:image')) {
-        base64Image = base64Image.replaceFirst(RegExp(r'data:image/[^;]+;base64,'), '');
-      }
-      try {
-        final imageBytes = base64Decode(base64Image);
-        imageWidget = Container(
-          height: 150,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(12),
-              topRight: Radius.circular(12),
-            ),
-            image: DecorationImage(
-              image: MemoryImage(imageBytes),
-              fit: BoxFit.fill,
-            ),
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      // ✅ CHANGED: Use NetworkImage for URL-based images
+      imageWidget = Container(
+        height: 150,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(12),
+            topRight: Radius.circular(12),
           ),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
+        ),
+        child: ClipRRect(
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(12),
+            topRight: Radius.circular(12),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    color: Colors.grey[100],
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                            loadingProgress.expectedTotalBytes!
+                            : null,
+                        color: Primary,
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: Colors.grey[100],
+                    child: Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        size: 32,
+                        color: Colors.grey[400],
+                      ),
+                    ),
+                  );
+                },
               ),
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withOpacity(0.08),
-                ],
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.08),
+                    ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        );
-      } catch (e) {
-        imageWidget = Container(
-          height: 120,
-          decoration: BoxDecoration(
-            color: Colors.grey[100],
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(12),
-              topRight: Radius.circular(12),
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              Icons.broken_image_outlined,
-              size: 32,
-              color: Colors.grey[400],
-            ),
-          ),
-        );
-      }
+        ),
+      );
     } else {
+      // ✅ UNCHANGED: Placeholder for missing images
       imageWidget = Container(
         height: 120,
         decoration: BoxDecoration(
@@ -727,11 +755,8 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
                                 costPerSlot: serviceMap['cost'] ?? 0,
                                 currency: serviceMap['currency'] ?? 'INR',
                                 maxSlots: serviceMap['slots'] ?? 10,
-                                serviceImage: (serviceMap['image'] != null &&
-                                    serviceMap['image'] is List &&
-                                    serviceMap['image'].isNotEmpty)
-                                    ? serviceMap['image'][0]
-                                    : '',
+                                // ✅ CHANGED: Pass image URL instead of base64
+                                serviceImage: _getImageUrl(serviceMap['image']) ?? '',
                                 location: serviceMap['location'] ?? '',
                               ),
                             ),
@@ -768,204 +793,200 @@ class _ServicesScreenState extends State<ServicesScreen> with AutomaticKeepAlive
   Widget build(BuildContext context) {
     super.build(context);
     return Consumer<ServicesProvider>(
-        builder: (context, provider, child) {
-      final filteredServices = _getFilteredServices(provider.services);
+      builder: (context, provider, child) {
+        final filteredServices = _getFilteredServices(provider.services);
 
-      return Scaffold(
+        return Scaffold(
           backgroundColor: Colors.grey[50],
           appBar: AppBar(
-          scrolledUnderElevation: 0,
-          title: const Text(
-          'All Services',
-          style: TextStyle(
-          fontSize: 22,
-          fontWeight: FontWeight.bold,
-          color: Colors.black87,
-      ),
-    ),
-    actions: [
-    TextButton(
-    onPressed: () {
-    Navigator.push(
-    context,
-    MaterialPageRoute(builder: (context) => MyProductsScreen()),
-    );
-    },
-    child: Text(
-    'View Products',
-    style: TextStyle(
-    color: Colors.black,
-    fontSize: 16,
-    ),
-    ),
-    ),
-    ],
-    backgroundColor: Colors.white,
-    elevation: 0,
-    centerTitle: true,
-    ),
-    floatingActionButton: FloatingActionButton.extended(
-    onPressed: () {
-    Navigator.push(
-    context,
-    MaterialPageRoute(
-    builder: (context) => const CreateServiceScreen(communityId: ''),
-    ),
-    );
-    },
-    backgroundColor: Primary,
-    foregroundColor: Colors.white,
-    icon: const Icon(Icons.add, size: 20),
-    label: const Text(
-    'Add Service',
-    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-    ),
-    shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(12),
-    ),
-    elevation: 3,
-    ),
-    body: Column(
-    children: [
-    _buildSearchBar(),
-    _buildFilterChip(),
-    const SizedBox(height: 8),
-    Expanded(
-    child: RefreshIndicator(
-    onRefresh: () async {
-    // ✅ CHANGED: Pass refresh=true to reset pagination
-    await provider.fetchServices(refresh: true);
-    },
-    color: Primary,
-    child: provider.isLoading
-    ? const Center(
-    child: CircularProgressIndicator(color: Primary),
-    )
-        : provider.hasError
-    ? Center(
-    child: Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-    Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-    color: Colors.red.withOpacity(0.1),
-    shape: BoxShape.circle,
-    ),
-    child: Icon(
-    Icons.error_outline,
-    size: 40,
-    color: Colors.red[400],
-    ),
-    ),
-    const SizedBox(height: 12),
-    const Text(
-    'Oops! Something went wrong',
-    style: TextStyle(
-    fontSize: 16,
-    fontWeight: FontWeight.w600,
-    color: Colors.black87,
-    ),
-    ),
-    const SizedBox(height: 6),
-    Text(
-    provider.message,
-    style: TextStyle(
-    fontSize: 13,
-    color: Colors.grey[600],
-    ),
-    textAlign: TextAlign.center,
-    ),
-    const SizedBox(height: 20),
-    ElevatedButton.icon(
-    onPressed: () => provider.fetchServices(),
-    icon: const Icon(Icons.refresh, size: 18),
-    label: const Text('Try Again'),
-    style: ElevatedButton.styleFrom(
-    backgroundColor: Primary,
-    foregroundColor: Colors.white,
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-    shape: RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(10),
-    ),
-    elevation: 0,
-    ),
-    ),
-    ],
-    ),
-    )
-        : filteredServices.isEmpty
-    ? Center(
-    child: Column(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-    Icon(
-    _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
-    ? Icons.search_off
-        : Icons.inventory_2_outlined,
-    size: 48,
-    color: Colors.grey[400],
-    ),
-    const SizedBox(height: 12),
-    Text(
-    _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
-    ? 'No services found'
-        : 'No services available',
-    style: TextStyle(
-    fontSize: 14,
-    fontWeight: FontWeight.w500,
-    color: Colors.grey[600],
-    ),
-    textAlign: TextAlign.center,
-    ),
-    if (_searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')) ...[
-    const SizedBox(height: 6),
-    TextButton(
-    onPressed: () {
-    setState(() {
-    _searchQuery = '';
-    _selectedCategories = {'All'};
-    _searchController.clear();
-    _searchFocusNode.unfocus();
-    });
-    },
-    child: const Text(
-    'Clear filters',
-    style: TextStyle(fontSize: 13),
-    ),
-    ),
-    ],
-    ],
-    ),
-    )
-        : ListView.builder(
-    controller: _scrollController, // ✅ ADDED: Attach scroll controller
-    padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
-    // ✅ CHANGED: Add +1 for loading indicator
-    itemCount: filteredServices.length + (provider.isLoadingMoreServices ? 1 : 0),
-    itemBuilder: (context, index) {
-      // ✅ ADDED: Show loading indicator at the end
-      if (index == filteredServices.length) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          alignment: Alignment.center,
-          child: const CircularProgressIndicator(
-            color: Primary,
-            strokeWidth: 2,
+            scrolledUnderElevation: 0,
+            title: const Text(
+              'All Services',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            actions: [
+              Padding(
+                padding: const EdgeInsets.only(right: 20.0),
+                child: IconButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => MyProductsScreen()),
+                    );
+                  },
+                  icon: Icon(Icons.trolley),
+                  tooltip: 'View Products',
+
+                ),
+              ),
+            ],
+            backgroundColor: Colors.white,
+            elevation: 0,
+            centerTitle: true,
+          ),
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CreateServiceScreen(communityId: ''),
+                ),
+              );
+            },
+            backgroundColor: Primary,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.add, size: 20),
+            label: const Text(
+              'Add Service',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            elevation: 3,
+          ),
+          body: Column(
+            children: [
+              _buildSearchBar(),
+              _buildFilterChip(),
+              const SizedBox(height: 8),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    await provider.fetchServices(refresh: true);
+                  },
+                  color: Primary,
+                  child: provider.isLoading
+                      ? const Center(
+                    child: CircularProgressIndicator(color: Primary),
+                  )
+                      : provider.hasError
+                      ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withOpacity(0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.error_outline,
+                            size: 40,
+                            color: Colors.red[400],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Oops! Something went wrong',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          provider.message,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton.icon(
+                          onPressed: () => provider.fetchServices(),
+                          icon: const Icon(Icons.refresh, size: 18),
+                          label: const Text('Try Again'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            elevation: 0,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                      : filteredServices.isEmpty
+                      ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
+                              ? Icons.search_off
+                              : Icons.inventory_2_outlined,
+                          size: 48,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')
+                              ? 'No services found'
+                              : 'No services available',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_searchQuery.isNotEmpty || _selectedCategories.isNotEmpty && !_selectedCategories.contains('All')) ...[
+                          const SizedBox(height: 6),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _searchQuery = '';
+                                _selectedCategories = {'All'};
+                                _searchController.clear();
+                                _searchFocusNode.unfocus();
+                              });
+                            },
+                            child: const Text(
+                              'Clear filters',
+                              style: TextStyle(fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  )
+                      : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 80),
+                    itemCount: filteredServices.length + (provider.isLoadingMoreServices ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == filteredServices.length) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          alignment: Alignment.center,
+                          child: const CircularProgressIndicator(
+                            color: Primary,
+                            strokeWidth: 2,
+                          ),
+                        );
+                      }
+
+                      final service = filteredServices[index];
+                      return _buildServiceCard(service: service);
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
         );
-      }
-
-      final service = filteredServices[index];
-      return _buildServiceCard(service: service);
-    },
-    ),
-    ),
-    ),
-    ],
-    ),
-      );
-        },
+      },
     );
   }
 }

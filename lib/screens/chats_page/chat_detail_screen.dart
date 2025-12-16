@@ -478,25 +478,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
-  String _constructFullFileUrl(String? fileUrl) {
-    if (fileUrl == null || fileUrl.isEmpty) return '';
-
-    if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
-      return fileUrl;
-    }
-
-    const String baseUrl = 'https://api.ixes.ai';
-    String cleanPath = fileUrl;
-    if (!cleanPath.startsWith('/')) {
-      cleanPath = '/$cleanPath';
-    }
-
-    if (cleanPath.contains('/voice/')) {
-      return '$baseUrl$cleanPath';
-    }
-
-    return '$baseUrl/fileUrl$cleanPath';
-  }
 
   @override
   Widget build(BuildContext context) {
