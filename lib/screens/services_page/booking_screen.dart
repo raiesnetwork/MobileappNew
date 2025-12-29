@@ -58,9 +58,14 @@ class _BookingScreenState extends State<BookingScreen> {
 
   num get totalAmount => widget.costPerSlot * _selectedSlots;
 
+
   String _formatDate(DateTime date) {
     return DateFormat('dd MMM yyyy').format(date);
   }
+  List<String> _generateSelectedSlots() {
+    return List.generate(_selectedSlots, (index) => 'slot_${index + 1}');
+  }
+
 
   Future<void> _selectDate() async {
     final DateTime? picked = await showDatePicker(
@@ -187,6 +192,16 @@ class _BookingScreenState extends State<BookingScreen> {
     try {
       final provider = Provider.of<ServicesProvider>(context, listen: false);
 
+      // ✅ GENERATE SELECTED SLOTS
+      final selectedSlots = _generateSelectedSlots();
+
+      print('🔍 Verifying payment...');
+      print('📦 Service ID: ${widget.serviceId}');
+      print('💰 Amount: $totalAmount');
+      print('📅 Date: ${_selectedDate!.toIso8601String()}');
+      print('🎫 Slots count: $_selectedSlots');
+      print('🎫 Selected slots being sent: $selectedSlots'); // ✅ Log the slots
+
       final verifyResult = await provider.verifyPayment(
         response: {
           'razorpay_payment_id': paymentId,
@@ -197,6 +212,7 @@ class _BookingScreenState extends State<BookingScreen> {
         amount: totalAmount,
         date: _selectedDate!.toIso8601String(),
         slots: _selectedSlots,
+        selectedSlots: selectedSlots, // ✅ ADDED THIS PARAMETER
       );
 
       // Check if widget is still mounted after async operation
@@ -220,6 +236,7 @@ class _BookingScreenState extends State<BookingScreen> {
         // Success - err is false
         final booking = verifyResult['booking'];
         if (booking != null && booking.isNotEmpty) {
+          print('✅ Booking successful!');
           _showSuccessDialog(booking);
         } else {
           print('⚠️ Booking data: $booking');
@@ -229,6 +246,12 @@ class _BookingScreenState extends State<BookingScreen> {
         // Error - err is true
         final message = verifyResult['message'] ?? 'Payment verification failed';
         print('❌ Verification failed: $message');
+
+        // Check for additional error details
+        if (verifyResult['errorDetails'] != null) {
+          print('❌ Error details: ${verifyResult['errorDetails']}');
+        }
+
         _showSnackBar(message, isError: true);
       }
     } catch (e) {

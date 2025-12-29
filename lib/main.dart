@@ -1,6 +1,7 @@
-// main.dart
+// main.dart - FIXED VERSION
+
 import 'package:flutter/material.dart';
-import 'package:ixes.app/constants/apiConstants.dart';
+
 import 'package:ixes.app/providers/announcement_provider.dart';
 import 'package:ixes.app/providers/campaign_provider.dart';
 import 'package:ixes.app/providers/chat_provider.dart';
@@ -17,12 +18,13 @@ import 'package:ixes.app/providers/service_provider.dart';
 import 'package:ixes.app/providers/service_request_provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
+
 import 'package:ixes.app/screens/widgets/video_call.dart';
 import 'package:ixes.app/screens/widgets/voice_call.dart';
+import 'package:ixes.app/services/meeting_overlay_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
-
 import 'providers/auth_provider.dart';
 import 'providers/post_provider.dart';
 import 'screens/splash_screen.dart';
@@ -32,8 +34,6 @@ import 'utils/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString('auth_token');
   final userId = prefs.getString('user_id');
@@ -47,7 +47,7 @@ void main() async {
   ));
 }
 
-class IxesApp extends StatefulWidget {
+class IxesApp extends StatelessWidget {
   final String? initialToken;
   final String? initialUserId;
 
@@ -57,11 +57,6 @@ class IxesApp extends StatefulWidget {
     this.initialUserId,
   });
 
-  @override
-  State<IxesApp> createState() => _IxesAppState();
-}
-
-class _IxesAppState extends State<IxesApp> {
   @override
   Widget build(BuildContext context) {
     return Sizer(
@@ -86,75 +81,174 @@ class _IxesAppState extends State<IxesApp> {
             ChangeNotifierProvider(create: (_) => MeetingProvider()),
             ChangeNotifierProvider(create: (_) => VoiceCallProvider()),
             ChangeNotifierProvider(create: (_) => ProfileProvider()),
+            ChangeNotifierProvider(create: (_) => MeetingOverlayService()),
           ],
-          child: Builder(
-            builder: (context) {
-              final authProvider = context.watch<AuthProvider>();
+          child: AppWithLifecycleObserver(
+            initialToken: initialToken,
+            initialUserId: initialUserId,
+          ),
+        );
+      },
+    );
+  }
+}
 
-              // Step 1: If auth not initialized → trigger load + show splash
-              if (!authProvider.isInitialized) {
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  context.read<AuthProvider>().loadUserFromStorage();
-                });
-                return _buildMaterialApp(home: const SplashScreen());
-              }
+class AppWithLifecycleObserver extends StatefulWidget {
+  final String? initialToken;
+  final String? initialUserId;
 
-              // Step 2: If user is authenticated → initialize ALL services
-              if (authProvider.isAuthenticated && authProvider.user != null) {
-                final user = authProvider.user!;
+  const AppWithLifecycleObserver({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+  });
 
-                WidgetsBinding.instance.addPostFrameCallback((_) async {
-                  final String displayName = user.username.isNotEmpty
-                      ? user.username
-                      : "User_${user.mobile.substring(user.mobile.length - 4)}";
+  @override
+  State<AppWithLifecycleObserver> createState() =>
+      _AppWithLifecycleObserverState();
+}
 
-                  debugPrint('🚀 Initializing all services for: $displayName (${user.id})');
+class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
 
-                  // ✅ CRITICAL: Initialize Personal Chat Provider (includes socket)
-                  final personalChatProvider = context.read<PersonalChatProvider>();
-                  await personalChatProvider.initialize();
-                  debugPrint('✅ Personal Chat Provider initialized');
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Clean up meeting overlay when app is disposed
+    try {
+      MeetingOverlayService().dispose();
+    } catch (e) {
+      debugPrint('Error disposing meeting overlay: $e');
+    }
+    super.dispose();
+  }
 
-                  // Initialize Video Call
-                  context.read<VideoCallProvider>().initialize(
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (!mounted) return;
+
+    try {
+      final authProvider = context.read<AuthProvider>();
+      if (!authProvider.isAuthenticated) return;
+
+      final personalChatProvider = context.read<PersonalChatProvider>();
+
+      switch (state) {
+        case AppLifecycleState.resumed:
+          debugPrint('📱 App resumed - reconnecting socket...');
+          personalChatProvider.reconnectSocket();
+          if (personalChatProvider.currentReceiverId != null) {
+            personalChatProvider
+                .fetchConversation(personalChatProvider.currentReceiverId!);
+          }
+          break;
+        case AppLifecycleState.paused:
+          debugPrint('📱 App paused - keeping socket connected');
+          break;
+        case AppLifecycleState.inactive:
+          debugPrint('📱 App inactive');
+          break;
+        case AppLifecycleState.detached:
+          debugPrint('📱 App detached - cleaning up socket connections');
+          personalChatProvider.cleanup();
+          // Also clean up meeting overlay
+          try {
+            MeetingOverlayService().hideOverlay();
+          } catch (e) {
+            debugPrint('Error hiding meeting overlay: $e');
+          }
+          break;
+        case AppLifecycleState.hidden:
+          debugPrint('📱 App hidden');
+          break;
+      }
+    } catch (e) {
+      debugPrint('❌ Error in lifecycle handler: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Builder(
+      builder: (context) {
+        final authProvider = context.watch<AuthProvider>();
+
+        if (!authProvider.isInitialized) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              context.read<AuthProvider>().loadUserFromStorage();
+            }
+          });
+          return _buildMaterialApp(home: const SplashScreen());
+        }
+
+        if (authProvider.isAuthenticated && authProvider.user != null) {
+          final user = authProvider.user!;
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+
+            final String displayName = user.username.isNotEmpty
+                ? user.username
+                : "User_${user.mobile.substring(user.mobile.length - 4)}";
+
+            debugPrint(
+                '🚀 Initializing all services for: $displayName (${user.id})');
+
+            try {
+              // Initialize Personal Chat Provider
+              final personalChatProvider = context.read<PersonalChatProvider>();
+              await personalChatProvider.initialize();
+              debugPrint('✅ Personal Chat Provider initialized');
+
+              // Initialize Video Call
+              context.read<VideoCallProvider>().initialize(
                     userId: user.id,
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
-                  debugPrint('✅ Video Call Provider initialized');
+              debugPrint('✅ Video Call Provider initialized');
 
-                  // Initialize Voice Call
-                  context.read<VoiceCallProvider>().initialize(
+              // Initialize Voice Call
+              context.read<VoiceCallProvider>().initialize(
                     userId: user.id,
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
-                  debugPrint('✅ Voice Call Provider initialized');
+              debugPrint('✅ Voice Call Provider initialized');
 
-                  // Initialize Meeting (if used)
-                  context.read<MeetingProvider>().initialize(
+              // Initialize Meeting
+              context.read<MeetingProvider>().initialize(
                     userId: user.id,
                     userName: displayName,
                     authToken: widget.initialToken,
                   );
-                  debugPrint('✅ Meeting Provider initialized');
-                });
-              }
+              debugPrint('✅ Meeting Provider initialized');
 
-              // Step 3: Decide which screen to show
-              final bool isLoggedIn = authProvider.isAuthenticated;
+              debugPrint(
+                  '✅ Meeting Overlay Service ready (will be initialized on meeting join)');
+            } catch (e) {
+              debugPrint('❌ Error initializing services: $e');
+            }
+          });
+        }
 
-              return _buildMaterialApp(
-                home: isLoggedIn
-                    ? VoiceCallListener(
+        final bool isLoggedIn = authProvider.isAuthenticated;
+
+        return _buildMaterialApp(
+          home: isLoggedIn
+              ? VoiceCallListener(
                   child: IncomingCallListener(
                     child: const MainScreen(initialIndex: 0),
                   ),
                 )
-                    : const SplashScreen(),
-              );
-            },
-          ),
+              : const SplashScreen(),
         );
       },
     );
@@ -165,14 +259,16 @@ class _IxesAppState extends State<IxesApp> {
       title: 'Ixes',
       theme: AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
+      // REMOVED: The problematic builder that was blocking incoming calls
+      // The default MaterialApp already has an Overlay that works for all overlays
       home: home,
       routes: {
         '/login': (context) => const LoginScreen(),
         '/main': (context) => VoiceCallListener(
-          child: IncomingCallListener(
-            child: const MainScreen(initialIndex: 0),
-          ),
-        ),
+              child: IncomingCallListener(
+                child: const MainScreen(initialIndex: 0),
+              ),
+            ),
       },
     );
   }

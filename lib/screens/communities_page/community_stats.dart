@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
-
+import 'community_campaigns.dart';
+import 'community_members.dart';
+import 'community_services.dart';
 
 class CommunityStatsScreen extends StatefulWidget {
   final String communityId;
@@ -54,6 +56,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     required IconData icon,
     required Color color,
     required int index,
+    VoidCallback? onTap,
   }) {
     return AnimatedBuilder(
       animation: _fadeAnimation,
@@ -62,113 +65,116 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
           offset: Offset(0, 50 * (1 - _fadeAnimation.value)),
           child: Opacity(
             opacity: _fadeAnimation.value,
-            child: Container(
-              margin: EdgeInsets.only(
-                bottom: 16,
-                top: index == 0 ? 0 : 0,
-              ),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    color.withOpacity(0.1),
-                    color.withOpacity(0.05),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+            child: GestureDetector(
+              onTap: onTap,
+              child: Container(
+                margin: EdgeInsets.only(
+                  bottom: 16,
+                  top: index == 0 ? 0 : 0,
                 ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: color.withOpacity(0.2),
-                  width: 1.2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.15),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      color.withOpacity(0.1),
+                      color.withOpacity(0.05),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                ],
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Row(
-                  children: [
-                    // Icon Container
-                    Container(
-                      width: 60,
-                      height: 60,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [color, color.withOpacity(0.8)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(15),
-                        boxShadow: [
-                          BoxShadow(
-                            color: color.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        icon,
-                        color: Colors.white,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    // Content
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[700],
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
-                            ),
-                          ),
-                          const SizedBox(height: 7),
-                          Text(
-                            value,
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                              color: color,
-                              height: 1.0,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            subtitle,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    // Trailing Icon
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        Icons.trending_up,
-                        color: color,
-                        size: 18,
-                      ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: color.withOpacity(0.2),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withOpacity(0.15),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Row(
+                    children: [
+                      // Icon Container
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [color, color.withOpacity(0.8)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(15),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          icon,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      // Content
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[700],
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 7),
+                            Text(
+                              value,
+                              style: TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                                height: 1.0,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              subtitle,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Trailing Icon
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: color.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          onTap != null ? Icons.arrow_forward_ios : Icons.trending_up,
+                          color: color,
+                          size: 18,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -349,7 +355,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            'No Statistics Available',
+            'No Analytics Available',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -406,7 +412,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
           ),
           const SizedBox(height: 16),
           Text(
-            'Failed to Load Statistics',
+            'Failed to Load Analytics',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -467,13 +473,62 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     );
   }
 
+
+  void _navigateToCommunities() {
+    // Navigator.push(
+    //   context,
+    //   MaterialPageRoute(
+    //     builder: (context) => YourCommunitiesScreen(
+    //       communityId: widget.communityId,
+    //       communityName: widget.communityName,
+    //     ),
+    //   ),
+    // );
+  }
+
+  void _navigateToUsers() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CommunityMembersScreen(
+          communityId: widget.communityId,
+
+        ),
+      ),
+    );
+  }
+
+  void _navigateToServices() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CommunityServicesScreen(
+          communityId: widget.communityId,
+
+        ),
+      ),
+    );
+  }
+
+  void _navigateToCampaigns() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CommunityCampaignsScreen(
+          communityId: widget.communityId,
+
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: AppBar(
         title: const Text(
-          'Community Statistics',
+          'Community Analytics',
           style: TextStyle(
             fontSize: 17,
             fontWeight: FontWeight.w600,
@@ -553,8 +608,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     value: (statsData['totalCommunities'] ?? 0).toString(),
                     subtitle: 'Communities in hierarchy',
                     icon: Icons.business,
-                    color: const Color(0xFF3B82F6), // Blue
+                    color: const Color(0xFF3B82F6),
                     index: 0,
+                    onTap: _navigateToCommunities,
                   ),
 
                   _buildStatsCard(
@@ -562,8 +618,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     value: (statsData['totalUsers'] ?? 0).toString(),
                     subtitle: 'Registered members',
                     icon: Icons.people,
-                    color: const Color(0xFF10B981), // Green
+                    color: const Color(0xFF10B981),
                     index: 1,
+                    onTap: _navigateToUsers,
                   ),
 
                   _buildStatsCard(
@@ -571,8 +628,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     value: (statsData['totalServices'] ?? 0).toString(),
                     subtitle: 'Services offered',
                     icon: Icons.business_center,
-                    color: const Color(0xFFF59E0B), // Orange
+                    color: const Color(0xFFF59E0B),
                     index: 2,
+                    onTap: _navigateToServices,
                   ),
 
                   _buildStatsCard(
@@ -580,8 +638,10 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     value: (statsData['totalCampaigns'] ?? 0).toString(),
                     subtitle: 'Running campaigns',
                     icon: Icons.campaign,
-                    color: const Color(0xFF8B5CF6), // Purple
-                    index: 3,),
+                    color: const Color(0xFF8B5CF6),
+                    index: 3,
+                    onTap: _navigateToCampaigns,
+                  ),
 
                   const SizedBox(height: 12),
                 ],

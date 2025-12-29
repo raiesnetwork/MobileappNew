@@ -6,13 +6,13 @@ import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
 import 'dart:async';
 
+
+import '../../services/meeting_overlay_service.dart';
+
 class MeetingRoomScreen extends StatefulWidget {
   final String meetingId;
 
-  const MeetingRoomScreen({
-    Key? key,
-    required this.meetingId,
-  }) : super(key: key);
+  const MeetingRoomScreen({Key? key, required this.meetingId}) : super(key: key);
 
   @override
   State<MeetingRoomScreen> createState() => _MeetingRoomScreenState();
@@ -34,10 +34,115 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   final ScrollController _chatScrollController = ScrollController();
   final Set<String> _displayedMessageIds = {}; // Track displayed messages
 
+
+
   @override
   void initState() {
     super.initState();
-    _initializeMeeting();
+    _checkAndRestoreFromOverlay();
+
+    // Listen to overlay service for state changes
+    final overlayService = MeetingOverlayService();
+    overlayService.addListener(_onOverlayUpdate);
+  }
+  void _onOverlayUpdate() {
+    // Update UI when overlay controls change camera/mic
+    if (mounted && _localParticipant != null) {
+      setState(() {
+        _isVideoEnabled = _localParticipant!.isCameraEnabled();
+        _isAudioEnabled = _localParticipant!.isMicrophoneEnabled();
+      });
+    }
+  }
+
+  Future<void> _checkAndRestoreFromOverlay() async {
+    final overlayService = MeetingOverlayService();
+
+    debugPrint('🔍 ===== CHECK RESTORE FROM OVERLAY =====');
+    debugPrint('🔍 Overlay minimized: ${overlayService.isMinimized}');
+    debugPrint('🔍 Overlay meeting ID: ${overlayService.meetingId}');
+    debugPrint('🔍 Current meeting ID: ${widget.meetingId}');
+    debugPrint('🔍 Has room: ${overlayService.room != null}');
+
+    // Check if coming back from overlay
+    if (overlayService.isMinimized &&
+        overlayService.meetingId == widget.meetingId &&
+        overlayService.room != null) {
+
+      debugPrint('✅ ===== RESTORING FROM OVERLAY =====');
+      debugPrint('✅ Reusing existing room connection');
+
+      // REUSE the existing room connection (NO reconnection!)
+      _room = overlayService.room;
+      _localParticipant = overlayService.localParticipant;
+
+      // Setup listeners for the existing room
+      _setupRoomListeners();
+
+      // Update participants
+      _updateParticipants();
+
+      // CRITICAL: Sync UI state with actual device state
+      final actualCameraState = _localParticipant?.isCameraEnabled() ?? true;
+      final actualMicState = _localParticipant?.isMicrophoneEnabled() ?? true;
+
+      setState(() {
+        _isConnecting = false;
+        _isVideoEnabled = actualCameraState;
+        _isAudioEnabled = actualMicState;
+      });
+
+      // Join chat if needed
+      final meetingProvider = context.read<MeetingProvider>();
+      if (!meetingProvider.isChatJoined) {
+        debugPrint('💬 Rejoining chat...');
+        meetingProvider.joinChatRoom();
+      }
+
+      debugPrint('✅ ===== RESTORE COMPLETE =====');
+      debugPrint('✅ Camera: $_isVideoEnabled, Mic: $_isAudioEnabled');
+      debugPrint('✅ Room state: ${_room?.connectionState}');
+      debugPrint('✅ Participants: ${_participantTracks.length}');
+
+      // IMPORTANT: Return early to skip normal initialization
+      return;
+    }
+
+    // Normal flow - initialize new meeting ONLY if not restoring
+    debugPrint('🆕 Not restoring, initializing new meeting');
+    await _initializeMeeting();
+  }
+
+  void _minimizeMeeting() {
+    if (_room == null || _localParticipant == null) {
+      debugPrint('⚠️ Cannot minimize: room or participant is null');
+      return;
+    }
+
+    debugPrint('📱 ===== MINIMIZING MEETING =====');
+    debugPrint('📱 Camera enabled: ${_localParticipant?.isCameraEnabled()}');
+    debugPrint('📱 Mic enabled: ${_localParticipant?.isMicrophoneEnabled()}');
+    debugPrint('📱 Room state: ${_room!.connectionState}');
+
+    // Initialize overlay service with ACTIVE room
+    final overlayService = MeetingOverlayService();
+    overlayService.initialize(
+      room: _room!,
+      localParticipant: _localParticipant!,
+      meetingId: widget.meetingId,
+    );
+
+    // Show overlay BEFORE popping
+    overlayService.showOverlay(context);
+
+    debugPrint('✅ Overlay shown, popping screen');
+
+    // Pop current screen after a small delay to ensure overlay is visible
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    });
   }
 
   Future<void> _initializeMeeting() async {
@@ -126,6 +231,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         debugPrint('Disconnected from room');
 
         if (!mounted) return;
+        final overlayService = MeetingOverlayService();
+        if (overlayService.isMinimized) {
+          overlayService.hideOverlay();
+        }
 
         // Schedule navigation safely
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -193,16 +302,26 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         }
       }
     }
-
-    setState(() {
-      _participantTracks = tracks;
-    });
+    if (mounted) {
+      setState(() {
+        _participantTracks = tracks;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
+        // Check if overlay is active
+        final overlayService = MeetingOverlayService();
+        if (overlayService.isMinimized && overlayService.meetingId == widget.meetingId) {
+          // Coming back from overlay, just allow pop
+          debugPrint('✅ Allowing pop - returning from overlay');
+          return true;
+        }
+
+        // Normal case, show leave dialog
         _showLeaveDialog();
         return false;
       },
@@ -614,6 +733,13 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             badge: context.watch<MeetingProvider>().isHost
                 ? context.watch<MeetingProvider>().pendingRequests.length
                 : null,
+          ),
+          // ADD THIS - Minimize button
+          _buildControlButton(
+            icon: Icons.minimize,
+            label: 'Minimize',
+            isActive: false,
+            onPressed: _minimizeMeeting,
           ),
           _buildControlButton(
             icon: Icons.call_end,
@@ -1335,13 +1461,15 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       }
     });
   }
-
   Future<void> _toggleVideo() async {
     setState(() {
       _isVideoEnabled = !_isVideoEnabled;
     });
 
     await _room?.localParticipant?.setCameraEnabled(_isVideoEnabled);
+
+    // Notify overlay to update
+    MeetingOverlayService().notifyListeners();
   }
 
   Future<void> _toggleAudio() async {
@@ -1350,7 +1478,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     });
 
     await _room?.localParticipant?.setMicrophoneEnabled(_isAudioEnabled);
+
+    // Notify overlay to update
+    MeetingOverlayService().notifyListeners();
   }
+
+
 
   void _showLeaveDialog() {
     showDialog(
@@ -1394,6 +1527,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Future<void> _leaveMeeting() async {
     try {
+      // NEW: Hide overlay if active
+      final overlayService = MeetingOverlayService();
+      if (overlayService.isMinimized) {
+        overlayService.hideOverlay();
+      }
+
       // Show loading indicator
       if (mounted) {
         showDialog(
@@ -1423,22 +1562,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       // Disconnect room in background
       final room = _room;
       if (room != null) {
-        // Remove listener first to prevent callbacks
         room.removeListener(_onRoomUpdate);
-
-        // Disconnect asynchronously
-        unawaited(room.disconnect());
-        unawaited(room.dispose());
+        await room.disconnect();
+        await room.dispose();
       }
 
       // Clear meeting data on main thread
       if (mounted) {
         final provider = context.read<MeetingProvider>();
-
-        // Leave meeting via provider (socket disconnect, etc.)
         provider.leaveMeeting();
 
-        // Small delay to ensure cleanup
         await Future.delayed(const Duration(milliseconds: 100));
 
         // Navigate back
@@ -1448,12 +1581,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       }
     } catch (e) {
       debugPrint('Error leaving meeting: $e');
-      // Force navigation even if error
       if (mounted) {
         Navigator.of(context).popUntil((route) => route.isFirst);
       }
     }
   }
+
   Future<void> _kickParticipant(String participantIdentity) async {
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -1515,17 +1648,36 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   @override
   void dispose() {
+    debugPrint('🧹 ===== DISPOSING MEETING ROOM SCREEN =====');
+
+    // Remove overlay listener
+    final overlayService = MeetingOverlayService();
+    overlayService.removeListener(_onOverlayUpdate);
+
     // Clean up controllers
     _chatController.dispose();
     _chatScrollController.dispose();
 
-    // Clean up room - do this asynchronously to avoid blocking
-    if (_room != null) {
-      _room!.removeListener(_onRoomUpdate);
-      unawaited(_room!.disconnect());
-      unawaited(_room!.dispose());
+    // CRITICAL: Check if we're minimizing
+    if (overlayService.isMinimized &&
+        overlayService.meetingId == widget.meetingId) {
+      // We're minimizing - DON'T disconnect the room
+      debugPrint('✅ Screen disposed but keeping room active (minimized)');
+      // Only remove the listener, don't disconnect
+      if (_room != null) {
+        _room!.removeListener(_onRoomUpdate);
+      }
+    } else {
+      // Normal disposal - disconnect and cleanup
+      debugPrint('🔌 Disconnecting room (normal disposal)');
+      if (_room != null) {
+        _room!.removeListener(_onRoomUpdate);
+        unawaited(_room!.disconnect());
+        unawaited(_room!.dispose());
+      }
     }
 
+    debugPrint('✅ Meeting room screen disposed');
     super.dispose();
   }
 }

@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:path/path.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../api_service/user_api_service.dart';
+
 import '../models/post_model.dart';
 import '../services/comment_service.dart';
 import '../services/post_service.dart';
@@ -452,5 +450,132 @@ class CommentProvider with ChangeNotifier {
 
       notifyListeners();
     }
+  }
+  // Add these properties at the top with other declarations
+  // Add these properties at the top with other declarations
+  List<Map<String, dynamic>> _allUsers = [];
+  bool _isLoadingUsers = false;
+  int _currentUserPage = 1;
+  int _totalUserPages = 1;
+
+// Add these getters
+  List<Map<String, dynamic>> get allUsers => _allUsers;
+  bool get isLoadingUsers => _isLoadingUsers;
+  int get currentUserPage => _currentUserPage;
+  int get totalUserPages => _totalUserPages;
+
+  /// Fetch all users with pagination and search
+  Future<bool> fetchAllUsers({
+    String? search,
+    int pageNo = 1,
+    bool isLoadMore = false,
+  }) async {
+    _isLoadingUsers = true;
+    notifyListeners();
+
+    try {
+      final result = await CommentService.getAllUsers(
+        search: search,
+        pageNo: pageNo,
+      );
+
+      if (result['success']) {
+        final List<dynamic> users = result['allUsers'] ?? [];
+
+        if (isLoadMore) {
+          // Append users when loading more
+          _allUsers.addAll(users.map((e) => e as Map<String, dynamic>).toList());
+        } else {
+          // Replace users on new search or first load
+          _allUsers = users.map((e) => e as Map<String, dynamic>).toList();
+        }
+
+        _currentUserPage = result['currentPage'] ?? 1;
+        _totalUserPages = result['totalPage'] ?? 1;
+
+        _isLoadingUsers = false;
+        notifyListeners();
+        return true;
+      } else {
+        _isLoadingUsers = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error fetching users: $e');
+      _isLoadingUsers = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Share a post
+  Future<bool> sharePost({
+    required BuildContext context,
+    required String postId,
+    required String type, // "user" or "group"
+    required String userId, // Receiver ID
+    required String shareContext, // "feed", "campaign", "service", "announcement"
+    String? contextId, // Required if shareContext is not "feed"
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final result = await CommentService.sharePost(
+        postId: postId,
+        type: type,
+        userId: userId,
+        shareContext: shareContext,
+        contextId: contextId,
+      );
+
+      _isLoading = false;
+
+      if (result['success']) {
+        // ✅ Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Post shared successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+
+        notifyListeners();
+        return true;
+      } else {
+        // ❌ Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result['message'] ?? 'Failed to share post'),
+            backgroundColor: Colors.red,
+          ),
+        );
+
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error sharing post: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+
+      print('❌ Error in sharePost provider: $e');
+      return false;
+    }
+  }
+
+  /// Clear users list (useful when closing search or user selection dialog)
+  void clearUsersList() {
+    _allUsers = [];
+    _currentUserPage = 1;
+    _totalUserPages = 1;
+    notifyListeners();
   }
 }

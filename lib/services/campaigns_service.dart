@@ -19,19 +19,19 @@ class CampaignService {
           'error': true,
           'message': 'Authentication token is missing',
           'campaigns': [],
-          'hasMore': false,
         };
       }
 
+      // Fetch all campaigns (backend doesn't support pagination yet)
       final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/?page=$page&limit=$limit'),
+        Uri.parse('${apiBaseUrl}api/campaigns/'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );
 
-      print('getAllCampaigns - Page: $page, Status: ${response.statusCode}');
+      print('getAllCampaigns - Status: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -47,13 +47,12 @@ class CampaignService {
               [];
         }
 
-        print('Fetched ${campaignsList.length} campaigns for page $page');
+        print('✅ Fetched ${campaignsList.length} total campaigns from server');
 
         return {
           'error': false,
           'message': 'Campaigns fetched successfully',
           'campaigns': campaignsList,
-          'hasMore': campaignsList.length == limit, // If we got full page, there might be more
         };
       } else {
         final decoded = _safeJsonDecode(response.body);
@@ -61,7 +60,6 @@ class CampaignService {
           'error': true,
           'message': decoded['message'] ?? 'Failed to fetch campaigns',
           'campaigns': [],
-          'hasMore': false,
         };
       }
     } catch (e) {
@@ -70,7 +68,6 @@ class CampaignService {
         'error': true,
         'message': 'Error fetching campaigns: ${e.toString()}',
         'campaigns': [],
-        'hasMore': false,
       };
     }
   }
@@ -101,7 +98,6 @@ class CampaignService {
         };
       }
 
-      // Process the campaign data to handle base64 image
       final processedData = Map<String, dynamic>.from(campaignData);
 
       // Handle base64 image properly
@@ -109,7 +105,6 @@ class CampaignService {
           processedData['coverImageBase64'].toString().isNotEmpty) {
         String base64Image = processedData['coverImageBase64'].toString();
 
-        // Remove data URL prefix if it exists (data:image/jpeg;base64,)
         if (base64Image.contains('data:image')) {
           final parts = base64Image.split(',');
           if (parts.length > 1) {
@@ -117,12 +112,10 @@ class CampaignService {
           }
         }
 
-        // Ensure the base64 string is clean
         base64Image = base64Image.replaceAll(RegExp(r'\s+'), '');
         processedData['coverImageBase64'] = base64Image;
         print('createCampaign - Processed base64 image length: ${base64Image.length}');
       } else {
-        // Remove the field if it's empty to avoid server issues
         processedData.remove('coverImageBase64');
       }
 
@@ -144,7 +137,6 @@ class CampaignService {
       if (response.statusCode == 201 || response.statusCode == 200) {
         final decoded = _safeJsonDecode(response.body);
 
-        // Handle different response structures
         Map<String, dynamic>? campaign;
         if (decoded.containsKey('campaign')) {
           campaign = decoded['campaign'];
@@ -153,7 +145,6 @@ class CampaignService {
         } else if (decoded.containsKey('result')) {
           campaign = decoded['result'];
         } else {
-          // If the response itself is the campaign object
           campaign = decoded;
         }
 
@@ -182,7 +173,6 @@ class CampaignService {
       };
     }
   }
-
 
   Future<Map<String, dynamic>> getCampaignDetails(String campaignId) async {
     try {
@@ -298,17 +288,16 @@ class CampaignService {
       }
 
       final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/campaigns/delete'), // 👈 FIXED URL
+        Uri.parse('${apiBaseUrl}api/campaigns/delete'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'campaignId': campaignId}), // 👈 FIXED BODY
+        body: jsonEncode({'campaignId': campaignId}),
       );
 
       print('deleteCampaign - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
-
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -333,6 +322,7 @@ class CampaignService {
       };
     }
   }
+
   Future<Map<String, dynamic>> getCampaignMembers(String campaignId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -356,9 +346,7 @@ class CampaignService {
 
       print('getCampaignMembers - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
-      print("Campaign ID: $campaignId"
-      );
-
+      print("Campaign ID: $campaignId");
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -384,6 +372,7 @@ class CampaignService {
       };
     }
   }
+
   Future<Map<String, dynamic>> getUnpaidCommunityMembers(
       String communityId, String campaignId) async {
     try {
@@ -436,6 +425,3 @@ class CampaignService {
     }
   }
 }
-
-
-

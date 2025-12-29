@@ -9,6 +9,7 @@ import 'package:ixes.app/screens/home/componats/videopayer.dart';
 
 import 'package:intl/intl.dart';
 import 'package:ixes.app/api_service/user_api_service.dart';
+import 'package:ixes.app/screens/home/feedpage/sharepost_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../models/post_model.dart';
@@ -1268,18 +1269,13 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   void _handleShare(BuildContext context, Post post) async {
-    final result = await CommentService.sharePost(
-      postId: post.id,
-      type: 'user',
-      userId: 'receiver_user_id', // Replace with actual ID
-      whom: 'feed',
-      // whomId: 'xyz', // Optional if whom != 'feed'
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result['message']),
-        backgroundColor: result['success'] ? Colors.green : Colors.red,
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SharePostScreen(
+          postId: post.id,
+          shareContext: 'feed', // Since you're in feed screen
+        ),
       ),
     );
   }

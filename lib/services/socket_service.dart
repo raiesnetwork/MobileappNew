@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 import 'dart:convert';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -12,15 +10,17 @@ class SocketService {
 
   IO.Socket? _socket;
   bool _isConnected = false;
+  bool _isConnecting = false;
+  Timer? _reconnectTimer;
 
-  // Stream controllers for events that your provider expects
+  // Stream controllers for events
   final StreamController<bool> _connectionController = StreamController<bool>.broadcast();
   final StreamController<Map<String, dynamic>> _newMessageController = StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<Map<String, dynamic>> _messageDeletedController = StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<Map<String, dynamic>> _messageEditedController = StreamController<Map<String, dynamic>>.broadcast();
   final StreamController<Map<String, dynamic>> _readStatusController = StreamController<Map<String, dynamic>>.broadcast();
 
-  // Streams that your provider expects
+  // Public streams
   Stream<bool> get onConnectionChanged => _connectionController.stream;
   Stream<Map<String, dynamic>> get onNewMessage => _newMessageController.stream;
   Stream<Map<String, dynamic>> get onMessageDeleted => _messageDeletedController.stream;
@@ -30,25 +30,39 @@ class SocketService {
   bool get isConnected => _isConnected;
 
   Future<bool> connect() async {
+    if (_isConnected || _isConnecting) {
+      print('⚠️ Socket already connected or connecting');
+      return _isConnected;
+    }
+
     try {
+      _isConnecting = true;
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
 
       if (token == null || userId == null) {
         print('❗ Cannot connect socket: missing token/userId');
+        _isConnecting = false;
         return false;
       }
 
-      // Use your WebSocket URL from constants
       const String socketUrl = "wss://api.ixes.ai";
+
+      // Dispose existing socket if any
+      if (_socket != null) {
+        await _disposeSocket();
+      }
 
       _socket = IO.io(
         socketUrl,
         IO.OptionBuilder()
             .setTransports(['websocket'])
             .setQuery({'token': token, 'userId': userId})
-            .disableAutoConnect()
+            .setReconnectionAttempts(5)
+            .setReconnectionDelay(2000)
+            .setTimeout(10000)
+            .enableAutoConnect()
             .build(),
       );
 
@@ -56,32 +70,58 @@ class SocketService {
       _socket!.onConnect((_) {
         print("✅ Connected to socket server");
         _isConnected = true;
+        _isConnecting = false;
         _connectionController.add(true);
         _socket!.emit("joinUser", userId);
+        _cancelReconnectTimer();
       });
 
       _socket!.onDisconnect((_) {
         print("❌ Disconnected from socket server");
         _isConnected = false;
+        _isConnecting = false;
+        _connectionController.add(false);
+        _startReconnectTimer();
+      });
+
+      _socket!.onConnectError((data) {
+        print("💥 Socket connection error: $data");
+        _isConnected = false;
+        _isConnecting = false;
         _connectionController.add(false);
       });
 
       _socket!.onError((data) {
         print("💥 Socket error: $data");
         _isConnected = false;
+        _isConnecting = false;
         _connectionController.add(false);
+      });
+
+      _socket!.onReconnect((data) {
+        print("🔄 Socket reconnecting... attempt: $data");
+      });
+
+      _socket!.onReconnectError((data) {
+        print("💥 Reconnection error: $data");
+      });
+
+      _socket!.onReconnectFailed((_) {
+        print("❌ Reconnection failed");
+        _startReconnectTimer();
       });
 
       // Connect
       _socket!.connect();
 
-      // Setup event listeners
+      // Setup event listeners AFTER connection
       _setupEventListeners();
 
       return true;
     } catch (e) {
       print("💥 Socket connection error: $e");
       _isConnected = false;
+      _isConnecting = false;
       _connectionController.add(false);
       return false;
     }
@@ -90,13 +130,27 @@ class SocketService {
   void _setupEventListeners() {
     if (_socket == null) return;
 
-    // Listen for incoming messages - matches API documentation
+    // CRITICAL FIX: Remove old listeners before adding new ones
+    _socket!.off("receiveMessage");
+    _socket!.off("receiveVoiceMessage");
+    _socket!.off("receiveFileMessage");
+    _socket!.off("messageDeleted");
+    _socket!.off("messageEdited");
+    _socket!.off("readStatusUpdated");
+
+    // Listen for incoming messages
     _socket!.on("receiveMessage", (data) {
       try {
         final Map<String, dynamic> messageData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("📩 Received message via socket: $messageData");
-        _newMessageController.add({'message': messageData});
+
+        // Add small delay to ensure UI is ready
+        Future.microtask(() {
+          if (!_newMessageController.isClosed) {
+            _newMessageController.add({'message': messageData});
+          }
+        });
       } catch (e) {
         print("Error parsing receiveMessage: $e");
       }
@@ -107,7 +161,12 @@ class SocketService {
         final Map<String, dynamic> messageData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("🎤 Received voice message via socket: $messageData");
-        _newMessageController.add({'message': messageData});
+
+        Future.microtask(() {
+          if (!_newMessageController.isClosed) {
+            _newMessageController.add({'message': messageData});
+          }
+        });
       } catch (e) {
         print("Error parsing receiveVoiceMessage: $e");
       }
@@ -118,7 +177,12 @@ class SocketService {
         final Map<String, dynamic> messageData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("📁 Received file message via socket: $messageData");
-        _newMessageController.add({'message': messageData});
+
+        Future.microtask(() {
+          if (!_newMessageController.isClosed) {
+            _newMessageController.add({'message': messageData});
+          }
+        });
       } catch (e) {
         print("Error parsing receiveFileMessage: $e");
       }
@@ -130,7 +194,12 @@ class SocketService {
         final Map<String, dynamic> deleteData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("🗑️ Message deleted via socket: $deleteData");
-        _messageDeletedController.add(deleteData);
+
+        Future.microtask(() {
+          if (!_messageDeletedController.isClosed) {
+            _messageDeletedController.add(deleteData);
+          }
+        });
       } catch (e) {
         print("Error parsing messageDeleted: $e");
       }
@@ -142,7 +211,12 @@ class SocketService {
         final Map<String, dynamic> editData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("✏️ Message edited via socket: $editData");
-        _messageEditedController.add(editData);
+
+        Future.microtask(() {
+          if (!_messageEditedController.isClosed) {
+            _messageEditedController.add(editData);
+          }
+        });
       } catch (e) {
         print("Error parsing messageEdited: $e");
       }
@@ -154,7 +228,12 @@ class SocketService {
         final Map<String, dynamic> readData =
         data is String ? jsonDecode(data) : Map<String, dynamic>.from(data);
         print("👁️ Read status updated via socket: $readData");
-        _readStatusController.add(readData);
+
+        Future.microtask(() {
+          if (!_readStatusController.isClosed) {
+            _readStatusController.add(readData);
+          }
+        });
       } catch (e) {
         print("Error parsing readStatusUpdated: $e");
       }
@@ -163,7 +242,23 @@ class SocketService {
     print('🎯 Socket event listeners setup complete');
   }
 
-  // Methods that your service calls
+  void _startReconnectTimer() {
+    _cancelReconnectTimer();
+    _reconnectTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (!_isConnected && !_isConnecting) {
+        print('🔄 Attempting to reconnect...');
+        connect();
+      } else {
+        _cancelReconnectTimer();
+      }
+    });
+  }
+
+  void _cancelReconnectTimer() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+  }
+
   Future<Map<String, dynamic>> sendMessage({
     required String receiverId,
     required String text,
@@ -179,7 +274,9 @@ class SocketService {
     }
 
     try {
-      // Create message data
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
+
       final messageData = {
         'receiverId': receiverId,
         'text': text,
@@ -189,17 +286,16 @@ class SocketService {
         if (replayTo != null) 'replayTo': replayTo,
       };
 
-      // Emit via socket
       _socket!.emit('sendMessage', messageData);
+      print('📤 Message sent via socket: $messageData');
 
-      // Create mock response since socket doesn't return response immediately
       return {
         'error': false,
         'message': 'Message sent via socket',
         'data': {
           'message': {
             '_id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
-            'senderId': (await SharedPreferences.getInstance()).getString('user_id'),
+            'senderId': userId,
             'receiverId': receiverId,
             'text': text,
             'readBy': readBy,
@@ -218,35 +314,6 @@ class SocketService {
     }
   }
 
-  Future<Map<String, dynamic>> sendVoiceMessage({
-    required String receiverId,
-    required String audioPath,
-    bool readBy = false,
-    String? image,
-  }) async {
-    // Voice/file uploads typically need HTTP API since socket.io doesn't handle files well
-    // Return error to force HTTP fallback
-    return {
-      'error': true,
-      'message': 'Voice message via socket not implemented - use HTTP fallback',
-    };
-  }
-
-  Future<Map<String, dynamic>> sendFileMessage({
-    required String receiverId,
-    required String filePath,
-    required String fileName,
-    required String fileType,
-    bool readBy = false,
-  }) async {
-    // File uploads typically need HTTP API since socket.io doesn't handle files well
-    // Return error to force HTTP fallback
-    return {
-      'error': true,
-      'message': 'File message via socket not implemented - use HTTP fallback',
-    };
-  }
-
   Future<Map<String, dynamic>> updateReadStatus({
     required String senderId,
     required String receiverId,
@@ -259,7 +326,6 @@ class SocketService {
     }
 
     try {
-      // Emit the correct event name from API documentation
       _socket!.emit('updatereadBy', {
         'senderId': senderId,
         'receiverId': receiverId,
@@ -291,7 +357,6 @@ class SocketService {
     }
 
     try {
-      // Emit the correct event name from API documentation
       _socket!.emit('deleteMessage', {
         'messageId': messageId,
         'receiverId': receiverId,
@@ -324,7 +389,6 @@ class SocketService {
     }
 
     try {
-      // Emit the correct event name from API documentation
       _socket!.emit('editMessage', {
         'messageId': messageId,
         'newText': newText,
@@ -365,13 +429,36 @@ class SocketService {
     }
   }
 
+  Future<void> _disposeSocket() async {
+    try {
+      if (_socket != null) {
+        _socket!.off("receiveMessage");
+        _socket!.off("receiveVoiceMessage");
+        _socket!.off("receiveFileMessage");
+        _socket!.off("messageDeleted");
+        _socket!.off("messageEdited");
+        _socket!.off("readStatusUpdated");
+
+        _socket!.disconnect();
+        _socket!.dispose();
+        _socket = null;
+      }
+    } catch (e) {
+      print('Error disposing socket: $e');
+    }
+  }
+
   Future<void> disconnect() async {
     try {
+      _cancelReconnectTimer();
       _isConnected = false;
-      _socket?.disconnect();
-      _socket?.dispose();
-      _socket = null;
-      _connectionController.add(false);
+      _isConnecting = false;
+
+      await _disposeSocket();
+
+      if (!_connectionController.isClosed) {
+        _connectionController.add(false);
+      }
       print('🔌 Socket disconnected');
     } catch (e) {
       print('Error disconnecting socket: $e');
@@ -380,12 +467,15 @@ class SocketService {
 
   void dispose() {
     try {
+      _cancelReconnectTimer();
+      disconnect();
+
+      // Close stream controllers
       _connectionController.close();
       _newMessageController.close();
       _messageDeletedController.close();
       _messageEditedController.close();
       _readStatusController.close();
-      disconnect();
     } catch (e) {
       print('Error disposing socket service: $e');
     }

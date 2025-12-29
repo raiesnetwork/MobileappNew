@@ -287,12 +287,83 @@ class CommentService {
     }
   }
 
+  // Get all users
+  static Future<Map<String, dynamic>> getAllUsers({
+    String? search,
+    int pageNo = 1,
+  }) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        print("❌ Token missing for getAllUsers");
+        return {
+          "success": false,
+          "message": "Authentication token is missing",
+        };
+      }
+
+      // Build query parameters
+      Map<String, dynamic> queryParams = {
+        'pageNo': pageNo.toString(),
+      };
+
+      if (search != null && search.isNotEmpty) {
+        queryParams['search'] = search;
+      }
+
+      final Uri url = Uri.parse("https://api.ixes.ai/api/mobile/all-users")
+          .replace(queryParameters: queryParams);
+
+      print('📤 getAllUsers URL: $url');
+      print('🔐 TOKEN: $token');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      print('📥 getAllUsers STATUS: ${response.statusCode}');
+      print('📥 getAllUsers RESPONSE: ${response.body}');
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        print('✅ Users fetched successfully');
+        return {
+          "success": true,
+          "data": decoded['data'],
+          "allUsers": decoded['data']['allUsers'],
+          "totalPage": decoded['data']['totalPage'],
+          "currentPage": decoded['data']['currentPage'],
+        };
+      } else {
+        print('⚠️ Failed to fetch users');
+        return {
+          "success": false,
+          "message": decoded['message'] ?? "Failed to fetch users",
+        };
+      }
+    } catch (e) {
+      print("❌ Network or Decoding Error: $e");
+      return {
+        "success": false,
+        "message": "Error fetching users: ${e.toString()}",
+      };
+    }
+  }
+
+// Share post
   static Future<Map<String, dynamic>> sharePost({
     required String postId,
-    required String type,
-    required String whom,
-    String? userId,
-    String? whomId,
+    required String type, // "user" or "group"
+    required String userId, // Receiver ID
+    required String shareContext, // "feed", "campaign", "service", "announcement"
+    String? contextId, // Required if shareContext is not "feed"
   }) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -310,11 +381,15 @@ class CommentService {
 
       final Map<String, dynamic> body = {
         "postId": postId,
+        "userId": userId,
         "type": type,
-        if (type == "user") "userId": userId,
-        "whom": whom,
-        if (whom != "feed") "whomId": whomId,
+        "shareContext": shareContext,
       };
+
+      // Add contextId only if shareContext is not "feed"
+      if (shareContext != "feed" && contextId != null) {
+        body["contextId"] = contextId;
+      }
 
       print('📤 sharePost URL: $url');
       print('📤 sharePost BODY: $body');
@@ -338,7 +413,7 @@ class CommentService {
         print('✅ Post shared successfully');
         return {
           "success": true,
-          "message": decoded['message'] ?? "Post shared successfully",
+          "message": decoded['message'] ?? "Post sent successfully",
         };
       } else {
         print('⚠️ Failed to share post');

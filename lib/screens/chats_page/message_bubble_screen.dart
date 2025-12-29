@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/chats_page/view_file_screen.dart';
@@ -29,6 +31,10 @@ class MessageBubble extends StatefulWidget {
   // Voice message properties
   final bool isAudio;
   final String? audioUrl;
+  final int? audioDurationMs;
+  final String? replyTo;
+  final Map<String, dynamic>? replyToMessage;
+  final Function(Map<String, dynamic>)? onReply;// Changed name for clarity
 
   const MessageBubble({
     Key? key,
@@ -47,6 +53,10 @@ class MessageBubble extends StatefulWidget {
     this.receiverId,
     this.isAudio = false,
     this.audioUrl,
+    this.audioDurationMs,
+    this.replyTo,
+    this.replyToMessage,
+    this.onReply,
   }) : super(key: key);
 
   @override
@@ -54,7 +64,7 @@ class MessageBubble extends StatefulWidget {
 }
 
 class _MessageBubbleState extends State<MessageBubble> {
-  late final ScaffoldMessengerState _scaffoldMessenger;
+
 
   // Voice message variables
   FlutterSoundPlayer? _player;
@@ -64,20 +74,21 @@ class _MessageBubbleState extends State<MessageBubble> {
   Duration _position = Duration.zero;
   String? _localAudioPath;
   bool _isLoadingAudio = false;
+  StreamSubscription? _playerSubscription;
 
   @override
   void initState() {
     super.initState();
     if (widget.isAudio) {
       _initializePlayer();
+      // Set initial duration if available
+      if (widget.audioDurationMs != null) {
+        _duration = Duration(milliseconds: widget.audioDurationMs!);
+      }
     }
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _scaffoldMessenger = ScaffoldMessenger.of(context);
-  }
+  ScaffoldMessengerState get _scaffoldMessenger => ScaffoldMessenger.of(context);
 
   Future<void> _initializePlayer() async {
     try {
@@ -105,37 +116,113 @@ class _MessageBubbleState extends State<MessageBubble> {
         String? audioPath = await _getAudioPath();
         if (audioPath == null) return;
 
+        // Get duration if not already set
+        if (_duration == Duration.zero) {
+          await _loadAudioDuration(audioPath);
+        }
+
+        // Cancel existing subscription before starting new one
+        await _playerSubscription?.cancel();
+
         // Start playing
         await _player!.startPlayer(
           fromURI: audioPath,
           whenFinished: () {
-            setState(() {
-              _isPlaying = false;
-              _position = Duration.zero;
-            });
+            print('🎵 Audio finished playing');
+            if (mounted) {
+              setState(() {
+                _isPlaying = false;
+                _position = Duration.zero;
+              });
+            }
           },
         );
-
-        // Set up position stream
-        _player!.onProgress!.listen((event) {
-          setState(() {
-            _position = event.position;
-            _duration = event.duration;
-          });
-        });
 
         setState(() {
           _isPlaying = true;
         });
+
+        // CRITICAL: Subscribe to progress updates AFTER starting playback
+        _playerSubscription = _player!.onProgress!.listen(
+              (event) {
+            print('🎵 Progress: ${event.position.inSeconds}s / ${event.duration.inSeconds}s');
+            if (mounted) {
+              setState(() {
+                _position = event.position;
+
+                // Update duration if we get a better value
+                if (event.duration > Duration.zero && event.duration > _duration) {
+                  _duration = event.duration;
+                }
+              });
+            }
+          },
+          onError: (error) {
+            print('⚠️ Audio progress stream error: $error');
+          },
+          cancelOnError: false,
+        );
       }
     } catch (e) {
-      print('Error playing audio: $e');
-      _scaffoldMessenger.showSnackBar(
-        SnackBar(
-          content: Text('Error playing voice message: $e'),
-          backgroundColor: Colors.red,
-        ),
+      print('💥 Error playing audio: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error playing voice message: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadAudioDuration(String audioPath) async {
+    try {
+      // Create a temporary player to get duration
+      final tempPlayer = FlutterSoundPlayer();
+      await tempPlayer.openPlayer();
+
+      Duration? detectedDuration;
+
+      // Start playing to detect duration
+      await tempPlayer.startPlayer(
+        fromURI: audioPath,
+        whenFinished: () {},
       );
+
+      // Wait a bit for the player to initialize
+      await Future.delayed(const Duration(milliseconds: 150));
+
+      // Get duration from progress stream
+      final subscription = tempPlayer.onProgress!.listen(
+            (event) {
+          if (event.duration > Duration.zero) {
+            detectedDuration = event.duration;
+          }
+        },
+      );
+
+      // Wait up to 500ms for duration detection
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Cancel subscription and close temp player
+      await subscription.cancel();
+      await tempPlayer.stopPlayer();
+      await tempPlayer.closePlayer();
+
+      // Update duration if detected
+      if (detectedDuration != null && detectedDuration! > Duration.zero) {
+        if (mounted) {
+          setState(() {
+            _duration = detectedDuration!;
+          });
+        }
+        print('✅ Audio duration detected: ${_formatDuration(detectedDuration!)}');
+      } else {
+        print('⚠️ Could not detect audio duration');
+      }
+    } catch (e) {
+      print('💥 Error loading audio duration: $e');
     }
   }
 
@@ -196,6 +283,14 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildVoiceMessage() {
+    // Calculate progress for waveform
+    double progress = 0.0;
+    if (_duration.inMilliseconds > 0) {
+      progress = _position.inMilliseconds / _duration.inMilliseconds;
+      // Clamp between 0 and 1
+      progress = progress.clamp(0.0, 1.0);
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
@@ -217,57 +312,71 @@ class _MessageBubbleState extends State<MessageBubble> {
                 color: widget.isMe ? Colors.white : Colors.grey[800],
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                _isLoadingAudio
-                    ? Icons.hourglass_empty
-                    : _isPlaying
-                    ? Icons.pause
-                    : Icons.play_arrow,
+              child: _isLoadingAudio
+                  ? Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    widget.isMe ? Colors.blue : Colors.white,
+                  ),
+                ),
+              )
+                  : Icon(
+                _isPlaying ? Icons.pause : Icons.play_arrow,
                 color: widget.isMe ? Colors.blue : Colors.white,
-                size: 20,
+                size: 24,
               ),
             ),
           ),
           const SizedBox(width: 12),
 
-          // Waveform visualization (simplified)
+          // Waveform visualization with animated progress
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Simple waveform representation
-                Container(
-                  height: 20,
+                // Waveform with progress
+                SizedBox(
+                  height: 24,
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: List.generate(20, (index) {
-                      final isActive = _isPlaying &&
-                          (_position.inMilliseconds / _duration.inMilliseconds) * 20 > index;
-                      return Container(
-                        width: 2,
-                        height: (index % 3 == 0) ? 20 : (index % 2 == 0) ? 15 : 10,
-                        margin: const EdgeInsets.symmetric(horizontal: 1),
-                        decoration: BoxDecoration(
-                          color: isActive
-                              ? (widget.isMe ? Colors.white : Colors.blue)
-                              : (widget.isMe ? Colors.white54 : Colors.grey[400]),
-                          borderRadius: BorderRadius.circular(1),
+                      final barProgress = index / 20;
+                      final isActive = progress >= barProgress;
+
+                      // Create varying heights for waveform effect
+                      final heights = [20.0, 15.0, 10.0, 18.0, 12.0, 16.0, 14.0, 20.0, 11.0, 15.0,
+                        17.0, 13.0, 19.0, 10.0, 16.0, 14.0, 18.0, 12.0, 15.0, 20.0];
+
+                      return Expanded(
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 1),
+                          height: heights[index],
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? (widget.isMe ? Colors.white : Colors.blue)
+                                : (widget.isMe ? Colors.white54 : Colors.grey[400]),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       );
                     }),
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
 
-                // Duration
+                // Duration display - FIXED to show current/total
                 Text(
-                  _isPlaying && _duration > Duration.zero
+                  _isPlaying || _position.inSeconds > 0
                       ? '${_formatDuration(_position)} / ${_formatDuration(_duration)}'
-                      : _duration > Duration.zero
+                      : _duration.inSeconds > 0
                       ? _formatDuration(_duration)
                       : '0:00',
                   style: TextStyle(
                     color: widget.isMe ? Colors.white70 : Colors.grey[600],
                     fontSize: 11,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -275,24 +384,26 @@ class _MessageBubbleState extends State<MessageBubble> {
           ),
 
           // Status indicator for voice messages
-          if (widget.status == 'sending')
-            Container(
-              width: 12,
-              height: 12,
-              margin: const EdgeInsets.only(left: 8),
+          if (widget.status == 'sending') ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 14,
+              height: 14,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 valueColor: AlwaysStoppedAnimation<Color>(
                   widget.isMe ? Colors.white70 : Colors.grey[600]!,
                 ),
               ),
-            )
-          else if (widget.status == 'failed')
+            ),
+          ] else if (widget.status == 'failed') ...[
+            const SizedBox(width: 8),
             Icon(
               Icons.error_outline,
               size: 16,
               color: Colors.red,
             ),
+          ],
         ],
       ),
     );
@@ -313,7 +424,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: widget.isMe
-                  ? Primary // Your primary purple color
+                  ? Primary
                   : Colors.grey[300],
               borderRadius: BorderRadius.circular(18).copyWith(
                 bottomRight: widget.isMe ? const Radius.circular(4) : null,
@@ -323,12 +434,64 @@ class _MessageBubbleState extends State<MessageBubble> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Inside the main Container, before content, add:
+                if (widget.replyToMessage != null) ...[
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    margin: const EdgeInsets.only(bottom: 8),
+                    decoration: BoxDecoration(
+                      color: widget.isMe
+                          ? Colors.white.withOpacity(0.2)
+                          : Colors.black.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border(
+                        left: BorderSide(
+                          color: widget.isMe ? Colors.white : Colors.grey[800]!,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Replied to',
+                          style: TextStyle(
+                            color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.replyToMessage!['text'] != null && widget.replyToMessage!['text'].toString().isNotEmpty
+                              ? widget.replyToMessage!['text']
+                              : (widget.replyToMessage!['isFile'] == true
+                              ? '📎 ${widget.replyToMessage!['fileName'] ?? 'File'}'
+                              : (widget.replyToMessage!['isAudio'] == true
+                              ? '🎤 Voice message'
+                              : 'Message')),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: widget.isMe ? Colors.white70 : Colors.grey[700],
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
                 // Voice message content
                 if (widget.isAudio)
                   _buildVoiceMessage()
+
                 // File content
                 else if (widget.isFile && widget.fileUrl != null && widget.fileName != null)
+
                   GestureDetector(
+
                     onTap: () => _handleFileOpen(context),
                     child: Container(
                       padding: const EdgeInsets.all(8),
@@ -441,14 +604,71 @@ class _MessageBubbleState extends State<MessageBubble> {
       ),
     );
   }
-
   void _showMessageOptions(BuildContext context) {
-    // Don't show options for voice messages, files, or messages being sent
-    if (!widget.isMe || widget.isFile == true || widget.isAudio == true ||
-        widget.isOptimistic || widget.status == 'sending') {
-      return;
+    // Build options list based on message type
+    List<Widget> options = [];
+
+    // REPLY option - available for ALL messages (sent and received)
+    options.add(
+      ListTile(
+        leading: Icon(Icons.reply, color: Theme.of(context).colorScheme.primary),
+        title: const Text('Reply'),
+        onTap: () {
+          Navigator.pop(context);
+          if (widget.onReply != null) {
+            widget.onReply!({
+              '_id': widget.messageId,
+              'text': widget.content,
+              'isFile': widget.isFile,
+              'fileName': widget.fileName,
+              'isAudio': widget.isAudio,
+              'senderId': widget.isMe ? 'current_user' : 'other_user',
+            });
+          }
+        },
+      ),
+    );
+
+    // EDIT and DELETE options - only for MY messages (text only)
+    if (widget.isMe &&
+        !widget.isFile &&
+        !widget.isAudio &&
+        !widget.isOptimistic &&
+        widget.status != 'sending') {
+
+      options.add(
+        ListTile(
+          leading: Icon(
+            Icons.edit,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          title: const Text('Edit Message'),
+          onTap: () {
+            Navigator.pop(context);
+            _showEditDialog(context);
+          },
+        ),
+      );
+
+      options.add(
+        ListTile(
+          leading: const Icon(
+            Icons.delete,
+            color: Colors.red,
+          ),
+          title: const Text(
+            'Delete Message',
+            style: TextStyle(color: Colors.red),
+          ),
+          onTap: () {
+            Navigator.pop(context);
+            _showDeleteConfirmation(context);
+          },
+        ),
+      );
     }
 
+    // Show the bottom sheet
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -470,31 +690,7 @@ class _MessageBubbleState extends State<MessageBubble> {
               ),
             ),
             const SizedBox(height: 20),
-            ListTile(
-              leading: Icon(
-                Icons.edit,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              title: const Text('Edit Message'),
-              onTap: () {
-                Navigator.pop(context);
-                _showEditDialog(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(
-                Icons.delete,
-                color: Colors.red,
-              ),
-              title: const Text(
-                'Delete Message',
-                style: TextStyle(color: Colors.red),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _showDeleteConfirmation(context);
-              },
-            ),
+            ...options,
             const SizedBox(height: 10),
           ],
         ),
@@ -684,7 +880,6 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
-  // Keep existing file handling methods
   Future<void> _handleFileOpen(BuildContext context) async {
     if (widget.fileUrl == null || widget.fileName == null) {
       _scaffoldMessenger.showSnackBar(
@@ -716,23 +911,12 @@ class _MessageBubbleState extends State<MessageBubble> {
       return;
     }
 
-    // Use the new FileViewerHelper
     await FileViewerHelper.openFile(
       context: context,
       fileUrl: widget.fileUrl!,
       fileName: widget.fileName!,
       localFilePath: widget.localFilePath,
     );
-  }
-
-  bool _isUrl(String path) {
-    try {
-      final uri = Uri.tryParse(path);
-      if (uri == null) return false;
-      return uri.scheme == 'http' || uri.scheme == 'https';
-    } catch (e) {
-      return false;
-    }
   }
 
   IconData _getFileIcon(String? fileType) {
@@ -779,9 +963,46 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   @override
   void dispose() {
-    if (_player != null) {
-      _player!.closePlayer();
+    print('🧹 MessageBubble disposing...');
+
+    // Cancel the progress subscription FIRST
+    _playerSubscription?.cancel();
+    _playerSubscription = null;
+
+    // Stop player
+    if (_isPlaying && _player != null) {
+      _player!.stopPlayer().catchError((error) {
+        print('⚠️ Error stopping player: $error');
+      });
     }
+
+    // Then close player
+    if (_player != null) {
+      _player!.closePlayer().then((_) {
+        print('✅ Audio player closed');
+      }).catchError((error) {
+        print('⚠️ Error closing player: $error');
+      });
+      _player = null;
+    }
+
     super.dispose();
+    print('✅ MessageBubble disposed');
+  }
+
+  @override
+  void deactivate() {
+    // Cancel subscription when deactivated
+    _playerSubscription?.cancel();
+
+    if (_isPlaying && _player != null) {
+      _player!.pausePlayer().catchError((error) {
+        print('⚠️ Error pausing player: $error');
+      });
+      setState(() {
+        _isPlaying = false;
+      });
+    }
+    super.deactivate();
   }
 }

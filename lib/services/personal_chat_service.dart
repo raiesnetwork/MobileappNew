@@ -81,7 +81,7 @@ class PersonalChatService {
     required String text,
     bool readBy = false,
     String? image,
-    String? replayTo,
+    String? replyTo,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -108,8 +108,8 @@ class PersonalChatService {
       if (image != null && image.isNotEmpty) {
         requestBody['image'] = image;
       }
-      if (replayTo != null && replayTo.isNotEmpty) {
-        requestBody['replayTo'] = replayTo;
+      if (replyTo != null && replyTo.isNotEmpty) {
+        requestBody['replyTo'] = replyTo;
       }
 
       print('📦 Request Body: ${jsonEncode(requestBody)}');
@@ -214,6 +214,8 @@ class PersonalChatService {
     required String receiverId,
     bool readBy = false,
     String? image,
+    String? replyTo,
+
     bool useSocket = false, // Force HTTP for voice messages
   }) async {
     print('📤 Sending voice message via HTTP...');
@@ -231,6 +233,7 @@ class PersonalChatService {
     required String receiverId,
     bool readBy = false,
     String? image,
+    String? replyTo,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -255,6 +258,9 @@ class PersonalChatService {
       request.fields['readBy'] = readBy.toString();
       if (image != null && image.isNotEmpty) {
         request.fields['image'] = image;
+        if (replyTo != null && replyTo.isNotEmpty) {
+          request.fields['replyTo'] = replyTo;
+        }
       }
 
       request.files.add(
@@ -305,6 +311,8 @@ class PersonalChatService {
     required File file,
     required String receiverId,
     bool readBy = false,
+    String? replyTo,
+
     bool useSocket = false, // Force HTTP for file messages
   }) async {
     print('📤 Sending file message via HTTP...');
@@ -320,6 +328,7 @@ class PersonalChatService {
     required File file,
     required String receiverId,
     bool readBy = false,
+    String? replyTo,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -342,6 +351,9 @@ class PersonalChatService {
 
       request.fields['receiverId'] = receiverId;
       request.fields['readBy'] = readBy.toString();
+      if (replyTo != null && replyTo.isNotEmpty) {
+        request.fields['replyTo'] = replyTo;
+      }
 
       request.files.add(
         await http.MultipartFile.fromPath(
@@ -479,60 +491,45 @@ class PersonalChatService {
     }
   }
 
-  /// Delete message via socket (preferred) or HTTP fallback
   Future<Map<String, dynamic>> deleteMessage({
     required String messageId,
     required String receiverId,
     bool useSocket = true,
   }) async {
+    // Prefer socket when available
     if (useSocket && _socketService.isConnected) {
-      print('🗑️ Deleting message via socket...');
-      final socketResult = await _socketService.deleteMessage(
+      print('🗑️ Attempting delete via socket...');
+      final result = await _socketService.deleteMessage(
         messageId: messageId,
         receiverId: receiverId,
       );
 
-      if (socketResult['error'] == false) {
-        return socketResult;
-      } else {
-        print('⚠️ Socket delete failed: ${socketResult['message']}');
-        print('🗑️ Falling back to HTTP for delete...');
-        return await _deleteMessageHttp(
-          messageId: messageId,
-          receiverId: receiverId,
-        );
+      if (result['error'] == false) {
+        return result;
       }
-    } else {
-      print('🗑️ Deleting message via HTTP...');
-      return await _deleteMessageHttp(
-        messageId: messageId,
-        receiverId: receiverId,
-      );
+
+      print('⚠️ Socket delete failed: ${result['message']} → falling back to HTTP');
     }
+
+    // Fallback to HTTP
+    return await _deleteMessageViaHttp(
+      messageId: messageId,
+      receiverId: receiverId,
+    );
   }
 
-  /// HTTP fallback for message deletion
-  Future<Map<String, dynamic>> _deleteMessageHttp({
+  Future<Map<String, dynamic>> _deleteMessageViaHttp({
     required String messageId,
     required String receiverId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-        };
+      final token = await _getAuthToken();
+      if (token == null) {
+        return {'error': true, 'message': 'Authentication token missing'};
       }
 
-      final uri = Uri.parse('${apiBaseUrl}api/chat/deleteMessage');
-      print('📤 Deleting message to: $uri');
-
       final response = await http.post(
-        uri,
+        Uri.parse('$apiBaseUrl/api/chat/deleteMessage'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -543,83 +540,71 @@ class PersonalChatService {
         }),
       );
 
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
+      final body = jsonDecode(response.body);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final decoded = jsonDecode(response.body);
         return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Message deleted successfully',
-          'data': decoded['data'],
+          'error': false,
+          'message': body['message'] ?? 'Message deleted successfully',
+          'data': body['data'],
         };
       } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
         return {
           'error': true,
-          'message': decoded['message'] ?? 'Failed to delete message',
-          'data': null,
+          'message': body['message'] ?? 'Failed to delete message',
         };
       }
     } catch (e) {
-      print('💥 Exception occurred while deleting message: $e');
+      print('💥 HTTP delete exception: $e');
       return {
         'error': true,
-        'message': 'Error deleting message: ${e.toString()}',
-        'data': null,
+        'message': 'Network error while deleting message',
       };
     }
   }
-
-  /// Edit message via socket (preferred) or HTTP fallback
-  Future<Map<String, dynamic>?> editMessage({
+  Future<Map<String, dynamic>> editMessage({
     required String messageId,
     required String newText,
     required String receiverId,
     bool useSocket = true,
   }) async {
+    // Prefer socket when available
     if (useSocket && _socketService.isConnected) {
-      print('✏️ Editing message via socket...');
-      final socketResult = await _socketService.editMessage(
+      print('✏️ Attempting edit via socket...');
+      final result = await _socketService.editMessage(
         messageId: messageId,
         newText: newText,
         receiverId: receiverId,
       );
 
-      if (socketResult['error'] == false) {
-        return socketResult;
-      } else {
-        print('⚠️ Socket edit failed: ${socketResult['message']}');
-        print('✏️ Falling back to HTTP for edit...');
-        return await _editMessageHttp(
-          messageId: messageId,
-          newText: newText,
-          receiverId: receiverId,
-        );
+      if (result['error'] == false) {
+        return result;
       }
-    } else {
-      print('✏️ Editing message via HTTP...');
-      return await _editMessageHttp(
-        messageId: messageId,
-        newText: newText,
-        receiverId: receiverId,
-      );
+
+      print('⚠️ Socket edit failed: ${result['message']} → falling back to HTTP');
     }
+
+    // Fallback to HTTP
+    return await _editMessageViaHttp(
+      messageId: messageId,
+      newText: newText,
+      receiverId: receiverId,
+    );
   }
 
-  /// HTTP fallback for message editing
-  Future<Map<String, dynamic>?> _editMessageHttp({
+  Future<Map<String, dynamic>> _editMessageViaHttp({
     required String messageId,
     required String newText,
     required String receiverId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getAuthToken();
+      if (token == null) {
+        return {'error': true, 'message': 'Authentication token missing'};
+      }
 
       final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/editMessage'),
+        Uri.parse('$apiBaseUrl/api/chat/editMessage'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
@@ -634,66 +619,31 @@ class PersonalChatService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
+        final body = jsonDecode(response.body);
         return {
           'error': true,
-          'message': 'Failed with status ${response.statusCode}',
+          'message': body['message'] ?? 'Failed to edit message (status ${response.statusCode})',
         };
       }
     } catch (e) {
+      print('💥 HTTP edit exception: $e');
       return {
         'error': true,
-        'message': 'Error editing message: $e',
+        'message': 'Network error while editing message',
       };
     }
   }
 
-  /// Get file MIME type
-  String _getFileType(String path) {
-    final extension = path.split('.').last.toLowerCase();
-    switch (extension) {
-      case 'jpg':
-      case 'jpeg':
-        return 'image/jpeg';
-      case 'png':
-        return 'image/png';
-      case 'gif':
-        return 'image/gif';
-      case 'webp':
-        return 'image/webp';
-      case 'pdf':
-        return 'application/pdf';
-      case 'doc':
-        return 'application/msword';
-      case 'docx':
-        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-      case 'xls':
-        return 'application/vnd.ms-excel';
-      case 'xlsx':
-        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-      case 'ppt':
-        return 'application/vnd.ms-powerpoint';
-      case 'pptx':
-        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-      case 'txt':
-        return 'text/plain';
-      case 'mp3':
-        return 'audio/mpeg';
-      case 'wav':
-        return 'audio/wav';
-      case 'mp4':
-        return 'video/mp4';
-      case 'avi':
-        return 'video/avi';
-      case 'mov':
-        return 'video/quicktime';
-      case 'zip':
-        return 'application/zip';
-      case 'rar':
-        return 'application/rar';
-      default:
-        return 'application/octet-stream';
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) {
+      print('❗ Auth token is missing or empty');
+      return null;
     }
+    return token;
   }
+
 
   /// Join conversation room
   void joinConversation(String userId, String receiverId) {

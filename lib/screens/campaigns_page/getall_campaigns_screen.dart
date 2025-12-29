@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:ixes.app/screens/campaigns_page/share_campaign.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../constants/constants.dart';
@@ -12,7 +13,11 @@ class CampaignsScreen extends StatefulWidget {
   final Widget Function(String?, {bool isProfileImage}) buildImageWidget;
   final String communityId;
 
-  const CampaignsScreen({super.key, required this.buildImageWidget, required this.communityId});
+  const CampaignsScreen({
+    super.key,
+    required this.buildImageWidget,
+    required this.communityId,
+  });
 
   @override
   State<CampaignsScreen> createState() => _CampaignsScreenState();
@@ -39,16 +44,26 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
-      if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 300) {
         _loadMoreCampaigns();
       }
     });
+  }
+  void _shareCampaign(String campaignId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ShareCampaignScreen(
+          campaignId: campaignId,
+        ),
+      ),
+    );
   }
 
   void _loadMoreCampaigns() async {
     final provider = context.read<CampaignProvider>();
 
-    // Prevent multiple simultaneous calls
     if (_isLoadingMore || provider.isLoading || !provider.hasMoreCampaigns) {
       return;
     }
@@ -57,11 +72,10 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
       _isLoadingMore = true;
     });
 
-    // Calculate next page based on current campaigns count
     final currentPage = (provider.campaigns.length / 10).ceil();
     final nextPage = currentPage + 1;
 
-    print('Loading more campaigns - Current count: ${provider.campaigns.length}, Loading page: $nextPage');
+    print('📄 Loading page $nextPage (current campaigns: ${provider.campaigns.length})');
 
     await provider.fetchAllCampaigns(page: nextPage);
 
@@ -99,24 +113,44 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
           children: [
             Icon(Icons.delete_outline, color: Colors.red, size: 28),
             SizedBox(width: 12),
-            Text('Delete Campaign', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 20, color: Colors.black87)),
+            Text(
+              'Delete Campaign',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 20,
+                color: Colors.black87,
+              ),
+            ),
           ],
         ),
-        content: const Text('Are you sure you want to delete this campaign? This action cannot be undone.',
-            style: TextStyle(fontSize: 16, color: Colors.black54, height: 1.5)),
+        content: const Text(
+          'Are you sure you want to delete this campaign? This action cannot be undone.',
+          style: TextStyle(fontSize: 16, color: Colors.black54, height: 1.5),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.w600)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              final response = await context.read<CampaignProvider>().deleteCampaign(campaignId);
+              final response = await context
+                  .read<CampaignProvider>()
+                  .deleteCampaign(campaignId);
               if (mounted) {
                 final isError = response['error'] ?? true;
                 final message = response['message'] ?? 'Unknown error';
@@ -124,15 +158,30 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                   SnackBar(
                     content: Row(
                       children: [
-                        Icon(isError ? Icons.error_outline : Icons.check_circle_outline, color: Colors.white),
+                        Icon(
+                          isError
+                              ? Icons.error_outline
+                              : Icons.check_circle_outline,
+                          color: Colors.white,
+                        ),
                         const SizedBox(width: 12),
-                        Expanded(child: Text(isError ? 'Error: $message' : message, style: const TextStyle(color: Colors.white, fontSize: 14))),
+                        Expanded(
+                          child: Text(
+                            isError ? 'Error: $message' : message,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                     backgroundColor: isError ? Colors.red : Colors.green,
                     behavior: SnackBarBehavior.floating,
                     margin: const EdgeInsets.all(16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 );
               }
@@ -141,40 +190,97 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               elevation: 0,
             ),
-            child: const Text('Delete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
     );
   }
 
-  // Build image - now handles multipart URL responses
   Widget _buildCampaignImage(String imageUrl) {
     try {
       if (imageUrl.isEmpty) {
         return _buildImageErrorWidget();
       }
 
-      // Use the buildImageWidget for URL-based images
-      return widget.buildImageWidget(imageUrl, isProfileImage: false);
+      print('🖼️ Building image for URL: $imageUrl');
+
+      // Handle both S3 URLs and relative paths
+      if (imageUrl.startsWith('http://') ||
+          imageUrl.startsWith('https://') ||
+          imageUrl.contains('amazonaws.com') ||
+          imageUrl.contains('cloudfront.net')) {
+        // Direct URL (S3, HTTP, HTTPS)
+        print('✅ Loading direct URL: $imageUrl');
+        return Image.network(
+          imageUrl,
+          fit: BoxFit.cover,
+          loadingBuilder: (context, child, loadingProgress) {
+            if (loadingProgress == null) {
+              print('✅ Image loaded successfully: $imageUrl');
+              return child;
+            }
+            final progress = loadingProgress.expectedTotalBytes != null
+                ? loadingProgress.cumulativeBytesLoaded /
+                loadingProgress.expectedTotalBytes!
+                : null;
+            print('⏳ Loading image: ${(progress ?? 0) * 100}%');
+            return Center(
+              child: CircularProgressIndicator(
+                value: progress,
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[400]!),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) {
+            print('❌ Error loading image: $imageUrl');
+            print('❌ Error details: $error');
+            return _buildImageErrorWidget();
+          },
+        );
+      } else {
+        // Use buildImageWidget for relative paths
+        print('🔗 Using buildImageWidget for: $imageUrl');
+        return widget.buildImageWidget(imageUrl, isProfileImage: false);
+      }
     } catch (e) {
-      print('Error processing campaign image: $e');
+      print('❌ Exception processing campaign image: $e');
       return _buildImageErrorWidget();
     }
   }
 
   Widget _buildImageErrorWidget() {
     return Container(
-      color: Colors.grey.shade100,
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.image_not_supported_outlined, color: Colors.grey.shade400, size: 48),
-          const SizedBox(height: 12),
-          Text('Failed to load image', style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
+          Icon(
+            Icons.image_not_supported_outlined,
+            color: Colors.grey.shade300,
+            size: 36,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'No image',
+            style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );
@@ -183,41 +289,62 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         scrolledUnderElevation: 0,
         title: const Text(
           'Campaigns',
-          style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800, color: Colors.black87, letterSpacing: -0.5),
+          style: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
+            color: Colors.black87,
+            letterSpacing: -0.5,
+          ),
         ),
-        backgroundColor: const Color(0xFFF8FAFC),
+        backgroundColor: const Color(0xFFF5F7FA),
         elevation: 0,
       ),
       body: Consumer<CampaignProvider>(
         builder: (context, provider, _) {
+          // Initial loading
           if (provider.isLoading && provider.campaigns.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.circular(20),
+                      shape: BoxShape.circle,
                       boxShadow: [
-                        BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 8)),
+                        BoxShadow(
+                          color: Primary.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 4),
+                        ),
                       ],
                     ),
-                    child: const CircularProgressIndicator(color: Primary, strokeWidth: 3),
+                    child: const CircularProgressIndicator(
+                      color: Primary,
+                      strokeWidth: 3,
+                    ),
                   ),
                   const SizedBox(height: 24),
-                  const Text('Loading campaigns...', style: TextStyle(fontSize: 16, color: Colors.black54, fontWeight: FontWeight.w500)),
+                  const Text(
+                    'Loading campaigns...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.black54,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
                 ],
               ),
             );
           }
 
+          // Error state
           if (provider.campaigns.isEmpty && provider.errorMessage != null) {
             return Center(
               child: Container(
@@ -225,26 +352,38 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                 padding: const EdgeInsets.all(32),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 8)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
+                        shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.error_outline, size: 48, color: Colors.red),
+                      child: const Icon(
+                        Icons.error_outline,
+                        size: 48,
+                        color: Colors.red,
+                      ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     Text(
                       provider.errorMessage!,
-                      style: const TextStyle(fontSize: 18, color: Colors.black87, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 24),
@@ -253,12 +392,23 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Primary,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 14,
+                        ),
+                        elevation: 0,
                       ),
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Retry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                      icon: const Icon(Icons.refresh_rounded, size: 20),
+                      label: const Text(
+                        'Retry',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -266,16 +416,21 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
             );
           }
 
+          // Empty state
           if (provider.campaigns.isEmpty) {
             return Center(
               child: Container(
                 margin: const EdgeInsets.all(24),
-                padding: const EdgeInsets.all(32),
+                padding: const EdgeInsets.all(40),
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(24),
+                  borderRadius: BorderRadius.circular(20),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 8)),
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
                   ],
                 ),
                 child: Column(
@@ -285,20 +440,40 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: Primary.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
+                        shape: BoxShape.circle,
                       ),
-                      child: const Icon(Icons.campaign_outlined, size: 64, color: Primary),
+                      child: const Icon(
+                        Icons.campaign_outlined,
+                        size: 56,
+                        color: Primary,
+                      ),
                     ),
                     const SizedBox(height: 24),
-                    const Text('No Campaigns Yet', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: Colors.black87)),
+                    const Text(
+                      'No Campaigns Yet',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
                     const SizedBox(height: 8),
-                    const Text('Create your first campaign to get started', style: TextStyle(fontSize: 16, color: Colors.black54)),
+                    Text(
+                      'Create your first campaign\nto get started',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.grey[600],
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               ),
             );
           }
 
+          // Campaign list
           return RefreshIndicator(
             onRefresh: provider.refreshCampaigns,
             color: Primary,
@@ -306,8 +481,9 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
             child: ListView.builder(
               controller: _scrollController,
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(16),
-              itemCount: provider.campaigns.length + (provider.hasMoreCampaigns ? 1 : 0),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              itemCount: provider.campaigns.length +
+                  (provider.hasMoreCampaigns ? 1 : 0),
               itemBuilder: (context, index) {
                 if (index < provider.campaigns.length) {
                   return _buildCampaignCard(provider.campaigns[index], index);
@@ -323,232 +499,402 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   }
 
   Widget _buildCampaignCard(dynamic campaign, int index) {
-    // Get cover image URL from the response
     final String coverImage = campaign['coverImage'] ?? '';
-    final String schedule = (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
+    final String schedule =
+    (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
     final String communityName = campaign['community']?['name'] ?? 'Unknown';
+    final bool isAdmin = campaign['isUserAdmin'] == true;
 
-    return Stack(
-      children: [
-        Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 8)),
-            ],
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CampaignDetailsScreen(
-                      campaignId: campaign['_id'],
-                      buildImageWidget: widget.buildImageWidget,
-                      communityName: communityName,
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CampaignDetailsScreen(
+                  campaignId: campaign['_id'],
+                  buildImageWidget: widget.buildImageWidget,
+                  communityName: communityName,
+                ),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Cover Image
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.grey.shade50,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: coverImage.isNotEmpty
+                        ? _buildCampaignImage(coverImage)
+                        : Container(
+                      decoration: BoxDecoration(
+                        color: Primary.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.campaign_outlined,
+                        size: 40,
+                        color: Primary,
+                      ),
                     ),
                   ),
-                );
-              },
-              borderRadius: BorderRadius.circular(24),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Cover Image
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(16),
-                        color: Colors.grey.shade100,
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: coverImage.isNotEmpty
-                            ? _buildCampaignImage(coverImage)
-                            : Container(
-                          color: Primary.withOpacity(0.1),
-                          child: const Icon(Icons.campaign_outlined, size: 40, color: Primary),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
+                ),
+                const SizedBox(width: 14),
 
-                    // Content
-                    Expanded(
-                      child: Column(
+                // Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Title row with menu
+                      // Replace the entire Title row with menu section with this:
+
+
+                      Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Title
-                          Padding(
-                            padding: const EdgeInsets.only(right: 15),
+                          Expanded(
                             child: Text(
                               campaign['title'] ?? 'Untitled Campaign',
                               style: const TextStyle(
                                 fontSize: 16,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w700,
                                 color: Colors.black87,
-                                height: 1.2,
+                                height: 1.3,
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          // ✅ THREE DOTS MENU FOR EVERYONE
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _editCampaign(campaign);
+                              } else if (value == 'delete') {
+                                _confirmDelete(campaign['_id']);
+                              } else if (value == 'share') {
+                                _shareCampaign(campaign['_id']);
+                              }
+                            },
+                            padding: EdgeInsets.zero,
+                            itemBuilder: (context) {
+                              // Build menu items dynamically based on admin status
+                              List<PopupMenuEntry<String>> menuItems = [];
 
-                          // Description
-                          Text(
-                            campaign['description'] ?? 'No description available',
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: Colors.black54,
-                              height: 1.4,
+                              // ✅ Edit - Only for admins
+                              if (isAdmin) {
+                                menuItems.add(
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    height: 44,
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Icon(
+                                            Icons.edit_outlined,
+                                            size: 16,
+                                            color: Colors.blue,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        const Text(
+                                          'Edit',
+                                          style: TextStyle(
+                                            color: Colors.blue,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              // ✅ Share - For EVERYONE
+                              menuItems.add(
+                                PopupMenuItem(
+                                  value: 'share',
+                                  height: 44,
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Icon(
+                                          Icons.share_outlined,
+                                          size: 16,
+                                          color: Colors.green,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        'Share',
+                                        style: TextStyle(
+                                          color: Colors.green,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+
+                              // ✅ Delete - Only for admins
+                              if (isAdmin) {
+                                menuItems.add(
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    height: 44,
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: const Icon(
+                                            Icons.delete_outline,
+                                            size: 16,
+                                            color: Colors.red,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        const Text(
+                                          'Delete',
+                                          style: TextStyle(
+                                            color: Colors.red,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }
+
+                              return menuItems;
+                            },
+                            color: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                            elevation: 8,
+                            icon: Icon(
+                              Icons.more_vert,
+                              size: 20,
+                              color: Colors.grey[600],
+                            ),
                           ),
-                          const SizedBox(height: 12),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
 
-                          // Schedule + Members Button
-                          Row(
-                            children: [
-                              // Schedule Chip
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      // Description
+                      Text(
+                        campaign['description'] ?? 'No description available',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                          height: 1.4,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Schedule + Members (with wrap to prevent overflow)
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          // Schedule Chip
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _getScheduleColor(schedule).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _getScheduleColor(schedule).withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.schedule_rounded,
+                                  size: 13,
+                                  color: _getScheduleColor(schedule),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  _formatSchedule(schedule),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: _getScheduleColor(schedule),
+                                    letterSpacing: 0.3,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Members button
+                          if (isAdmin)
+                            InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CampaignMembersScreen(
+                                      campaignId: campaign['_id'],
+                                    ),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 5,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                                  color: Colors.blue.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.schedule, size: 14, color: Colors.green),
-                                    const SizedBox(width: 6),
+                                    const Icon(
+                                      Icons.people_outline_rounded,
+                                      color: Colors.blue,
+                                      size: 14,
+                                    ),
+                                    const SizedBox(width: 5),
                                     Text(
-                                      schedule.replaceAll('_', ' ').toUpperCase(),
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.green,
+                                      'Members',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.blue[700],
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              const SizedBox(width: 12),
-
-                              // Members icon
-                              if (campaign['isUserAdmin'] == true)
-                                IconButton(
-                                  icon: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.blue.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Icon(Icons.people_outline, color: Colors.blue, size: 16),
-                                  ),
-                                  tooltip: 'View Members',
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => CampaignMembersScreen(campaignId: campaign['_id']),
-                                      ),
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
+                            ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        if (campaign['isUserAdmin'] == true)
-          Positioned(
-            top: 3,
-            right: 5,
-            child: PopupMenuButton<String>(
-              onSelected: (value) {
-                if (value == 'edit') {
-                  _editCampaign(campaign);
-                } else if (value == 'delete') {
-                  _confirmDelete(campaign['_id']);
-                }
-              },
-              itemBuilder: (context) => [
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.blue.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.edit_outlined, size: 16, color: Colors.blue),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text('Edit', style: TextStyle(color: Colors.blue, fontSize: 14, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text('Delete', style: TextStyle(color: Colors.red, fontSize: 14, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
               ],
-              color: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              elevation: 8,
-              icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
             ),
           ),
-      ],
+        ),
+      ),
     );
+  }
+
+  Color _getScheduleColor(String schedule) {
+    switch (schedule.toLowerCase()) {
+      case 'daily':
+        return Colors.blue;
+      case 'weekly':
+        return Colors.purple;
+      case 'monthly':
+        return Colors.orange;
+      case 'one_time':
+      default:
+        return Colors.green;
+    }
+  }
+
+  String _formatSchedule(String schedule) {
+    return schedule.replaceAll('_', ' ').toUpperCase();
   }
 
   Widget _buildLoadingMoreIndicator() {
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(vertical: 20),
       child: Center(
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(12),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 12, offset: const Offset(0, 4)),
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
             ],
           ),
-          child: const CircularProgressIndicator(color: Primary, strokeWidth: 3),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  color: Primary,
+                  strokeWidth: 2.5,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Loading more campaigns...',
+                style: TextStyle(
+                  color: Colors.grey[700],
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

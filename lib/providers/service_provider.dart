@@ -570,6 +570,7 @@ class ServicesProvider with ChangeNotifier {
     required num amount,
     required String date,
     required int slots,
+    required List<String> selectedSlots, // ✅ ADDED
   }) async {
     _isPaymentLoading = true;
     _hasPaymentError = false;
@@ -584,6 +585,7 @@ class ServicesProvider with ChangeNotifier {
         amount: amount,
         date: date,
         slots: slots,
+        selectedSlots: selectedSlots, // ✅ PASS IT TO SERVICE
       );
 
       if (!result['err']) {

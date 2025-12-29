@@ -770,6 +770,7 @@ class ServicesService {
     required num amount,
     required String date,
     required int slots,
+    required List<String> selectedSlots, // ✅ ADDED
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -789,7 +790,8 @@ class ServicesService {
       print('📦 Service ID: $serviceId');
       print('💰 Amount: $amount');
       print('📅 Date: $date');
-      print('🎫 Slots: $slots');
+      print('🎫 Slots count: $slots');
+      print('🎫 Selected slots: $selectedSlots'); // ✅ ADDED LOG
 
       final body = {
         'response': response,
@@ -797,6 +799,7 @@ class ServicesService {
         'amount': amount,
         'date': date,
         'slots': slots,
+        'selectedSlots': selectedSlots, // ✅ ADDED TO BODY
       };
 
       print('📤 Request Body: ${jsonEncode(body)}');

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
 
+import '../services_page/booking_screen.dart';
 import '../services_page/create_service_screen.dart';
 import '../services_page/my_services.dart';
 
@@ -279,8 +280,6 @@ class ServiceDetailScreen extends StatelessWidget {
                 ),
               ],
             ),
-
-            // Category & Details
             _buildInfoCard(
               title: 'Category & Classification',
               icon: Icons.category,
@@ -379,54 +378,48 @@ class ServiceDetailScreen extends StatelessWidget {
             ),
           ],
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: ElevatedButton(
-                onPressed: () {
-                  // Add contact/book functionality here
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Contact service provider feature coming soon!'),
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+        child: SafeArea(
+          child: ElevatedButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => BookingScreen(
+                    serviceId: service['_id']?.toString() ?? '',
+                    serviceName: service['name']?.toString() ?? 'Service',
+                    costPerSlot: service['cost'] ?? 0,
+                    currency: service['currency']?.toString() ?? 'INR',
+                    maxSlots: service['capacity'] ?? 10,
+                    serviceImage: service['image']?.toString() ?? '',
+                    location: service['location']?.toString() ?? '',
                   ),
                 ),
-                child: const Text(
-                  'Contact Provider',
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 0,
+            ),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.calendar_today, size: 20),
+                SizedBox(width: 10),
+                Text(
+                  'Book Now',
                   style: TextStyle(
-                    fontSize: 15,
+                    fontSize: 16,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Primary),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: IconButton(
-                onPressed: () {
-                  // Add bookmark functionality here
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Bookmark feature coming soon!'),
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.bookmark_outline, color: Primary),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -642,68 +635,70 @@ class _CommunityServicesScreenState extends State<CommunityServicesScreen>
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 10),
-                    // Cost and Provider Badge Row - Fixed overflow
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          // Cost
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green.withOpacity(0.3)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.attach_money, size: 12, color: Colors.green),
-                                const SizedBox(width: 2),
-                                Text(
-                                  '${service['cost']?.toString() ?? '0'} ${service['currency']?.toString() ?? ''}',
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.green,
-                                  ),
+                    // Cost and Book Button Row
+                    Row(
+                      children: [
+                        // Cost Container
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green.withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.attach_money, size: 12, color: Colors.green),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${service['cost']?.toString() ?? '0'} ${service['currency']?.toString() ?? ''}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green,
                                 ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 6),
-                          // Provider Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: isCommunityService
-                                  ? Colors.blue.withOpacity(0.1)
-                                  : Colors.orange.withOpacity(0.1),
+                        ),
+                        const Spacer(),
+                        // Book Button
+                        ElevatedButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => BookingScreen(
+                                  serviceId: service['_id']?.toString() ?? '',
+                                  serviceName: service['name']?.toString() ?? 'Service',
+                                  costPerSlot: service['cost'] ?? 0,
+                                  currency: service['currency']?.toString() ?? 'INR',
+                                  maxSlots: service['capacity'] ?? 10,
+                                  serviceImage: service['image']?.toString() ?? '',
+                                  location: service['location']?.toString() ?? '',
+                                ),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isCommunityService
-                                    ? Colors.blue.withOpacity(0.3)
-                                    : Colors.orange.withOpacity(0.3),
-                              ),
                             ),
-                            child: Text(
-                              isCommunityService ? 'Community' : 'Member',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: isCommunityService ? Colors.blue : Colors.orange,
-                              ),
+                            elevation: 0,
+                          ),
+                          child: const Text(
+                            'Book',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          // View Details Arrow
-                          Icon(
-                            Icons.arrow_forward_ios,
-                            color: Primary.withOpacity(0.7),
-                            size: 14,
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ],
                 ),

@@ -1040,7 +1040,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     );
   }
 
-// Add this navigation method to your class
   void _navigateToInviteStatusScreen(BuildContext context, String communityId, String communityName) {
     Navigator.push(
       context,
@@ -1055,6 +1054,11 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
 
   Widget _buildGridView() {
     final gridItems = [
+      {
+        'icon': Icons.safety_check,
+        'title': 'Home',
+        'screen': CommunityStatsScreen(communityId: widget.communityId)
+      },
       {
         'icon': Icons.group,
         'title': 'Users',
@@ -1090,11 +1094,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         'title': 'Service Requests',
         'screen': AllServiceRequestsScreen(communityId: widget.communityId)
       },
-      {
-        'icon': Icons.safety_check,
-        'title': 'Service Statistics',
-        'screen': CommunityStatsScreen(communityId: widget.communityId)
-      },
+
     ];
 
     return Padding(
