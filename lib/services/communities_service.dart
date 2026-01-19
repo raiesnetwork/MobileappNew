@@ -105,18 +105,54 @@ class CommunityService {
         final transformedData = decoded.map((community) {
           final communityMap = community as Map<String, dynamic>;
 
+          // Debug: Print the raw community data to see what fields exist
+          print('Raw community data: $communityMap');
+
+          // Extract the ID - try both 'id' and '_id'
+          final id = communityMap['id']?.toString() ??
+              communityMap['_id']?.toString() ?? '';
+
+          // Extract profile image - try multiple possible field names
+          final profileImage = communityMap['profileImage'] ??
+              communityMap['profile_image'] ??
+              communityMap['image'] ??
+              communityMap['avatar'];
+
+          print('Community ID: $id, ProfileImage: $profileImage');
+
           return {
-            // CRITICAL: Make sure the ID field matches what you're using in other places
-            '_id': communityMap['id']?.toString() ?? communityMap['_id']?.toString() ?? '',
+            // Use BOTH 'id' and '_id' to ensure compatibility
+            'id': id,
+            '_id': id,
             'name': communityMap['name']?.toString() ?? 'Unnamed Community',
             'isMember': true,
             'isAdmin': communityMap['isAdmin'] ?? false,
             'isPrivate': communityMap['isPrivate'] ?? false,
-            'profileImage': communityMap['profileImage'],
+            'profileImage': profileImage, // Use the extracted profile image
             'description': communityMap['description'],
             'memberCount': communityMap['memberCount'] ?? 0,
-            'subCommunities': communityMap['subCommunities'] ?? [],
-            // Add any other fields that might be needed
+            // Handle subcommunities recursively
+            'subCommunities': (communityMap['subCommunities'] as List?)?.map((sub) {
+              final subMap = sub as Map<String, dynamic>;
+              final subId = subMap['id']?.toString() ?? subMap['_id']?.toString() ?? '';
+              final subProfileImage = subMap['profileImage'] ??
+                  subMap['profile_image'] ??
+                  subMap['image'] ??
+                  subMap['avatar'];
+
+              return {
+                'id': subId,
+                '_id': subId,
+                'name': subMap['name']?.toString() ?? 'Unnamed Community',
+                'isMember': true,
+                'isAdmin': subMap['isAdmin'] ?? false,
+                'isPrivate': subMap['isPrivate'] ?? false,
+                'profileImage': subProfileImage,
+                'description': subMap['description'],
+                'memberCount': subMap['memberCount'] ?? 0,
+                'subCommunities': subMap['subCommunities'] ?? [],
+              };
+            }).toList() ?? [],
           };
         }).toList();
 

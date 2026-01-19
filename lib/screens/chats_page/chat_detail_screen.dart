@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/constants.dart';
@@ -14,6 +16,8 @@ import '../../providers/voice_call_provider.dart';
 import '../video_call/video_call_initiate_.dart';
 import '../voice_call/outgoing_voice_call.dart';
 import './message_bubble_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../providers/notification_provider.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final String userId;
@@ -35,7 +39,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   File? _selectedFile;
-  bool _isSending = false; // Add this to prevent duplicate sends
+  bool _isSending = false;
+  // ✅ ADD THESE
+  String? _userId;
+  late NotificationProvider _notificationProvider;// Add this to prevent duplicate sends
 
   // Voice recording variables
   FlutterSoundRecorder? _recorder;
@@ -44,6 +51,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
   final ImagePicker _imagePicker = ImagePicker();
+  Timer? _recordingTimer;
 
   late PersonalChatProvider _chatProvider;
   Map<String, dynamic>? _replyingToMessage;
@@ -54,8 +62,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _initializeRecorder();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      // ✅ Store the provider reference here
+      // Store the provider reference
       _chatProvider = context.read<PersonalChatProvider>();
+
+      // ✅ ADD THESE LINES
+      _notificationProvider = context.read<NotificationProvider>();
+      await _initializeChatNotifications();
 
       await _chatProvider.fetchConversation(widget.userId);
 
@@ -68,6 +80,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       // Scroll to bottom after messages load
       _scrollToBottom();
     });
+  }
+  /// ✅ Initialize chat and clear notifications
+  // In chat_detail_screen.dart
+
+  /// ✅ Initialize chat and clear notifications
+  Future<void> _initializeChatNotifications() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _userId = prefs.getString('user_id');
+
+      if (_userId != null && mounted) {
+        // ✅ FIX 1: Use correct notification type
+        // Personal chat notifications typically use 'Conversation' or 'Message' type
+        // Try both to be safe
+        await _notificationProvider.markChatAsRead(
+          chatId: widget.userId, // This is the sender's ID
+          type: 'Conversation', // Try this first
+        );
+
+        // Also try 'Message' type if your backend uses that
+        await _notificationProvider.markChatAsRead(
+          chatId: widget.userId,
+          type: 'Message',
+        );
+
+        // ✅ FIX 2: Activate chat to prevent new notifications
+        _notificationProvider.activateChat(
+          userId: _userId!,
+          type: 'Conversation', // Match the type above
+          chatId: widget.userId,
+        );
+
+        print('✅ Chat notifications cleared for userId: ${widget.userId}');
+      }
+    } catch (e) {
+      print('💥 Error initializing chat notifications: $e');
+    }
   }
   void _setReplyMessage(Map<String, dynamic> message) {
     setState(() {
@@ -194,7 +243,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       setState(() {
         _isRecording = true;
-        _recordingDuration = Duration.zero;
+        _recordingDuration = Duration.zero; // ✅ Reset to zero
       });
 
       _startDurationTimer();
@@ -215,12 +264,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (!_isRecording || _recorder == null) return;
 
     try {
+      // ✅ Cancel timer first
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+
       await _recorder!.stopRecorder();
       setState(() {
         _isRecording = false;
       });
 
       print('🎤 Stopped recording. File: $_recordingPath');
+      print('🎤 Duration: ${_formatDuration(_recordingDuration)}');
 
       if (_recordingPath != null && File(_recordingPath!).existsSync()) {
         _showVoicePreview();
@@ -238,11 +292,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   // Timer for recording duration
   void _startDurationTimer() {
-    Stream.periodic(const Duration(seconds: 1), (i) => i).listen((count) {
+    // Cancel any existing timer
+    _recordingTimer?.cancel();
+
+    // Start new timer
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_isRecording && mounted) {
         setState(() {
-          _recordingDuration = Duration(seconds: count + 1);
+          _recordingDuration = Duration(seconds: timer.tick);
         });
+      } else {
+        timer.cancel();
       }
     });
   }
@@ -251,59 +311,67 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void _showVoicePreview() {
     showModalBottomSheet(
       context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.mic, size: 25, color: Colors.blue),
-            const SizedBox(height: 16),
-            Text(
-              'Voice message recorded',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Duration: ${_formatDuration(_recordingDuration)}',
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _deleteRecording();
-                  },
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  label: const Text('Delete'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.grey[200],
-                    foregroundColor: Colors.red,
+      isDismissible: false, // ✅ Prevent accidental dismissal
+      enableDrag: false,
+      builder: (context) => WillPopScope(
+        onWillPop: () async => false,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mic, size: 25, color: Colors.blue),
+              const SizedBox(height: 16),
+              Text(
+                'Voice message recorded',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Duration: ${_formatDuration(_recordingDuration)}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _deleteRecording(); // ✅ Properly cleanup
+                    },
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    label: const Text('Delete'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey[200],
+                      foregroundColor: Colors.red,
+                    ),
                   ),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _sendVoiceMessage();
-                  },
-                  icon: const Icon(Icons.send, color: Colors.white),
-                  label: const Text('Send'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _sendVoiceMessage();
+                    },
+                    icon: const Icon(Icons.send, color: Colors.white),
+                    label: const Text('Send'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Colors.white,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   // Send voice message
+  // In chat_detail_screen.dart
+// Replace the ENTIRE _sendVoiceMessage method with this:
+
   Future<void> _sendVoiceMessage() async {
     if (_recordingPath == null || !File(_recordingPath!).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -331,49 +399,101 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     try {
       final audioFile = File(_recordingPath!);
+
+      // ✅ CRITICAL: Capture duration BEFORE any async operations
+      final durationMs = _recordingDuration.inMilliseconds;
+      final durationStr = _formatDuration(_recordingDuration);
+
+      print('📤 Preparing to send voice message');
+      print('📤 Duration: $durationStr ($durationMs ms)');
+      print('📤 File: $_recordingPath');
+
+      // Send voice message with duration
       final response = await provider.sendVoiceMessage(
         audioFile: audioFile,
         receiverId: receiverId,
         readBy: false,
         replyTo: _replyingToMessage?['_id'],
+        audioDurationMs: durationMs, // ✅ PASS DURATION HERE
       );
+
       _clearReply();
 
       if (response != null) {
+        // ✅ VERIFY: Check if duration was properly saved
+        final savedMessage = response['message'];
+        if (savedMessage != null) {
+          final savedDuration = savedMessage['audioDurationMs'];
+          if (savedDuration != null) {
+            print('✅ Voice sent with duration: $savedDuration ms');
+          } else {
+            print('⚠️ Warning: Duration not in response, but was sent: $durationMs ms');
+          }
+        }
+
         _scrollToBottom();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Voice message sent!'),
-            backgroundColor: Colors.green,
-          ),
-        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Voice message sent! ($durationStr)'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                  'Failed to send voice message: ${provider.sendMessageError ?? "Unknown error"}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('💥 Error sending voice message: $e');
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-                'Failed to send voice message: ${provider.sendMessageError}'),
+            content: Text('Error sending voice message: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error sending voice message: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     } finally {
-      _deleteRecording();
+      _deleteRecording(); // ✅ This properly resets timer and path
     }
   }
 
   // Delete recording file
   void _deleteRecording() {
+    // ✅ Cancel timer when deleting
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+
     if (_recordingPath != null && File(_recordingPath!).existsSync()) {
-      File(_recordingPath!).deleteSync();
-      _recordingPath = null;
+      try {
+        File(_recordingPath!).deleteSync();
+        _recordingPath = null;
+      } catch (e) {
+        print('⚠️ Error deleting recording file: $e');
+      }
     }
+
+    // ✅ Only call setState if widget is still mounted
+    if (mounted) {
+      setState(() {
+        _recordingDuration = Duration.zero;
+      });
+    } else {
+      // ✅ If not mounted, just reset the variable directly
+      _recordingDuration = Duration.zero;
+    }
+
+    print('🗑️ Recording deleted and timer reset');
   }
 
   // Format duration
@@ -814,14 +934,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   backgroundColor: Colors.white,
                   child: ListView.builder(
                     controller: _scrollController,
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     itemCount: messages.length,
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemBuilder: (context, index) {
                       final message = messages[index];
-                      final isMe =
-                          message['senderId'] == provider.currentUserId;
+
+                      // ✅ SKIP DELETED MESSAGES - DON'T RENDER THEM AT ALL
+                      if (message['isDelete'] == true) {
+                        return const SizedBox.shrink(); // Returns empty widget
+                      }
+
+                      final isMe = message['senderId'] == provider.currentUserId;
                       Map<String, dynamic>? repliedMessage;
                       if (message['replyTo'] != null) {
                         repliedMessage = _getMessageById(message['replyTo']);
@@ -829,10 +953,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-
                         child: MessageBubble(
-                          replyTo: message['replyTo'], // ADD THIS
-                          replyToMessage: repliedMessage, // ADD THIS
+                          replyTo: message['replyTo'],
+                          replyToMessage: repliedMessage,
                           onReply: (msg) => _setReplyMessage(msg),
                           content: message['text'],
                           isMe: isMe,
@@ -846,10 +969,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           isOptimistic: message['isOptimistic'] ?? false,
                           readBy: message['readBy'] ?? false,
                           messageId: message['_id'] ?? '',
-                          receiverId: isMe
-                              ? message['receiverId']
-                              : message['senderId'],
-                          // Voice message properties
+                          receiverId: isMe ? message['receiverId'] : message['senderId'],
                           isAudio: message['isAudio'] ?? false,
                           audioUrl: message['audioUrl'],
                         ),
@@ -1231,7 +1351,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void deactivate() {
-    // ✅ Use stored reference instead of context.read()
+    // ✅ ADD THIS SECTION
+    if (_userId != null) {
+      try {
+        _notificationProvider.deactivateChat(
+          userId: _userId!,
+          type: 'chat',
+          chatId: widget.userId,
+        );
+        print('👋 Chat notifications deactivated in deactivate');
+      } catch (e) {
+        print('⚠️ Error in deactivate: $e');
+      }
+    }
+
+    // Your existing code
     if (_chatProvider.currentUserId != null &&
         _chatProvider.currentReceiverId != null) {
       _chatProvider.leaveConversation();
@@ -1244,7 +1378,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void dispose() {
     print('🧹 ChatDetailScreen disposing...');
 
-    // ✅ Use stored reference instead of context.read()
+    // Cancel timer first
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+
+    // Notification cleanup
+    if (_userId != null) {
+      try {
+        _notificationProvider.deactivateChat(
+          userId: _userId!,
+          type: 'chat',
+          chatId: widget.userId,
+        );
+        print('👋 Chat notifications deactivated');
+      } catch (e) {
+        print('⚠️ Error deactivating chat notifications: $e');
+      }
+    }
+
+    // Leave conversation
     if (_chatProvider.currentUserId != null &&
         _chatProvider.currentReceiverId != null) {
       _chatProvider.leaveConversation();
@@ -1255,7 +1407,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _messageController.dispose();
     _scrollController.dispose();
 
-    // Clean up voice recorder
+    // Close recorder
     if (_recorder != null) {
       _recorder!.closeRecorder().then((_) {
         print('✅ Voice recorder closed');
@@ -1263,13 +1415,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         print('⚠️ Error closing recorder: $error');
       });
     }
-    _deleteRecording();
 
-    // Call super.dispose() LAST
+    // Delete recording WITHOUT setState
+    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+      try {
+        File(_recordingPath!).deleteSync();
+      } catch (e) {
+        print('⚠️ Error deleting recording in dispose: $e');
+      }
+    }
+
     super.dispose();
-
     print('✅ ChatDetailScreen disposed');
   }
+
 
   Future<void> _initiateVoiceCall() async {
     final voiceCallProvider = context.read<VoiceCallProvider>();

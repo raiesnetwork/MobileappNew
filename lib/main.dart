@@ -1,7 +1,6 @@
-// main.dart - FIXED VERSION
+
 
 import 'package:flutter/material.dart';
-
 import 'package:ixes.app/providers/announcement_provider.dart';
 import 'package:ixes.app/providers/campaign_provider.dart';
 import 'package:ixes.app/providers/chat_provider.dart';

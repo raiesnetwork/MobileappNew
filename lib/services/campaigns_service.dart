@@ -327,26 +327,25 @@ class CampaignService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
+
       if (token == null || token.isEmpty) {
-        print("token $token");
         return {
           'error': true,
-          'message': 'Authentication token is missing',
+          'message': 'Please log in again to continue',
           'data': null,
         };
       }
 
       final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/members/$campaignId'),
+        Uri.parse('${apiBaseUrl}api/community/campaigns/members/$campaignId'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
       );
 
-      print('getCampaignMembers - Status Code: ${response.statusCode}');
-      print('Response body: ${response.body}');
-      print("Campaign ID: $campaignId");
+      print('getCampaignMembers - Status: ${response.statusCode}');
+      print('Response: ${response.body}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -354,6 +353,21 @@ class CampaignService {
           'error': false,
           'message': 'Members fetched successfully',
           'data': decoded['data'],
+        };
+      } else if (response.statusCode == 403) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'error': true,
+          'message': decoded['message'] ?? 'You do not have permission to view campaign members',
+          'data': null,
+        };
+      } else if (response.statusCode == 401) {
+        // Token expired or invalid
+        await prefs.remove('auth_token'); // Clear invalid token
+        return {
+          'error': true,
+          'message': 'Session expired. Please log in again',
+          'data': null,
         };
       } else {
         final decoded = jsonDecode(response.body);
@@ -367,7 +381,7 @@ class CampaignService {
       print('Error in getCampaignMembers: $e');
       return {
         'error': true,
-        'message': 'Error fetching campaign members: ${e.toString()}',
+        'message': 'Network error. Please check your connection',
         'data': null,
       };
     }

@@ -36,6 +36,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
 
 
+
   @override
   void initState() {
     super.initState();
@@ -222,25 +223,40 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       });
     }
   }
+  EventsListener<RoomEvent>? _roomListener; // ✅ ADD THIS as class variable
 
   void _setupRoomListeners() {
+    // ✅ CRITICAL: Remove old listener first
+    if (_roomListener != null) {
+      debugPrint('🧹 Removing old room listener');
+      _roomListener = null;
+    }
+
+    _room?.removeListener(_onRoomUpdate);
     _room?.addListener(_onRoomUpdate);
 
-    _room?.createListener()
+    // ✅ Store the listener reference
+    _roomListener = _room?.createListener()
       ?..on<RoomDisconnectedEvent>((event) async {
-        debugPrint('Disconnected from room');
+        debugPrint('🔴 DISCONNECT EVENT - Reason: ${event.reason}');
 
-        if (!mounted) return;
+        if (!mounted) {
+          debugPrint('⚠️ Widget not mounted, ignoring disconnect');
+          return;
+        }
+
         final overlayService = MeetingOverlayService();
         if (overlayService.isMinimized) {
+          debugPrint('⚠️ Disconnect while minimized - hiding overlay');
           overlayService.hideOverlay();
         }
 
-        // Schedule navigation safely
+        // ✅ Only pop ONCE
+        debugPrint('📱 Scheduling navigation pop...');
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            // Use maybePop in case the route was already removed
-            Navigator.of(context).maybePop();
+          if (mounted && Navigator.canPop(context)) {
+            debugPrint('✅ Popping navigation');
+            Navigator.of(context).pop();
           }
         });
       })
@@ -1650,30 +1666,33 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   void dispose() {
     debugPrint('🧹 ===== DISPOSING MEETING ROOM SCREEN =====');
 
-    // Remove overlay listener
+    // ✅ Remove ALL listeners FIRST
     final overlayService = MeetingOverlayService();
     overlayService.removeListener(_onOverlayUpdate);
+
+    if (_room != null) {
+      _room!.removeListener(_onRoomUpdate);
+      // ✅ Dispose the event listener
+      _roomListener?.dispose();
+      _roomListener = null;
+    }
 
     // Clean up controllers
     _chatController.dispose();
     _chatScrollController.dispose();
 
-    // CRITICAL: Check if we're minimizing
-    if (overlayService.isMinimized &&
-        overlayService.meetingId == widget.meetingId) {
-      // We're minimizing - DON'T disconnect the room
-      debugPrint('✅ Screen disposed but keeping room active (minimized)');
-      // Only remove the listener, don't disconnect
-      if (_room != null) {
-        _room!.removeListener(_onRoomUpdate);
-      }
+    // Check if minimizing
+    final isMinimizing = overlayService.isMinimized &&
+        overlayService.meetingId == widget.meetingId;
+
+    if (isMinimizing) {
+      debugPrint('✅ Keeping room active (minimized)');
     } else {
-      // Normal disposal - disconnect and cleanup
       debugPrint('🔌 Disconnecting room (normal disposal)');
       if (_room != null) {
-        _room!.removeListener(_onRoomUpdate);
         unawaited(_room!.disconnect());
         unawaited(_room!.dispose());
+        _room = null;
       }
     }
 

@@ -541,12 +541,17 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   /// Send voice message with socket integration
+  // In personal_chat_provider.dart
+// Replace the sendVoiceMessage method with this:
+
+  /// Send voice message with socket integration
   Future<Map<String, dynamic>?> sendVoiceMessage({
     required File audioFile,
     required String receiverId,
     bool readBy = false,
     String? replyTo,
     String? image,
+    int? audioDurationMs, // ✅ ADD THIS PARAMETER
   }) async {
     _isSendingMessage = true;
     _sendMessageError = null;
@@ -554,8 +559,8 @@ class PersonalChatProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      // Create optimistic message
-      final tempId = DateTime.now().millisecondsSinceEpoch.toString();
+      // Create optimistic message with duration
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
       final optimisticMessage = {
         '_id': tempId,
         'audioUrl': audioFile.path,
@@ -567,18 +572,25 @@ class PersonalChatProvider with ChangeNotifier {
         'status': 'sending',
         'isOptimistic': true,
         'localFilePath': audioFile.path,
+        // ✅ INCLUDE DURATION IN OPTIMISTIC MESSAGE
+        if (audioDurationMs != null) 'audioDurationMs': audioDurationMs,
         if (image != null && image.isNotEmpty) 'image': image,
+        if (replyTo != null && replyTo.isNotEmpty) 'replyTo': replyTo,
       };
 
       _messages = [..._messages, optimisticMessage];
       notifyListeners();
 
+      print('📤 Sending voice with duration: $audioDurationMs ms');
+
+      // ✅ PASS DURATION TO SERVICE
       final response = await _chatService.sendVoiceMessage(
         audioFile: audioFile,
         receiverId: receiverId,
         readBy: readBy,
         image: image,
         replyTo: replyTo,
+        audioDurationMs: audioDurationMs, // ✅ PASS IT HERE
         useSocket: _socketConnected,
       );
 
@@ -588,9 +600,20 @@ class PersonalChatProvider with ChangeNotifier {
         _lastSentMessage = response['data'];
 
         // Replace optimistic message with real message
-        final realMessage = _processMessage(response['data']['message']);
-        realMessage['localFilePath'] =
-            audioFile.path; // Keep local path for sender
+        final messageData = response['data']['message'] ?? response['data'];
+        final realMessage = _processMessage(messageData);
+
+        // Keep local path and ensure duration is present
+        realMessage['localFilePath'] = audioFile.path;
+
+        // ✅ ENSURE DURATION IS IN THE MESSAGE
+        if (realMessage['audioDurationMs'] == null && audioDurationMs != null) {
+          realMessage['audioDurationMs'] = audioDurationMs;
+          print('⚠️ Duration not in response, using local value: $audioDurationMs ms');
+        } else {
+          print('✅ Duration in message: ${realMessage['audioDurationMs']} ms');
+        }
+
         _messages[messageIndex] = realMessage;
 
         print('✅ Voice message sent successfully');

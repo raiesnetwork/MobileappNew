@@ -329,6 +329,13 @@ class CommunityProvider with ChangeNotifier {
         List<dynamic> communitiesData = [];
         if (rawData is List) {
           communitiesData = rawData;
+
+          // Debug: Log each community's profile image
+          for (var community in communitiesData) {
+            if (community is Map<String, dynamic>) {
+              print('Community: ${community['name']}, ProfileImage: ${community['profileImage']}');
+            }
+          }
         } else {
           print('Warning: Expected List but got ${rawData.runtimeType}');
           communitiesData = [];
@@ -341,7 +348,7 @@ class CommunityProvider with ChangeNotifier {
           'data': communitiesData
         };
 
-        print('Updated _myCommunities: $_myCommunities');
+        print('Updated _myCommunities with ${communitiesData.length} communities');
         _myCommunitiesError = null;
       } else {
         _myCommunities = {
@@ -354,6 +361,7 @@ class CommunityProvider with ChangeNotifier {
       }
     } catch (e) {
       print('Exception in fetchMyCommunities: $e');
+      print('Stack trace: ${StackTrace.current}');
       _myCommunities = {
         'error': true,
         'message': 'Error fetching communities: ${e.toString()}',

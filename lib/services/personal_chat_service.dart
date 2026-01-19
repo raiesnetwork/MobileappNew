@@ -208,6 +208,9 @@ class PersonalChatService {
     }
   }
 
+// In personal_chat_service.dart
+// Replace the sendVoiceMessage and _sendVoiceMessageHttp methods with these:
+
   /// Send voice message - ALWAYS use HTTP since socket not implemented
   Future<Map<String, dynamic>> sendVoiceMessage({
     required File audioFile,
@@ -215,7 +218,7 @@ class PersonalChatService {
     bool readBy = false,
     String? image,
     String? replyTo,
-
+    int? audioDurationMs, // ✅ ADD THIS PARAMETER
     bool useSocket = false, // Force HTTP for voice messages
   }) async {
     print('📤 Sending voice message via HTTP...');
@@ -224,6 +227,8 @@ class PersonalChatService {
       receiverId: receiverId,
       readBy: readBy,
       image: image,
+      replyTo: replyTo,
+      audioDurationMs: audioDurationMs, // ✅ PASS IT THROUGH
     );
   }
 
@@ -234,6 +239,7 @@ class PersonalChatService {
     bool readBy = false,
     String? image,
     String? replyTo,
+    int? audioDurationMs, // ✅ ADD THIS PARAMETER
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -256,11 +262,19 @@ class PersonalChatService {
 
       request.fields['receiverId'] = receiverId;
       request.fields['readBy'] = readBy.toString();
+
       if (image != null && image.isNotEmpty) {
         request.fields['image'] = image;
-        if (replyTo != null && replyTo.isNotEmpty) {
-          request.fields['replyTo'] = replyTo;
-        }
+      }
+
+      if (replyTo != null && replyTo.isNotEmpty) {
+        request.fields['replyTo'] = replyTo;
+      }
+
+      // ✅ ADD DURATION TO REQUEST
+      if (audioDurationMs != null) {
+        request.fields['audioDurationMs'] = audioDurationMs.toString();
+        print('📦 Including audio duration: $audioDurationMs ms');
       }
 
       request.files.add(
@@ -282,6 +296,14 @@ class PersonalChatService {
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
+
+        // ✅ VERIFY duration in response
+        if (decoded['message'] != null && decoded['message']['audioDurationMs'] != null) {
+          print('✅ Server confirmed duration: ${decoded['message']['audioDurationMs']} ms');
+        } else {
+          print('⚠️ Warning: Duration not found in server response');
+        }
+
         return {
           'error': decoded['error'] ?? false,
           'message': decoded['message'] ?? 'Voice message sent successfully',

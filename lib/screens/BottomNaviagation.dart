@@ -11,6 +11,8 @@ import 'package:ixes.app/screens/communities_page/communities_screen.dart';
 import 'package:ixes.app/screens/widgets/dash_board_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/communities_provider.dart';
+import 'package:ixes.app/providers/notification_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chats_page/personal_chat_screen.dart';
 import 'communities_page/my_community_screen.dart';
@@ -25,19 +27,41 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late int _currentIndex;
   bool _snackbarShown = false;
   late PageController _pageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: _currentIndex);
+
+    WidgetsBinding.instance.addObserver(this);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifProvider = context.read<NotificationProvider>();
+      notifProvider.initializeNotifications().then((_) {
+        _isInitialized = true;
+        _clearTabNotifications(_currentIndex);
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed && _isInitialized) {
+      context.read<NotificationProvider>().loadNotifications().then((_) {
+        _clearTabNotifications(_currentIndex);
+      });
+    }
   }
 
   @override
@@ -45,7 +69,7 @@ class _MainScreenState extends State<MainScreen> {
     super.didChangeDependencies();
 
     final args =
-        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
 
     if (!_snackbarShown && args != null && args['showSnackbar'] == true) {
       _snackbarShown = true;
@@ -62,7 +86,7 @@ class _MainScreenState extends State<MainScreen> {
           SnackBar(
             content: Text(args['message'] ?? 'Action completed.'),
             backgroundColor:
-                args['deleted'] == true ? Colors.green : Colors.red,
+            args['deleted'] == true ? Colors.green : Colors.red,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 3),
           ),
@@ -70,9 +94,8 @@ class _MainScreenState extends State<MainScreen> {
       });
     }
 
-    // Fix: Use myCommunities instead of communities for the drawer
     final communityProvider =
-        Provider.of<CommunityProvider>(context, listen: false);
+    Provider.of<CommunityProvider>(context, listen: false);
     if (communityProvider.myCommunities['message'] == 'Not loaded') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         communityProvider.fetchMyCommunities();
@@ -82,6 +105,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pageController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -97,6 +121,57 @@ class _MainScreenState extends State<MainScreen> {
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeInOut,
     );
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        _clearTabNotifications(index);
+      }
+    });
+  }
+
+  Future<void> _clearTabNotifications(int tabIndex) async {
+    if (!_isInitialized || !mounted) return;
+
+    try {
+      final notifProvider = context.read<NotificationProvider>();
+
+      List<String> types = [];
+
+      switch (tabIndex) {
+        case 0:
+          types = ['Post', 'Announcement'];
+          break;
+        case 2:
+          types = ['chat', 'GroupChat', 'Conversation'];
+          break;
+        case 3:
+          types = ['community', 'GroupRequest'];
+          break;
+        case 4:
+          types = [
+            'campaign',
+            'Service',
+            'Invoice',
+            'StoreSubscription',
+            'SubDomain',
+            'AddProduct',
+            'ServiceReq',
+          ];
+          break;
+        default:
+          return;
+      }
+
+      if (types.isEmpty) return;
+
+      print('🧹 Clearing notifications for tab $tabIndex with types: $types');
+
+      await notifProvider.markTypesAsRead(types);
+
+      print('✅ Successfully cleared all notifications for tab $tabIndex');
+    } catch (e) {
+      print('💥 Error clearing tab notifications: $e');
+    }
   }
 
   void _onDrawerChanged(bool isOpened) {
@@ -107,19 +182,67 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   void _onCommunityTapped() {
-    Navigator.pop(context); // Close drawer
+    Navigator.pop(context);
   }
 
-  String _getCommunityId(BuildContext context) {
-    final communityProvider =
-        Provider.of<CommunityProvider>(context, listen: false);
-    final communityList =
-        communityProvider.myCommunities['data'] as List? ?? [];
+  // Updated badge for AppBar notification icon
+  Widget _buildBadge(int count) {
+    if (count == 0) return const SizedBox.shrink();
 
-    if (communityList.isNotEmpty) {
-      return communityList.first['_id']?.toString() ?? '';
-    }
-    return '';
+    return Positioned(
+      right: 0,
+      top: 0,
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: const BoxDecoration(
+          color: Colors.red,
+          shape: BoxShape.circle,
+        ),
+        constraints: const BoxConstraints(
+          minWidth: 18,
+          minHeight: 18,
+        ),
+        child: Text(
+          count > 99 ? '99+' : count.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
+  }
+
+  // New badge specifically for bottom navigation bar icons
+  Widget _buildBottomNavBadge(int count) {
+    if (count == 0) return const SizedBox.shrink();
+
+    return Positioned(
+      right: -6,
+      top: -6,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: const BoxDecoration(
+          color: Colors.red,
+          shape: BoxShape.circle,
+        ),
+        constraints: const BoxConstraints(
+          minWidth: 16,
+          minHeight: 16,
+        ),
+        child: Text(
+          count > 99 ? '99+' : count.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 9,
+            fontWeight: FontWeight.bold,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
   }
 
   @override
@@ -153,19 +276,36 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.notifications_outlined, color: Primary),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const NotificationScreen(),
-                ),
+          Consumer<NotificationProvider>(
+            builder: (context, notifProvider, child) {
+              final unreadCount = notifProvider.totalUnreadCount;
+
+              return Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined, color: Primary),
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const NotificationScreen(),
+                        ),
+                      );
+
+                      if (mounted) {
+                        await context.read<NotificationProvider>().loadNotifications();
+                        await Future.delayed(const Duration(milliseconds: 300));
+                        _clearTabNotifications(_currentIndex);
+                      }
+                    },
+                  ),
+                  _buildBadge(unreadCount),
+                ],
               );
             },
           ),
           IconButton(
-            icon: Icon(Icons.store, color: Primary),
+            icon: const Icon(Icons.store, color: Primary),
             onPressed: () {
               Navigator.push(
                 context,
@@ -176,7 +316,7 @@ class _MainScreenState extends State<MainScreen> {
             },
           ),
           IconButton(
-            icon: Icon(Icons.person, color: Primary),
+            icon: const Icon(Icons.person, color: Primary),
             onPressed: () {
               Navigator.push(
                 context,
@@ -193,7 +333,6 @@ class _MainScreenState extends State<MainScreen> {
         backgroundColor: Colors.black,
         child: Column(
           children: [
-            // Custom Header with gradient
             Container(
               height: 200,
               width: double.infinity,
@@ -220,7 +359,7 @@ class _MainScreenState extends State<MainScreen> {
                             color: Colors.white24,
                             width: 2,
                           ),
-                          boxShadow: [
+                          boxShadow: const [
                             BoxShadow(
                               color: Colors.black26,
                               blurRadius: 10,
@@ -242,7 +381,7 @@ class _MainScreenState extends State<MainScreen> {
                         ),
                       ),
                       const SizedBox(height: 15),
-                      Text(
+                      const Text(
                         'IXES',
                         style: TextStyle(
                           color: Colors.white,
@@ -251,7 +390,7 @@ class _MainScreenState extends State<MainScreen> {
                           letterSpacing: 2,
                         ),
                       ),
-                      Text(
+                      const Text(
                         'Connect • Share • Grow',
                         style: TextStyle(
                           color: Colors.white70,
@@ -264,8 +403,6 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
             ),
-
-            // Communities Section - Now using the extracted widget
             Expanded(
               child: Container(
                 color: Colors.black,
@@ -281,7 +418,6 @@ class _MainScreenState extends State<MainScreen> {
       ),
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
-          // Use myCommunities for getting community ID instead of allCommunities
           final communityList = provider.myCommunities['data'] as List? ?? [];
           final communityId = communityList.isNotEmpty
               ? communityList.first['_id']?.toString() ?? ''
@@ -293,8 +429,13 @@ class _MainScreenState extends State<MainScreen> {
               setState(() {
                 _currentIndex = index;
               });
+              Future.delayed(const Duration(milliseconds: 400), () {
+                if (mounted) {
+                  _clearTabNotifications(index);
+                }
+              });
             },
-            children: [
+            children: const [
               FeedScreen(),
               NewaScreen(),
               PersonalChatScreen(),
@@ -304,34 +445,75 @@ class _MainScreenState extends State<MainScreen> {
           );
         },
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: _onTabTapped,
-        type: BottomNavigationBarType.fixed,
-        selectedItemColor: Primary,
-        unselectedItemColor: Colors.grey,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle),
-            label: 'Ask Newa',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat),
-            label: 'Chats',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.group),
-            label: 'Communities',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard),
-            label: 'Dashboard',
-          ),
-        ],
+      bottomNavigationBar: Consumer<NotificationProvider>(
+        builder: (context, notifProvider, child) {
+          final homeCount = notifProvider.getUnreadCountForTypes(['Post', 'Announcement']);
+          final chatCount = notifProvider.getUnreadCountForTypes(['chat', 'GroupChat', 'Conversation']);
+          final communityCount = notifProvider.getUnreadCountForTypes(['community', 'GroupRequest']);
+          final dashboardCount = notifProvider.getUnreadCountForTypes([
+            'campaign',
+            'Service',
+            'Invoice',
+            'StoreSubscription',
+            'SubDomain',
+            'AddProduct',
+            'ServiceReq',
+          ]);
+
+          return BottomNavigationBar(
+            currentIndex: _currentIndex,
+            onTap: _onTabTapped,
+            type: BottomNavigationBarType.fixed,
+            selectedItemColor: Primary,
+            unselectedItemColor: Colors.grey,
+            items: [
+              BottomNavigationBarItem(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.home),
+                    _buildBottomNavBadge(homeCount),
+                  ],
+                ),
+                label: 'Home',
+              ),
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.add_circle),
+                label: 'Ask Newa',
+              ),
+              BottomNavigationBarItem(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.chat),
+                    _buildBottomNavBadge(chatCount),
+                  ],
+                ),
+                label: 'Chats',
+              ),
+              BottomNavigationBarItem(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.group),
+                    _buildBottomNavBadge(communityCount),
+                  ],
+                ),
+                label: 'Communities',
+              ),
+              BottomNavigationBarItem(
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.dashboard),
+                    _buildBottomNavBadge(dashboardCount),
+                  ],
+                ),
+                label: 'Dashboard',
+              ),
+            ],
+          );
+        },
       ),
       onDrawerChanged: _onDrawerChanged,
     );

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/chats_page/view_file_screen.dart';
@@ -8,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -81,9 +83,13 @@ class _MessageBubbleState extends State<MessageBubble> {
     super.initState();
     if (widget.isAudio) {
       _initializePlayer();
-      // Set initial duration if available
-      if (widget.audioDurationMs != null) {
+
+      // ✅ CRITICAL: Set initial duration from widget
+      if (widget.audioDurationMs != null && widget.audioDurationMs! > 0) {
         _duration = Duration(milliseconds: widget.audioDurationMs!);
+        print('✅ Initial duration set: ${_formatDuration(_duration)}');
+      } else {
+        print('⚠️ No duration provided in widget');
       }
     }
   }
@@ -102,33 +108,49 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
   }
 
+// In message_bubble_screen.dart
+// Replace the _playPauseAudio method with this fixed version:
+
   Future<void> _playPauseAudio() async {
-    if (!_isPlayerInitialized || _player == null) return;
+    if (!_isPlayerInitialized || _player == null) {
+      print('❌ Player not initialized');
+      return;
+    }
 
     try {
       if (_isPlaying) {
+        // Pause playback
         await _player!.pausePlayer();
         setState(() {
           _isPlaying = false;
         });
+        print('⏸️ Paused at ${_formatDuration(_position)}');
       } else {
-        // Get audio file path
+        // Start/Resume playback
         String? audioPath = await _getAudioPath();
-        if (audioPath == null) return;
+        if (audioPath == null) {
+          print('❌ No audio path available');
+          return;
+        }
 
-        // Get duration if not already set
-        if (_duration == Duration.zero) {
+        print('🎵 Starting playback: $audioPath');
+        print('🎵 Known duration: ${_formatDuration(_duration)}');
+
+        // ✅ Only load duration if we don't have it
+        if (_duration == Duration.zero || _duration.inMilliseconds < 100) {
+          print('⏳ Loading duration...');
           await _loadAudioDuration(audioPath);
         }
 
-        // Cancel existing subscription before starting new one
+        // Cancel any existing subscription
         await _playerSubscription?.cancel();
+        _playerSubscription = null;
 
         // Start playing
         await _player!.startPlayer(
           fromURI: audioPath,
           whenFinished: () {
-            print('🎵 Audio finished playing');
+            print('🎵 Playback finished');
             if (mounted) {
               setState(() {
                 _isPlaying = false;
@@ -138,38 +160,57 @@ class _MessageBubbleState extends State<MessageBubble> {
           },
         );
 
+        // Update state immediately
         setState(() {
           _isPlaying = true;
         });
 
-        // CRITICAL: Subscribe to progress updates AFTER starting playback
+        // Subscribe to progress updates
         _playerSubscription = _player!.onProgress!.listen(
               (event) {
-            print('🎵 Progress: ${event.position.inSeconds}s / ${event.duration.inSeconds}s');
+            if (!mounted || !_isPlaying) return;
+
+            setState(() {
+              _position = event.position;
+
+              // Update duration if we get a better value
+              if (event.duration > Duration.zero &&
+                  (_duration == Duration.zero || event.duration != _duration)) {
+                _duration = event.duration;
+                print('🔄 Duration updated from stream: ${_formatDuration(_duration)}');
+              }
+            });
+          },
+          onError: (error) {
+            print('⚠️ Progress stream error: $error');
+          },
+          onDone: () {
+            print('🎵 Progress stream completed');
             if (mounted) {
               setState(() {
-                _position = event.position;
-
-                // Update duration if we get a better value
-                if (event.duration > Duration.zero && event.duration > _duration) {
-                  _duration = event.duration;
-                }
+                _isPlaying = false;
+                _position = Duration.zero;
               });
             }
           },
-          onError: (error) {
-            print('⚠️ Audio progress stream error: $error');
-          },
           cancelOnError: false,
         );
+
+        print('✅ Playback started successfully');
       }
     } catch (e) {
-      print('💥 Error playing audio: $e');
+      print('💥 Playback error: $e');
       if (mounted) {
+        setState(() {
+          _isPlaying = false;
+          _position = Duration.zero;
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error playing voice message: $e'),
+            content: Text('Error playing audio: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -177,52 +218,84 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Future<void> _loadAudioDuration(String audioPath) async {
+    print('⏳ Loading audio duration from: $audioPath');
+
     try {
-      // Create a temporary player to get duration
+      // Method 1: Use widget duration if available (most reliable)
+      if (widget.audioDurationMs != null && widget.audioDurationMs! > 0) {
+        final widgetDuration = Duration(milliseconds: widget.audioDurationMs!);
+        if (mounted) {
+          setState(() {
+            _duration = widgetDuration;
+          });
+        }
+        print('✅ Using widget duration: ${_formatDuration(widgetDuration)}');
+        return;
+      }
+
+      print('⚠️ No widget duration, attempting detection...');
+
+      // Method 2: Try to detect duration by playing briefly
       final tempPlayer = FlutterSoundPlayer();
       await tempPlayer.openPlayer();
 
       Duration? detectedDuration;
+      bool durationFound = false;
 
-      // Start playing to detect duration
+      // Start playing to get duration
       await tempPlayer.startPlayer(
         fromURI: audioPath,
         whenFinished: () {},
       );
 
-      // Wait a bit for the player to initialize
-      await Future.delayed(const Duration(milliseconds: 150));
+      // Wait a bit for player to initialize
+      await Future.delayed(const Duration(milliseconds: 200));
 
-      // Get duration from progress stream
-      final subscription = tempPlayer.onProgress!.listen(
+      // Subscribe to get duration
+      final tempSubscription = tempPlayer.onProgress!.listen(
             (event) {
-          if (event.duration > Duration.zero) {
+          if (event.duration > Duration.zero && !durationFound) {
             detectedDuration = event.duration;
+            durationFound = true;
           }
         },
       );
 
-      // Wait up to 500ms for duration detection
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Wait up to 1 second for duration detection
+      int attempts = 0;
+      while (!durationFound && attempts < 10) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+      }
 
-      // Cancel subscription and close temp player
-      await subscription.cancel();
+      // Cleanup
+      await tempSubscription.cancel();
       await tempPlayer.stopPlayer();
       await tempPlayer.closePlayer();
 
-      // Update duration if detected
-      if (detectedDuration != null && detectedDuration! > Duration.zero) {
-        if (mounted) {
+      // Update duration if found
+      if (detectedDuration != null && mounted) {
+        setState(() {
+          _duration = detectedDuration!;
+        });
+        print('✅ Detected duration: ${_formatDuration(detectedDuration!)}');
+      } else {
+        print('! Could not detect audio duration, using widget value');
+        // Fallback to widget's audioDurationMs if available
+        if (widget.audioDurationMs != null && mounted) {
           setState(() {
-            _duration = detectedDuration!;
+            _duration = Duration(milliseconds: widget.audioDurationMs!);
           });
         }
-        print('✅ Audio duration detected: ${_formatDuration(detectedDuration!)}');
-      } else {
-        print('⚠️ Could not detect audio duration');
       }
     } catch (e) {
-      print('💥 Error loading audio duration: $e');
+      print('💥 Error loading duration: $e');
+      // Last resort: use widget duration
+      if (widget.audioDurationMs != null && mounted) {
+        setState(() {
+          _duration = Duration(milliseconds: widget.audioDurationMs!);
+        });
+      }
     }
   }
 
@@ -287,7 +360,6 @@ class _MessageBubbleState extends State<MessageBubble> {
     double progress = 0.0;
     if (_duration.inMilliseconds > 0) {
       progress = _position.inMilliseconds / _duration.inMilliseconds;
-      // Clamp between 0 and 1
       progress = progress.clamp(0.0, 1.0);
     }
 
@@ -331,12 +403,12 @@ class _MessageBubbleState extends State<MessageBubble> {
           ),
           const SizedBox(width: 12),
 
-          // Waveform visualization with animated progress
+          // Waveform visualization with progress
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Waveform with progress
+                // Waveform bars
                 SizedBox(
                   height: 24,
                   child: Row(
@@ -345,9 +417,11 @@ class _MessageBubbleState extends State<MessageBubble> {
                       final barProgress = index / 20;
                       final isActive = progress >= barProgress;
 
-                      // Create varying heights for waveform effect
-                      final heights = [20.0, 15.0, 10.0, 18.0, 12.0, 16.0, 14.0, 20.0, 11.0, 15.0,
-                        17.0, 13.0, 19.0, 10.0, 16.0, 14.0, 18.0, 12.0, 15.0, 20.0];
+                      // Varying heights for waveform effect
+                      final heights = [
+                        20.0, 15.0, 10.0, 18.0, 12.0, 16.0, 14.0, 20.0, 11.0, 15.0,
+                        17.0, 13.0, 19.0, 10.0, 16.0, 14.0, 18.0, 12.0, 15.0, 20.0
+                      ];
 
                       return Expanded(
                         child: Container(
@@ -366,13 +440,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                 ),
                 const SizedBox(height: 6),
 
-                // Duration display - FIXED to show current/total
+                // ✅ FIXED: Duration display
                 Text(
-                  _isPlaying || _position.inSeconds > 0
-                      ? '${_formatDuration(_position)} / ${_formatDuration(_duration)}'
-                      : _duration.inSeconds > 0
-                      ? _formatDuration(_duration)
-                      : '0:00',
+                  _buildDurationText(),
                   style: TextStyle(
                     color: widget.isMe ? Colors.white70 : Colors.grey[600],
                     fontSize: 11,
@@ -383,7 +453,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           ),
 
-          // Status indicator for voice messages
+          // Status indicators
           if (widget.status == 'sending') ...[
             const SizedBox(width: 8),
             SizedBox(
@@ -398,7 +468,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             ),
           ] else if (widget.status == 'failed') ...[
             const SizedBox(width: 8),
-            Icon(
+            const Icon(
               Icons.error_outline,
               size: 16,
               color: Colors.red,
@@ -407,6 +477,20 @@ class _MessageBubbleState extends State<MessageBubble> {
         ],
       ),
     );
+  }
+  String _buildDurationText() {
+    // If playing or paused with position, show current/total
+    if (_isPlaying || _position.inSeconds > 0) {
+      return '${_formatDuration(_position)} / ${_formatDuration(_duration)}';
+    }
+
+    // If we have duration, show it
+    if (_duration.inSeconds > 0) {
+      return _formatDuration(_duration);
+    }
+
+    // Fallback
+    return '0:00';
   }
 
   @override
@@ -561,13 +645,11 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ),
                   )
                 // Text content
+                // Text content with clickable URLs
                 else if (widget.content != null)
-                    Text(
-                      widget.content!,
-                      style: TextStyle(
-                        color: widget.isMe ? Colors.white : Colors.black87,
-                        fontSize: 16,
-                      ),
+                    ClickableMessageText(
+                      text: widget.content!,
+                      isMe: widget.isMe,
                     ),
                 const SizedBox(height: 4),
                 Row(
@@ -629,13 +711,14 @@ class _MessageBubbleState extends State<MessageBubble> {
       ),
     );
 
-    // EDIT and DELETE options - only for MY messages (text only)
+    // EDIT option - only for MY TEXT messages
     if (widget.isMe &&
         !widget.isFile &&
         !widget.isAudio &&
+        widget.content != null &&
+        widget.content!.isNotEmpty &&
         !widget.isOptimistic &&
         widget.status != 'sending') {
-
       options.add(
         ListTile(
           leading: Icon(
@@ -649,7 +732,13 @@ class _MessageBubbleState extends State<MessageBubble> {
           },
         ),
       );
+    }
 
+    // DELETE option - for ALL MY messages (text, file, AND voice)
+    if (widget.isMe &&
+        !widget.isOptimistic &&
+        widget.status != 'sending' &&
+        widget.status != 'failed') {
       options.add(
         ListTile(
           leading: const Icon(
@@ -1004,5 +1093,117 @@ class _MessageBubbleState extends State<MessageBubble> {
       });
     }
     super.deactivate();
+  }
+
+}
+
+class ClickableMessageText extends StatelessWidget {
+  final String text;
+  final bool isMe;
+
+  const ClickableMessageText({
+    Key? key,
+    required this.text,
+    required this.isMe,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: _buildTextSpans(),
+    );
+  }
+
+  TextSpan _buildTextSpans() {
+    final List<TextSpan> spans = [];
+
+    // Enhanced regex to detect URLs (http, https, www)
+    final urlPattern = RegExp(
+      r'(?:(?:https?):\/\/|www\.)'
+      r'(?:\S+(?::\S*)?@)?'
+      r'(?:'
+      r'(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])'
+      r'(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}'
+      r'(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))'
+      r'|'
+      r'(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+'
+      r'(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*'
+      r'(?:\.(?:[a-z\u00a1-\uffff]{2,}))'
+      r')'
+      r'(?::\d{2,5})?'
+      r'(?:[/?#]\S*)?',
+      caseSensitive: false,
+    );
+
+    final matches = urlPattern.allMatches(text);
+    int currentPosition = 0;
+
+    for (final match in matches) {
+      // Add text before URL
+      if (match.start > currentPosition) {
+        spans.add(TextSpan(
+          text: text.substring(currentPosition, match.start),
+          style: TextStyle(
+            color: isMe ? Colors.white : Colors.black87,
+            fontSize: 16,
+          ),
+        ));
+      }
+
+      // Add clickable URL with VERY visible styling
+      final url = match.group(0)!;
+      spans.add(TextSpan(
+        text: url,
+        style: TextStyle(
+          // ✅ BRIGHT COLORS - Very visible!
+          color: isMe ? Colors.lightBlueAccent : Colors.blue[800],
+          fontSize: 16,
+          // ✅ UNDERLINE - Makes it obvious it's a link
+          decoration: TextDecoration.underline,
+          decorationColor: isMe ? Colors.lightBlueAccent : Colors.blue[800],
+          decorationThickness: 2.0, // ✅ Thicker underline
+          fontWeight: FontWeight.w600, // ✅ Bold text
+        ),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () => _launchURL(url),
+      ));
+
+      currentPosition = match.end;
+    }
+
+    // Add remaining text after last URL
+    if (currentPosition < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(currentPosition),
+        style: TextStyle(
+          color: isMe ? Colors.white : Colors.black87,
+          fontSize: 16,
+        ),
+      ));
+    }
+
+    return TextSpan(children: spans);
+  }
+
+  Future<void> _launchURL(String urlString) async {
+    // Add https:// if URL starts with www.
+    if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+      urlString = 'https://$urlString';
+    }
+
+    final Uri url = Uri.parse(urlString);
+
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(
+          url,
+          mode: LaunchMode.externalApplication,
+        );
+      } else {
+        debugPrint('Could not launch $urlString');
+      }
+    } catch (e) {
+      debugPrint('Error launching URL: $e');
+    }
   }
 }
