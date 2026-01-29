@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
 import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http_parser/http_parser.dart' as http_parser;
 
@@ -21,6 +23,9 @@ class ServicesService {
         };
       }
 
+      print('🔍 Fetching ALL services - Page: $page, Limit: $limit');
+      print('🔑 Using token: ${token.substring(0, 20)}...');
+
       final response = await http.get(
         Uri.parse('https://api.ixes.ai/api/service/fetchallservices?page=$page&limit=$limit'),
         headers: {
@@ -29,18 +34,52 @@ class ServicesService {
         },
       );
 
+      print('📡 Status: ${response.statusCode}');
+      print('📦 FULL Response Body: ${response.body}');
+
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
+        final pagination = decoded['pagination'] ?? {};
+        final services = decoded['data'] ?? [];
+
+        // ✅ DETAILED LOGGING
+        print('📊 Services returned: ${services.length}');
+        print('📊 Total from pagination: ${pagination['total']}');
+        print('📊 Total pages: ${pagination['totalPages']}');
+        print('📊 Current page: ${pagination['page']}');
+
+        // Print each service ID and details
+        if (services.isNotEmpty) {
+          print('📋 Service IDs in response:');
+          for (var i = 0; i < services.length; i++) {
+            print('   ${i + 1}. ID: ${services[i]['_id']} | Name: ${services[i]['name']} | Provider: ${services[i]['serviceProvider']} | Status: ${services[i]['status']}');
+          }
+        }
+
+        // Check if the newly created service should be here
+        print('🔍 Looking for service ID: 69784a8aade75ffe80fd5a35');
+        final foundService = services.firstWhere(
+              (s) => s['_id'] == '69784a8aade75ffe80fd5a35',
+          orElse: () => null,
+        );
+        if (foundService != null) {
+          print('✅ NEW SERVICE FOUND in all services!');
+        } else {
+          print('❌ NEW SERVICE NOT FOUND in all services');
+          print('⚠️ This means the backend is filtering it out');
+        }
+
         return {
           'error': decoded['error'] ?? false,
           'message': decoded['message'] ?? 'Success',
-          'data': decoded['data'] ?? [],
-          'totalPages': decoded['totalPages'] ?? 1,
-          'currentPage': decoded['currentPage'] ?? 1,
-          'totalServices': decoded['totalServices'] ?? 0
+          'data': services,
+          'totalPages': pagination['totalPages'] ?? 1,
+          'currentPage': pagination['page'] ?? 1,
+          'totalServices': pagination['total'] ?? 0
         };
       } else {
         final decoded = jsonDecode(response.body);
+        print('❌ Error response: ${decoded['message']}');
         return {
           'error': true,
           'message': decoded['message'] ?? 'Failed to fetch services',
@@ -50,7 +89,9 @@ class ServicesService {
           'totalServices': 0
         };
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('💥 Exception in getAllServices: $e');
+      print('Stack trace: $stackTrace');
       return {
         'error': true,
         'message': 'Error fetching services: ${e.toString()}',
@@ -147,10 +188,7 @@ class ServicesService {
     }
   }
 
-  // FIXED VERSION - Key issues resolved:
-// 1. API expects "image" as array but code sends single data URL string
-// 2. API expects numbers for cost/slots but code sends strings
-// 3. Missing proper error response handling
+
 
   Future<Map<String, dynamic>> createService({
     required String name,
@@ -170,6 +208,7 @@ class ServicesService {
     File? image,
   }) async {
     try {
+      // 1. Get authentication token
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       print('🔑 Token: $token');
@@ -182,16 +221,15 @@ class ServicesService {
         };
       }
 
+      // 2. Setup API endpoint
       final uri = Uri.parse('${apiBaseUrl}api/service/create-service');
       print('📤 API URL: $uri');
 
-      // Create multipart request
+      // 3. Create multipart request
       final request = http.MultipartRequest('POST', uri);
-
-      // Add headers
       request.headers['Authorization'] = 'Bearer $token';
 
-      // Add text fields - matching the exact format from your Postman test
+      // 4. Add text fields
       request.fields['name'] = name;
       request.fields['description'] = description;
       request.fields['location'] = location;
@@ -205,18 +243,18 @@ class ServicesService {
       request.fields['serviceProvider'] = serviceProvider;
       request.fields['slots'] = slots;
 
-      // Add availableDays as multiple fields with the same name (standard form array format)
+      // 5. Add available days
       for (var day in availableDays) {
         request.fields['availableDays'] = day;
       }
+      print('📤 Available days: $availableDays');
 
-      print('📤 Available days being sent: $availableDays');
-
-      // Add image file if provided
+      // 6. Process and add image
       if (image != null) {
         try {
           print('📸 Processing image: ${image.path}');
 
+          // Check if file exists
           if (!await image.exists()) {
             print('❌ Image file does not exist');
             return {
@@ -225,44 +263,63 @@ class ServicesService {
             };
           }
 
+          // Get original file size
           final fileSize = await image.length();
-          print('📏 Image file size: ${fileSize} bytes');
+          print('📏 Original size: ${fileSize} bytes (${(fileSize / 1024).toStringAsFixed(2)} KB)');
 
-          if (fileSize > 5 * 1024 * 1024) {
-            print('❌ Image file too large');
+          File imageToUpload = image;
+
+          // Compress if larger than 500KB
+          if (fileSize > 500 * 1024) {
+            print('⚠️ Image too large, compressing...');
+
+            final compressedBytes = await FlutterImageCompress.compressWithFile(
+              image.path,
+              quality: 70,
+              minWidth: 1024,
+              minHeight: 1024,
+            );
+
+            if (compressedBytes != null) {
+              final tempDir = await getTemporaryDirectory();
+              final tempPath = '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
+              final compressedFile = File(tempPath);
+              await compressedFile.writeAsBytes(compressedBytes);
+
+              imageToUpload = compressedFile;
+              final compressedSize = await compressedFile.length();
+              print('✅ Compressed size: ${compressedSize} bytes (${(compressedSize / 1024).toStringAsFixed(2)} KB)');
+            }
+          }
+
+          // Final size validation
+          final finalSize = await imageToUpload.length();
+          if (finalSize > 5 * 1024 * 1024) {
+            print('❌ Image still too large after compression');
             return {
               'error': true,
-              'message': 'Image file is too large. Please select an image smaller than 5MB',
+              'message': 'Image is too large. Please select a smaller image.',
             };
           }
 
           // Determine MIME type
-          final extension = image.path.split('.').last.toLowerCase();
-          String mimeType;
-          switch (extension) {
-            case 'jpg':
-            case 'jpeg':
-              mimeType = 'image/jpeg';
-              break;
-            case 'png':
-              mimeType = 'image/png';
-              break;
-            case 'webp':
-              mimeType = 'image/webp';
-              break;
-            default:
-              mimeType = 'image/jpeg';
+          final extension = imageToUpload.path.split('.').last.toLowerCase();
+          String mimeType = 'image/jpeg';
+          if (extension == 'png') {
+            mimeType = 'image/png';
+          } else if (extension == 'webp') {
+            mimeType = 'image/webp';
           }
 
-          // Add file to multipart request
+          // Add file to request
           final multipartFile = await http.MultipartFile.fromPath(
             'image',
-            image.path,
+            imageToUpload.path,
             contentType: http_parser.MediaType.parse(mimeType),
           );
 
           request.files.add(multipartFile);
-          print('✅ Image added to multipart request with mime type: $mimeType');
+          print('✅ Image added (${mimeType})');
         } catch (e) {
           print('💥 Image processing error: $e');
           return {
@@ -270,28 +327,40 @@ class ServicesService {
             'message': 'Failed to process image: ${e.toString()}',
           };
         }
-      } else {
-        print('⚠️ No image selected');
       }
 
-      print('📤 Sending multipart request...');
-      print('📦 Fields: ${request.fields.keys.toList()}');
-      print('📦 Files: ${request.files.length}');
-
-      // Send request
+      // 7. Send request
+      print('📤 Sending request...');
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
       print('📥 Status Code: ${response.statusCode}');
       print('📥 Response Body: ${response.body}');
 
-      // Parse response
-      final decoded = jsonDecode(response.body);
+      // 8. Handle HTTP 413 error specifically
+      if (response.statusCode == 413) {
+        print('❌ 413 Request Entity Too Large');
+        return {
+          'error': true,
+          'message': 'Image is too large for the server. Please select a smaller image.',
+        };
+      }
 
+      // 9. Parse JSON response
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(response.body);
+      } catch (e) {
+        print('❌ Failed to parse JSON: $e');
+        return {
+          'error': true,
+          'message': 'Server returned invalid response. Status: ${response.statusCode}',
+        };
+      }
+
+      // 10. Handle success
       if (response.statusCode == 201 || response.statusCode == 200) {
         print('✅ Service created successfully');
-
-        // Check response structure - API returns 'err' not 'error'
         final hasError = decoded['err'] ?? decoded['error'] ?? false;
 
         return {
@@ -299,15 +368,16 @@ class ServicesService {
           'message': decoded['message'] ?? 'Service created successfully',
           'data': decoded['service'] ?? {},
         };
-      } else {
-        print('⚠️ Service creation failed');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to create service',
-        };
       }
+
+      // 11. Handle failure
+      print('⚠️ Service creation failed');
+      return {
+        'error': true,
+        'message': decoded['message'] ?? 'Failed to create service',
+      };
     } catch (e, stackTrace) {
-      print('💥 Exception occurred: $e');
+      print('💥 Exception: $e');
       print('Stack trace: $stackTrace');
       return {
         'error': true,

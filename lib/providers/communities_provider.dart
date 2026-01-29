@@ -1022,6 +1022,95 @@ class CommunityProvider with ChangeNotifier {
       };
     }
   }
+  // Add these properties and methods to your CommunityProvider class
+
+// Community Events Properties
+  Map<String, dynamic> _communityEvents = {
+    'message': 'Not loaded',
+    'data': [],
+    'email': null,
+    'password': null
+  };
+  bool _isLoadingEvents = false;
+  String? _eventsError;
+
+// Getters for Community Events
+  Map<String, dynamic> get communityEvents => _communityEvents;
+  bool get isLoadingEvents => _isLoadingEvents;
+  String? get eventsError => _eventsError;
+  String? get eventEmail => _communityEvents['email'];
+  String? get eventPassword => _communityEvents['password'];
+
+// Fetch Community Events
+  Future<Map<String, dynamic>> fetchCommunityEvents(String communityId) async {
+    try {
+      _isLoadingEvents = true;
+      _eventsError = null;
+      _communityEvents = {
+        'message': 'Loading',
+        'data': [],
+        'email': null,
+        'password': null
+      };
+      notifyListeners();
+
+      final result = await _communityService.getCommunityEvents(communityId);
+
+      _isLoadingEvents = false;
+      if (!result['error']) {
+        _communityEvents = {
+          'error': false,
+          'message': result['message'] ?? 'Events fetched successfully',
+          'data': result['data'] ?? [],
+          'email': result['email'],
+          'password': result['password']
+        };
+        _eventsError = null;
+      } else {
+        _communityEvents = {
+          'error': true,
+          'message': result['message'] ?? 'Error loading events',
+          'data': [],
+          'email': null,
+          'password': null
+        };
+        _eventsError = result['message'];
+      }
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _isLoadingEvents = false;
+      _eventsError = 'Error fetching events: $e';
+      _communityEvents = {
+        'error': true,
+        'message': 'Error fetching events: $e',
+        'data': [],
+        'email': null,
+        'password': null
+      };
+      notifyListeners();
+      return {
+        'error': true,
+        'message': 'Error fetching events: ${e.toString()}',
+        'data': [],
+        'email': null,
+        'password': null
+      };
+    }
+  }
+
+// Clear Events Data
+  void clearCommunityEvents() {
+    _isLoadingEvents = false;
+    _eventsError = null;
+    _communityEvents = {
+      'message': 'Not loaded',
+      'data': [],
+      'email': null,
+      'password': null
+    };
+    notifyListeners();
+  }
 
 
 }

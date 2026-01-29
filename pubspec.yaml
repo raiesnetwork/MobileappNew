@@ -78,6 +78,7 @@ dependencies:
   connectivity_plus:
   floating: ^2.0.0
   pip_view:
+  flutter_image_compress: ^2.1.0
 
 
 

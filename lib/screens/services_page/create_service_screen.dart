@@ -143,6 +143,7 @@ class _CreateServiceScreenState extends State<CreateServiceScreen> {
 
   Future<void> _createService() async {
     if (_formKey.currentState?.validate() ?? false) {
+      // Validation checks
       if (_availableDays.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please select at least one available day')),
@@ -163,8 +164,11 @@ class _CreateServiceScreenState extends State<CreateServiceScreen> {
       }
 
       setState(() => _isSubmitting = true);
+
       final provider = Provider.of<ServicesProvider>(context, listen: false);
-      await provider.createService(
+
+      // Call create service
+      final result = await provider.createService(
         name: _nameController.text,
         description: _descriptionController.text,
         location: _locationController.text,
@@ -184,20 +188,20 @@ class _CreateServiceScreenState extends State<CreateServiceScreen> {
 
       if (!mounted) return;
 
+      // Show result
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            provider.hasError
-                ? provider.message
-                : 'Service created successfully',
-          ),
-          backgroundColor: provider.hasError ? Colors.red : Colors.green,
+          content: Text(result['message'] ?? 'Operation completed'),
+          backgroundColor: result['error'] == true ? Colors.red : Colors.green,
+          duration: const Duration(seconds: 3),
         ),
       );
 
-      if (!provider.hasError) {
+      // Navigate back on success
+      if (result['error'] != true) {
         Navigator.pop(context);
       }
+
       setState(() => _isSubmitting = false);
     }
   }

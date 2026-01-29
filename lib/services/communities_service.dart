@@ -981,13 +981,6 @@ class CommunityService {
           queryParameters: {'name': communityName.trim()}
       );
 
-      // Debug prints
-      print('=== DEBUG INFO ===');
-      print('Base URL: $apiBaseUrl');
-      print('Community Name: "$communityName"');
-      print('Full URL: $uri');
-      print('Token present: ${token.isNotEmpty}');
-      print('================');
 
       final response = await http.get(
         uri,
@@ -1057,9 +1050,7 @@ class CommunityService {
     }
   }
 
-// 2. Send Invitation Link (POST /invitelink)
-// Corrected Service Method - Match your API documentation
-  // Enhanced Service Method - Support single or multiple contacts
+
   Future<Map<String, dynamic>> sendInvitationLink({
     required String link,
     required String type, // 'mail' or 'mobile'
@@ -1198,6 +1189,72 @@ class CommunityService {
         'error': true,
         'message': 'Network error: ${e.toString()}',
         'data': false
+      };
+    }
+  }
+  // Add this method to your CommunityService class
+
+  Future<Map<String, dynamic>> getCommunityEvents(String communityId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        return {
+          'error': true,
+          'message': 'Authentication token is missing',
+          'data': [],
+          'email': null,
+          'password': null
+        };
+      }
+
+      final response = await http.get(
+        Uri.parse('${apiBaseUrl}api/communities/event/fetch/$communityId'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      print('getCommunityEvents - Status Code: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'error': false,
+          'message': 'Events fetched successfully',
+          'data': decoded['data'] ?? [],
+          'email': decoded['email'],
+          'password': decoded['password']
+        };
+      } else if (response.statusCode == 401) {
+        return {
+          'error': true,
+          'message': 'Unauthorized access',
+          'data': [],
+          'email': null,
+          'password': null
+        };
+      } else {
+        final decoded = jsonDecode(response.body);
+        return {
+          'error': true,
+          'message': decoded['message'] ?? 'Failed to fetch events',
+          'data': [],
+          'email': null,
+          'password': null
+        };
+      }
+    } catch (e) {
+      print('Error in getCommunityEvents: $e');
+      return {
+        'error': true,
+        'message': 'Error fetching events: ${e.toString()}',
+        'data': [],
+        'email': null,
+        'password': null
       };
     }
   }

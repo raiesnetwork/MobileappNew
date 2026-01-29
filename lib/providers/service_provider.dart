@@ -96,9 +96,98 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Updated fetchServices with pagination support
+  Future<Map<String, dynamic>> createService({
+    required String name,
+    required String description,
+    required String location,
+    String? communityId,
+    required String category,
+    required String subCategory,
+    required String openHourFrom,
+    required String openHourEnd,
+    required String cost,
+    required String slots,
+    required String currency,
+    required String costPer,
+    required String serviceProvider,
+    required List<String> availableDays,
+    File? image,
+  }) async {
+    // 1. Set loading state
+    _isLoading = true;
+    _hasError = false;
+    _message = '';
+    notifyListeners();
+
+    try {
+      // 2. Call service to create
+      final response = await _service.createService(
+        name: name,
+        description: description,
+        location: location,
+        communityId: communityId,
+        category: category,
+        subCategory: subCategory,
+        openHourFrom: openHourFrom,
+        openHourEnd: openHourEnd,
+        cost: cost,
+        slots: slots,
+        currency: currency,
+        costPer: costPer,
+        serviceProvider: serviceProvider,
+        availableDays: availableDays,
+        image: image,
+      );
+
+      // 3. Handle response
+      if (!response['error']) {
+        _message = response['message'] ?? 'Service created successfully';
+        _hasError = false;
+
+        // 4. Refresh all services list
+        print('🔄 Refreshing services list...');
+        await fetchServices(refresh: true);
+
+        // 5. Refresh community services if applicable
+        if (communityId != null && communityId.isNotEmpty) {
+          print('🔄 Refreshing community services...');
+          await fetchCommunityServices(communityId: communityId);
+        }
+
+        // 6. Refresh my services
+        print('🔄 Refreshing my services...');
+        await fetchMyServices();
+
+        print('✅ All services refreshed');
+      } else {
+        _hasError = true;
+        _message = response['message'] ?? 'Failed to create service';
+        print('❌ Error: $_message');
+      }
+
+      // 7. Update loading state
+      _isLoading = false;
+      notifyListeners();
+
+      // 8. Return response
+      return response;
+    } catch (e) {
+      print('💥 Provider exception: $e');
+      _hasError = true;
+      _message = 'Error: ${e.toString()}';
+      _isLoading = false;
+      notifyListeners();
+
+      return {
+        'error': true,
+        'message': _message,
+      };
+    }
+  }
+
+  /// Fetch all services with pagination
   Future<void> fetchServices({bool refresh = false}) async {
-    // If refreshing, reset pagination
+    // Reset pagination on refresh
     if (refresh) {
       _servicesCurrentPage = 1;
       _services = [];
@@ -120,19 +209,20 @@ class ServicesProvider with ChangeNotifier {
       _servicesCurrentPage = response['currentPage'] ?? 1;
       _servicesTotalCount = response['totalServices'] ?? 0;
       _hasError = false;
+      print('✅ Fetched ${_services.length} services');
     } else {
       _hasError = true;
       _message = response['message'];
       _services = [];
+      print('❌ Fetch error: $_message');
     }
 
     _isLoading = false;
     notifyListeners();
   }
 
-  // New method: Load more services (pagination)
+  /// Load more services (pagination)
   Future<void> loadMoreServices() async {
-    // Prevent multiple simultaneous requests
     if (_isLoadingMoreServices || !hasMoreServices) return;
 
     _isLoadingMoreServices = true;
@@ -145,24 +235,24 @@ class ServicesProvider with ChangeNotifier {
       );
 
       if (!response['error']) {
-        // Append new services to existing list
         _services.addAll(response['data'] ?? []);
         _servicesCurrentPage = response['currentPage'] ?? _servicesCurrentPage + 1;
         _servicesTotalPages = response['totalPages'] ?? _servicesTotalPages;
         _servicesTotalCount = response['totalServices'] ?? _servicesTotalCount;
         _message = response['message'];
+        print('✅ Loaded more services. Total: ${_services.length}');
       } else {
-        // Optionally handle error
-        print('❌ Error loading more services: ${response['message']}');
+        print('❌ Error loading more: ${response['message']}');
       }
     } catch (e) {
-      print('💥 Exception loading more services: $e');
+      print('💥 Exception loading more: $e');
     } finally {
       _isLoadingMoreServices = false;
       notifyListeners();
     }
   }
 
+  /// Fetch user's own services
   Future<void> fetchMyServices() async {
     _isMyServicesLoading = true;
     _hasMyServicesError = false;
@@ -170,22 +260,25 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
 
     final response = await _service.getMyServices();
+
     if (!response['error']) {
       _myServices = response['myServices'] ?? [];
-      _myServicesMessage =
-          response['message'] ?? 'My services fetched successfully';
+      _myServicesMessage = response['message'] ?? 'My services fetched successfully';
+      print('✅ Fetched ${_myServices.length} my services');
     } else {
       _hasMyServicesError = true;
       _myServicesMessage = response['message'] ?? 'Failed to fetch my services';
       _myServices = [];
+      print('❌ My services error: $_myServicesMessage');
     }
 
     _isMyServicesLoading = false;
     notifyListeners();
   }
 
+  /// Fetch community services
   Future<void> fetchCommunityServices({String? communityId}) async {
-    print('🚀 Starting fetchCommunityServices with communityId: $communityId');
+    print('🚀 Fetching community services: $communityId');
 
     _isCommunityServicesLoading = true;
     _hasCommunityServicesError = false;
@@ -196,86 +289,25 @@ class ServicesProvider with ChangeNotifier {
     try {
       final response = await _service.getAllCommunityServices(communityId: communityId);
 
-      print('📨 Provider received response: $response');
-      print('📊 Response error: ${response['error']}');
-      print('📝 Response message: ${response['message']}');
-      print('📦 Response data length: ${response['data']?.length ?? 0}');
-
       if (!response['error']) {
         _communityServices = List<dynamic>.from(response['data'] ?? []);
         _communityServicesMessage = response['message'] ?? 'Success';
         _hasCommunityServicesError = false;
-        print('✅ Services loaded successfully: ${_communityServices.length} services');
+        print('✅ Fetched ${_communityServices.length} community services');
       } else {
         _hasCommunityServicesError = true;
-        _communityServicesMessage = response['message'] ?? 'Unknown error occurred';
+        _communityServicesMessage = response['message'] ?? 'Unknown error';
         _communityServices = [];
-        print('❌ Error loading services: $_communityServicesMessage');
+        print('❌ Community services error: $_communityServicesMessage');
       }
     } catch (e) {
-      print('💥 Provider exception: $e');
+      print('💥 Exception: $e');
       _hasCommunityServicesError = true;
-      _communityServicesMessage = 'Failed to load services: ${e.toString()}';
+      _communityServicesMessage = 'Failed to load: ${e.toString()}';
       _communityServices = [];
     }
 
     _isCommunityServicesLoading = false;
-    notifyListeners();
-
-    print('🏁 fetchCommunityServices completed. Loading: $_isCommunityServicesLoading, Error: $_hasCommunityServicesError, Services count: ${_communityServices.length}');
-  }
-
-  Future<void> createService({
-    required String name,
-    required String description,
-    required String location,
-    String? communityId,
-    required String category,
-    required String subCategory,
-    required String openHourFrom,
-    required String openHourEnd,
-    required String cost,
-    required String slots,
-    required String currency,
-    required String costPer,
-    required String serviceProvider,
-    required List<String> availableDays,
-    File? image,
-  }) async {
-    _isLoading = true;
-    _hasError = false;
-    notifyListeners();
-
-    final response = await _service.createService(
-      name: name,
-      description: description,
-      location: location,
-      communityId: communityId,
-      category: category,
-      subCategory: subCategory,
-      openHourFrom: openHourFrom,
-      openHourEnd: openHourEnd,
-      cost: cost,
-      slots: slots,
-      currency: currency,
-      costPer: costPer,
-      serviceProvider: serviceProvider,
-      availableDays: availableDays,
-      image: image,
-    );
-
-    if (!response['error']) {
-      _message = response['message'];
-      if (communityId != null && communityId.isNotEmpty) {
-        await fetchCommunityServices(communityId: communityId);
-      }
-      await fetchMyServices();
-    } else {
-      _hasError = true;
-      _message = response['message'];
-    }
-
-    _isLoading = false;
     notifyListeners();
   }
 

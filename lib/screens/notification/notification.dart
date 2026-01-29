@@ -1,4 +1,4 @@
-// screens/notification_screen.dart
+
 
 import 'package:flutter/material.dart';
 import 'package:ixes.app/providers/notification_provider.dart';
@@ -93,10 +93,44 @@ class _NotificationScreenState extends State<NotificationScreen> {
   String formatDate(String rawDate) {
     try {
       final dateTime = DateTime.parse(rawDate).toLocal();
-      return DateFormat('dd MMM yyyy • hh:mm a').format(dateTime);
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      // Show relative time for recent notifications
+      if (difference.inMinutes < 1) {
+        return 'Just now';
+      } else if (difference.inMinutes < 60) {
+        return '${difference.inMinutes}m ago';
+      } else if (difference.inHours < 24) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays}d ago';
+      } else {
+        // Show full date for older notifications
+        return DateFormat('dd MMM yyyy • hh:mm a').format(dateTime);
+      }
     } catch (_) {
       return rawDate;
     }
+  }
+
+  // ✅ Helper method to sort notifications by date (latest first)
+  List<Map<String, dynamic>> _getSortedNotifications(List<Map<String, dynamic>> notifications) {
+    final sorted = List<Map<String, dynamic>>.from(notifications);
+
+    sorted.sort((a, b) {
+      try {
+        final dateA = DateTime.parse(a['createdAt'] ?? '');
+        final dateB = DateTime.parse(b['createdAt'] ?? '');
+
+        // Sort in descending order (latest first)
+        return dateB.compareTo(dateA);
+      } catch (e) {
+        return 0; // Keep original order if date parsing fails
+      }
+    });
+
+    return sorted;
   }
 
   @override
@@ -163,23 +197,29 @@ class _NotificationScreenState extends State<NotificationScreen> {
             );
           }
 
+          // ✅ Get sorted notifications (latest first)
+          final sortedNotifications = _getSortedNotifications(provider.notifications);
+
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: provider.notifications.length,
+              itemCount: sortedNotifications.length,
               itemBuilder: (context, index) {
-                final item = provider.notifications[index];
+                final item = sortedNotifications[index];
                 final message = item['message'] ?? 'No message';
                 final type = item['type'] ?? 'Notification';
                 final createdAt = formatDate(item['createdAt'] ?? '');
-                final isUnread = item['status'] == 'unread';
+                final isUnread = item['status'] == 'unread' || item['read'] == false;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: isUnread ? Colors.blue.shade50 : Colors.white,
                     borderRadius: BorderRadius.circular(16),
+                    border: isUnread
+                        ? Border.all(color: Colors.blue.shade200, width: 1)
+                        : null,
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.05),
@@ -190,19 +230,75 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   ),
                   child: ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    leading: const Icon(Icons.notifications, color: Colors.blueAccent),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: isUnread ? Colors.blue.shade100 : Colors.grey.shade100,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.notifications,
+                        color: isUnread ? Colors.blue : Colors.grey.shade600,
+                        size: 24,
+                      ),
+                    ),
                     title: Text(
                       message,
-                      style: const TextStyle(fontWeight: FontWeight.w500),
+                      style: TextStyle(
+                        fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+                        fontSize: 14,
+                      ),
                     ),
-                    subtitle: Text(
-                      '$type • $createdAt',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            flex: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                type,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey.shade700,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              createdAt,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     trailing: isUnread
-                        ? const Icon(Icons.circle, color: Colors.red, size: 10)
+                        ? Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    )
                         : null,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                 );
               },

@@ -11,6 +11,7 @@ import '../home/feedpage/feed_screen.dart';
 import 'communities_screen.dart';
 import 'community_campaigns.dart';
 import 'community_coupons.dart';
+import 'community_events.dart';
 import 'community_members.dart';
 import 'community_services.dart';
 import 'community_stats.dart';
@@ -723,10 +724,17 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final provider = Provider.of<CommunityProvider>(context, listen: false);
-    final communityInfoFuture = provider.fetchCommunityInfo(widget.communityId);
+  void initState() {
+    super.initState();
+    // Fetch community info when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<CommunityProvider>(context, listen: false)
+          .fetchCommunityInfo(widget.communityId);
+    });
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.grey[50],
       appBar: PreferredSize(
@@ -765,25 +773,39 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
           ],
         ),
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: communityInfoFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      body: Consumer<CommunityProvider>(
+        builder: (context, provider, child) {
+          // Show loading while data is being fetched
+          if (provider.communityInfo.isEmpty ||
+              provider.communityInfo['_id'] != widget.communityId) {
             return const Center(
-                child: CircularProgressIndicator(strokeWidth: 3));
+              child: CircularProgressIndicator(strokeWidth: 3),
+            );
           }
 
-          if (snapshot.hasError || provider.infoError != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) {
-                _showSnackBar(
-                  provider.infoError ?? 'Failed to load community info',
-                  Colors.red,
-                );
-                Navigator.pop(context);
-              }
-            });
-            return const SizedBox();
+          // Show error if any
+          if (provider.infoError != null) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 60, color: Colors.red[300]),
+                  const SizedBox(height: 16),
+                  Text(
+                    provider.infoError ?? 'Failed to load community info',
+                    style: const TextStyle(fontSize: 16, color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      provider.fetchCommunityInfo(widget.communityId);
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
           }
 
           final communityInfo = provider.communityInfo;
@@ -1094,6 +1116,22 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         'title': 'Service Requests',
         'screen': AllServiceRequestsScreen(communityId: widget.communityId)
       },
+      {
+        'icon': Icons.event,
+        'title': 'Community Events',
+        'screen': Builder(
+          builder: (context) {
+            final provider = Provider.of<CommunityProvider>(context, listen: false);
+            final communityName = provider.communityInfo['name'] ?? 'Community';
+
+            return CommunityEventsScreen(
+              communityId: widget.communityId,
+              communityName: communityName,
+            );
+          },
+        )
+      },
+
 
     ];
 

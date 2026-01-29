@@ -11,7 +11,10 @@ import 'package:provider/provider.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
+import 'dart:convert';  // For base64Decode
 import 'dart:typed_data';
+
+import 'package:cached_network_image/cached_network_image.dart';  // For network images
 
 import '../../providers/personal_chat_provider.dart';
 
@@ -29,6 +32,8 @@ class MessageBubble extends StatefulWidget {
   final bool readBy;
   final String messageId;
   final String? receiverId;
+  final bool isSharedPost;
+  final Map<String, dynamic>? sharedPostData;
 
   // Voice message properties
   final bool isAudio;
@@ -59,6 +64,8 @@ class MessageBubble extends StatefulWidget {
     this.replyTo,
     this.replyToMessage,
     this.onReply,
+    this.isSharedPost = false,
+    this.sharedPostData,
   }) : super(key: key);
 
   @override
@@ -77,6 +84,10 @@ class _MessageBubbleState extends State<MessageBubble> {
   String? _localAudioPath;
   bool _isLoadingAudio = false;
   StreamSubscription? _playerSubscription;
+  // ✅ Helper to check if image is http/https
+  bool _isNetworkImage(String imageUrl) {
+    return imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
+  }
 
   @override
   void initState() {
@@ -215,6 +226,344 @@ class _MessageBubbleState extends State<MessageBubble> {
         );
       }
     }
+  }
+
+  Widget _buildSharedPost() {
+    if (widget.sharedPostData == null) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: widget.isMe
+              ? Colors.white.withOpacity(0.1)
+              : Colors.black.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.share,
+              color: widget.isMe ? Colors.white70 : Colors.grey[600],
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Shared a post',
+              style: TextStyle(
+                color: widget.isMe ? Colors.white : Colors.black87,
+                fontSize: 14,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final postData = widget.sharedPostData!;
+    final postContent = postData['text'] ?? '';
+    final postImages = postData['images'] as List<dynamic>? ?? [];
+    final authorName = postData['authorName'] ?? 'Unknown User';
+    final authorProfile = postData['authorProfile'];
+    final likesCount = postData['likesCount'] ?? 0;
+    final commentsCount = postData['commentsCount'] ?? 0;
+
+    return GestureDetector(
+      onTap: () {
+        // Navigate to full post view
+        _navigateToPost(postData);
+      },
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.7,
+        ),
+        decoration: BoxDecoration(
+          color: widget.isMe
+              ? Colors.white.withOpacity(0.15)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: widget.isMe
+                ? Colors.white.withOpacity(0.3)
+                : Colors.grey[300]!,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with share icon
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: widget.isMe
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.grey[50],
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.share,
+                    size: 16,
+                    color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Shared Post',
+                    style: TextStyle(
+                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Author info
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: widget.isMe
+                        ? Colors.white.withOpacity(0.3)
+                        : Colors.grey[300],
+                    backgroundImage: authorProfile != null &&
+                        authorProfile.isNotEmpty
+                        ? (authorProfile.startsWith('data:image/')
+                        ? MemoryImage(
+                        base64Decode(authorProfile.split(',')[1]))
+                        : NetworkImage(authorProfile) as ImageProvider)
+                        : null,
+                    child: authorProfile == null || authorProfile.isEmpty
+                        ? Text(
+                      authorName.isNotEmpty ? authorName[0].toUpperCase() : 'U',
+                      style: TextStyle(
+                        color: widget.isMe ? Colors.white : Colors.grey[700],
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    )
+                        : null,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      authorName,
+                      style: TextStyle(
+                        color: widget.isMe ? Colors.white : Colors.black87,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Post content
+            if (postContent.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  postContent,
+                  style: TextStyle(
+                    color: widget.isMe ? Colors.white : Colors.black87,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+
+            // Post image (first image only)
+            if (postImages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: _buildPostImage(postImages[0]),
+                  ),
+                ),
+              ),
+
+            // Post stats
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.favorite,
+                    size: 14,
+                    color: widget.isMe ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$likesCount',
+                    style: TextStyle(
+                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Icon(
+                    Icons.comment,
+                    size: 14,
+                    color: widget.isMe ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$commentsCount',
+                    style: TextStyle(
+                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Tap to view',
+                    style: TextStyle(
+                      color: widget.isMe ? Colors.white70 : Colors.blue[600],
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPostImage(dynamic imageData) {
+    if (imageData == null) {
+      return Container(
+        color: widget.isMe
+            ? Colors.white.withOpacity(0.1)
+            : Colors.grey[200],
+        child: Center(
+          child: Icon(
+            Icons.image,
+            size: 40,
+            color: widget.isMe ? Colors.white30 : Colors.grey[400],
+          ),
+        ),
+      );
+    }
+
+    final imageUrl = imageData is Map
+        ? imageData['url'] ?? imageData['image']
+        : imageData.toString();
+
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        color: widget.isMe
+            ? Colors.white.withOpacity(0.1)
+            : Colors.grey[200],
+        child: Center(
+          child: Icon(
+            Icons.image,
+            size: 40,
+            color: widget.isMe ? Colors.white30 : Colors.grey[400],
+          ),
+        ),
+      );
+    }
+
+    // Handle base64 images
+    if (imageUrl.startsWith('data:image/')) {
+      try {
+        final base64Data = imageUrl.split(',')[1];
+        return Image.memory(
+          base64Decode(base64Data),
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return _buildImageError();
+          },
+        );
+      } catch (e) {
+        print('Error decoding base64 image: $e');
+        return _buildImageError();
+      }
+    }
+
+    // Handle network images
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Center(
+          child: CircularProgressIndicator(
+            value: loadingProgress.expectedTotalBytes != null
+                ? loadingProgress.cumulativeBytesLoaded /
+                loadingProgress.expectedTotalBytes!
+                : null,
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(
+              widget.isMe ? Colors.white70 : Colors.grey[400]!,
+            ),
+          ),
+        );
+      },
+      errorBuilder: (context, error, stackTrace) {
+        print('Error loading network image: $error');
+        return _buildImageError();
+      },
+    );
+  }
+
+  Widget _buildImageError() {
+    return Container(
+      color: widget.isMe
+          ? Colors.white.withOpacity(0.1)
+          : Colors.grey[200],
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.broken_image,
+              size: 40,
+              color: widget.isMe ? Colors.white30 : Colors.grey[400],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Image unavailable',
+              style: TextStyle(
+                color: widget.isMe ? Colors.white60 : Colors.grey[500],
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _navigateToPost(Map<String, dynamic> postData) {
+    // TODO: Navigate to post detail screen
+    // You can implement this based on your app's navigation
+    print('Navigate to post: ${postData['_id']}');
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Open post: ${postData['_id'] ?? 'Unknown'}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _loadAudioDuration(String audioPath) async {
@@ -493,6 +842,9 @@ class _MessageBubbleState extends State<MessageBubble> {
     return '0:00';
   }
 
+// ✅ UPDATE THE BUILD METHOD in _MessageBubbleState
+// Replace the Column's children section in your build method
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -518,7 +870,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Inside the main Container, before content, add:
+                // Reply preview
                 if (widget.replyToMessage != null) ...[
                   Container(
                     padding: const EdgeInsets.all(8),
@@ -554,7 +906,9 @@ class _MessageBubbleState extends State<MessageBubble> {
                               ? '📎 ${widget.replyToMessage!['fileName'] ?? 'File'}'
                               : (widget.replyToMessage!['isAudio'] == true
                               ? '🎤 Voice message'
-                              : 'Message')),
+                              : (widget.replyToMessage!['isSharedPost'] == true
+                              ? '📄 Shared post'
+                              : 'Message'))),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -567,91 +921,96 @@ class _MessageBubbleState extends State<MessageBubble> {
                   ),
                 ],
 
+                // ✅ ADD SHARED POST CONTENT (CHECK THIS FIRST!)
+                if (widget.isSharedPost)
+                  _buildSharedPost()
+
                 // Voice message content
-                if (widget.isAudio)
+                else if (widget.isAudio)
                   _buildVoiceMessage()
 
                 // File content
                 else if (widget.isFile && widget.fileUrl != null && widget.fileName != null)
-
-                  GestureDetector(
-
-                    onTap: () => _handleFileOpen(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: widget.isMe
-                            ? Colors.white.withOpacity(0.1)
-                            : Colors.black.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _getFileIcon(widget.fileType),
-                            color: widget.isMe ? Colors.white : Colors.black87,
-                            size: 24,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  widget.fileName!,
-                                  style: TextStyle(
-                                    color: widget.isMe ? Colors.white : Colors.black87,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                if (widget.status == 'sending')
-                                  Text(
-                                    'Uploading...',
-                                    style: TextStyle(
-                                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                                      fontSize: 12,
-                                    ),
-                                  )
-                                else if (widget.status == 'failed')
-                                  Text(
-                                    'Failed to upload',
-                                    style: TextStyle(
-                                      color: widget.isMe ? Colors.white70 : Colors.red[600],
-                                      fontSize: 12,
-                                    ),
-                                  )
-                                else
-                                  Text(
-                                    'Tap to open',
-                                    style: TextStyle(
-                                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          if (widget.status != 'sending' && widget.status != 'failed')
+                    GestureDetector(
+                      onTap: () => _handleFileOpen(context),
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: widget.isMe
+                              ? Colors.white.withOpacity(0.1)
+                              : Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
                             Icon(
-                              Icons.open_in_new,
-                              color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                              size: 16,
+                              _getFileIcon(widget.fileType),
+                              color: widget.isMe ? Colors.white : Colors.black87,
+                              size: 24,
                             ),
-                        ],
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.fileName!,
+                                    style: TextStyle(
+                                      color: widget.isMe ? Colors.white : Colors.black87,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (widget.status == 'sending')
+                                    Text(
+                                      'Uploading...',
+                                      style: TextStyle(
+                                        color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
+                                    )
+                                  else if (widget.status == 'failed')
+                                    Text(
+                                      'Failed to upload',
+                                      style: TextStyle(
+                                        color: widget.isMe ? Colors.white70 : Colors.red[600],
+                                        fontSize: 12,
+                                      ),
+                                    )
+                                  else
+                                    Text(
+                                      'Tap to open',
+                                      style: TextStyle(
+                                        color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (widget.status != 'sending' && widget.status != 'failed')
+                              Icon(
+                                Icons.open_in_new,
+                                color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                                size: 16,
+                              ),
+                          ],
+                        ),
                       ),
-                    ),
-                  )
-                // Text content
-                // Text content with clickable URLs
-                else if (widget.content != null)
-                    ClickableMessageText(
-                      text: widget.content!,
-                      isMe: widget.isMe,
-                    ),
+                    )
+
+                  // Text content
+                  else if (widget.content != null)
+                      ClickableMessageText(
+                        text: widget.content!,
+                        isMe: widget.isMe,
+                      ),
+
                 const SizedBox(height: 4),
+
+                // Timestamp and status
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -1097,6 +1456,9 @@ class _MessageBubbleState extends State<MessageBubble> {
 
 }
 
+// IMPROVED URL Detection - Handles http, https, www, and localhost
+// Replace the entire ClickableMessageText class with this:
+
 class ClickableMessageText extends StatelessWidget {
   final String text;
   final bool isMe;
@@ -1117,21 +1479,22 @@ class ClickableMessageText extends StatelessWidget {
   TextSpan _buildTextSpans() {
     final List<TextSpan> spans = [];
 
-    // Enhanced regex to detect URLs (http, https, www)
+    // ✅ IMPROVED: More permissive URL regex that catches http, https, www, and localhost
     final urlPattern = RegExp(
-      r'(?:(?:https?):\/\/|www\.)'
-      r'(?:\S+(?::\S*)?@)?'
-      r'(?:'
-      r'(?:[1-9]\d?|1\d\d|2[01]\d|22[0-3])'
-      r'(?:\.(?:1?\d{1,2}|2[0-4]\d|25[0-5])){2}'
-      r'(?:\.(?:[1-9]\d?|1\d\d|2[0-4]\d|25[0-4]))'
-      r'|'
-      r'(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+'
-      r'(?:\.(?:[a-z\u00a1-\uffff0-9]-*)*[a-z\u00a1-\uffff0-9]+)*'
-      r'(?:\.(?:[a-z\u00a1-\uffff]{2,}))'
-      r')'
-      r'(?::\d{2,5})?'
-      r'(?:[/?#]\S*)?',
+      r'https?:\/\/(www\.)?'  // http:// or https:// with optional www.
+      r'[-a-zA-Z0-9@:%._\+~#=]{1,256}'  // domain or localhost
+      r'\.[a-zA-Z0-9()]{1,6}\b'  // TLD
+      r'([-a-zA-Z0-9()@:%_\+.~#?&//=]*)'  // path and query
+      r'|'  // OR
+      r'https?:\/\/'  // http:// or https://
+      r'localhost'  // localhost specifically
+      r'(:[0-9]{1,5})?'  // optional port
+      r'(\/[-a-zA-Z0-9()@:%_\+.~#?&//=]*)?'  // optional path
+      r'|'  // OR
+      r'www\.'  // www. prefix
+      r'[-a-zA-Z0-9@:%._\+~#=]{1,256}'
+      r'\.[a-zA-Z0-9()]{1,6}\b'
+      r'([-a-zA-Z0-9()@:%_\+.~#?&//=]*)',
       caseSensitive: false,
     );
 
@@ -1155,14 +1518,12 @@ class ClickableMessageText extends StatelessWidget {
       spans.add(TextSpan(
         text: url,
         style: TextStyle(
-          // ✅ BRIGHT COLORS - Very visible!
           color: isMe ? Colors.lightBlueAccent : Colors.blue[800],
           fontSize: 16,
-          // ✅ UNDERLINE - Makes it obvious it's a link
           decoration: TextDecoration.underline,
           decorationColor: isMe ? Colors.lightBlueAccent : Colors.blue[800],
-          decorationThickness: 2.0, // ✅ Thicker underline
-          fontWeight: FontWeight.w600, // ✅ Bold text
+          decorationThickness: 2.0,
+          fontWeight: FontWeight.w600,
         ),
         recognizer: TapGestureRecognizer()
           ..onTap = () => _launchURL(url),
@@ -1186,7 +1547,7 @@ class ClickableMessageText extends StatelessWidget {
   }
 
   Future<void> _launchURL(String urlString) async {
-    // Add https:// if URL starts with www.
+    // Add https:// if URL starts with www. (not http:// or https://)
     if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
       urlString = 'https://$urlString';
     }
@@ -1207,3 +1568,4 @@ class ClickableMessageText extends StatelessWidget {
     }
   }
 }
+

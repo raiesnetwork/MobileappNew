@@ -5,6 +5,7 @@ import 'package:ixes.app/screens/communities_page/communities_screen.dart';
 import 'package:ixes.app/screens/services_page/services_screen.dart';
 import 'package:ixes.app/screens/campaigns_page/getall_campaigns_screen.dart';
 import 'package:ixes.app/providers/announcement_provider.dart';
+import 'package:ixes.app/providers/notification_provider.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,6 +29,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
         });
       }
     });
+  }
+
+  // Helper method to build notification badge
+  Widget _buildNotificationBadge(int count) {
+    if (count == 0) return const SizedBox.shrink();
+
+    return Positioned(
+      right: 8,
+      top: 8,
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: Colors.red,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white,
+            width: 2,
+          ),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        constraints: const BoxConstraints(
+          minWidth: 24,
+          minHeight: 24,
+        ),
+        child: Text(
+          count > 99 ? '99+' : count.toString(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
+    );
   }
 
   @override
@@ -63,17 +105,37 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _isLoading
                   ? const Center(child: CircularProgressIndicator())
                   : Expanded(
-                child: Consumer<AnnouncementProvider>(
-                  builder: (context, provider, _) {
+                child: Consumer2<AnnouncementProvider, NotificationProvider>(
+                  builder: (context, announcementProvider, notificationProvider, _) {
+                    // Get notification counts for each category
+                    final communityCount = notificationProvider.getUnreadCountForTypes([
+                      'community',
+                      'GroupRequest',
+                    ]);
+
+                    final servicesCount = notificationProvider.getUnreadCountForTypes([
+                      'Service',
+                      'Invoice',
+                      'StoreSubscription',
+                      'SubDomain',
+                      'AddProduct',
+                      'ServiceReq',
+                    ]);
+
+                    final campaignsCount = notificationProvider.getUnreadCountForTypes([
+                      'campaign',
+                    ]);
+
                     return Column(
                       children: [
-                        // Communities Card
+                        // Communities Card with Badge
                         _buildDashboardCard(
                           title: 'Communities',
-                          subtitle: 'Total: ${provider.totalCommunities}',
+                          subtitle: 'Total: ${announcementProvider.totalCommunities}',
                           icon: const Icon(Icons.group, color: Colors.white, size: 28),
                           color: const Color(0xFFFF4081),
                           iconColor: Colors.white,
+                          notificationCount: communityCount,
                           onTap: () {
                             Navigator.push(
                               context,
@@ -85,10 +147,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         const SizedBox(height: 20),
 
-                        // Services Card with Asset Image
+                        // Services Card with Asset Image and Badge
                         _buildDashboardCard(
                           title: 'Services',
-                          subtitle: 'Total: ${provider.totalServices}',
+                          subtitle: 'Total: ${announcementProvider.totalServices}',
                           icon: Image.asset(
                             'assets/icons/service.png',
                             height: 28,
@@ -97,6 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                           color: const Color(0xFF2196F3),
                           iconColor: Colors.white,
+                          notificationCount: servicesCount,
                           onTap: () {
                             Navigator.push(
                               context,
@@ -108,13 +171,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         const SizedBox(height: 20),
 
-                        // Campaigns Card
+                        // Campaigns Card with Badge
                         _buildDashboardCard(
                           title: 'Campaigns',
-                          subtitle: 'Total: ${provider.totalCampaigns}',
+                          subtitle: 'Total: ${announcementProvider.totalCampaigns}',
                           icon: const Icon(Icons.campaign, color: Colors.white, size: 28),
                           color: const Color(0xFF4CAF50),
                           iconColor: Colors.white,
+                          notificationCount: campaignsCount,
                           onTap: () {
                             Navigator.push(
                               context,
@@ -190,73 +254,81 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required Color color,
     required Color iconColor,
     required VoidCallback onTap,
+    int notificationCount = 0, // ✅ NEW: Notification count parameter
   }) {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        height: 120,
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
+      child: Stack(
+        children: [
+          Container(
+            width: double.infinity,
+            height: 120,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Row(
-            children: [
-              // Icon box
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Center(child: icon),
-              ),
-              const SizedBox(width: 20),
-
-              // Texts
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Row(
+                children: [
+                  // Icon box
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.8),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+                    child: Center(child: icon),
+                  ),
+                  const SizedBox(width: 20),
 
-              Icon(
-                Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.7),
-                size: 16,
+                  // Texts
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    color: Colors.white.withOpacity(0.7),
+                    size: 16,
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+
+          // ✅ Notification Badge
+          _buildNotificationBadge(notificationCount),
+        ],
       ),
     );
   }
