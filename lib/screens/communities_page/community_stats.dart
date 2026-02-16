@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
+import '../dash_board_screens/main_dashboard.dart';
 import 'community_campaigns.dart';
 import 'community_members.dart';
 import 'community_services.dart';
@@ -49,14 +51,11 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     super.dispose();
   }
 
-  Widget _buildStatsCard({
+  Widget _buildGroupedStatsBox({
     required String title,
-    required String value,
-    required String subtitle,
-    required IconData icon,
-    required Color color,
+    required List<Map<String, dynamic>> items,
+    required Color primaryColor,
     required int index,
-    VoidCallback? onTap,
   }) {
     return AnimatedBuilder(
       animation: _fadeAnimation,
@@ -65,116 +64,123 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
           offset: Offset(0, 50 * (1 - _fadeAnimation.value)),
           child: Opacity(
             opacity: _fadeAnimation.value,
-            child: GestureDetector(
-              onTap: onTap,
-              child: Container(
-                margin: EdgeInsets.only(
-                  bottom: 16,
-                  top: index == 0 ? 0 : 0,
-                ),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      color.withOpacity(0.1),
-                      color.withOpacity(0.05),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: color.withOpacity(0.2),
-                    width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withOpacity(0.15),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    primaryColor.withOpacity(0.08),
+                    primaryColor.withOpacity(0.04),
                   ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Row(
-                    children: [
-                      // Icon Container
-                      Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [color, color.withOpacity(0.8)],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: primaryColor.withOpacity(0.2),
+                  width: 1.5,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey[800],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...items.asMap().entries.map((entry) {
+                      final item = entry.value;
+                      final isLast = entry.key == items.length - 1;
+                      return Column(
+                        children: [
+                          InkWell(
+                            onTap: item['onTap'],
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 48,
+                                    height: 48,
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [
+                                          item['color'],
+                                          item['color'].withOpacity(0.8)
+                                        ],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      item['icon'],
+                                      color: Colors.white,
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item['title'],
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Colors.grey[600],
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          item['value'],
+                                          style: TextStyle(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: item['color'],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: item['color'].withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(
+                                      Icons.arrow_forward_ios,
+                                      color: item['color'],
+                                      size: 14,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(15),
-                          boxShadow: [
-                            BoxShadow(
-                              color: color.withOpacity(0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 3),
+                          if (!isLast) ...[
+                            const SizedBox(height: 14),
+                            Divider(
+                              color: Colors.grey[200],
+                              thickness: 1,
+                              height: 1,
                             ),
+                            const SizedBox(height: 14),
                           ],
-                        ),
-                        child: Icon(
-                          icon,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Content
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[700],
-                                fontWeight: FontWeight.w600,
-                                letterSpacing: 0.4,
-                              ),
-                            ),
-                            const SizedBox(height: 7),
-                            Text(
-                              value,
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: color,
-                                height: 1.0,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              subtitle,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Trailing Icon
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: color.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Icon(
-                          onTap != null ? Icons.arrow_forward_ios : Icons.trending_up,
-                          color: color,
-                          size: 18,
-                        ),
-                      ),
-                    ],
-                  ),
+                        ],
+                      );
+                    }).toList(),
+                  ],
                 ),
               ),
             ),
@@ -226,9 +232,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
+                      const Text(
                         'Community Analytics',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
@@ -473,7 +479,6 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     );
   }
 
-
   void _navigateToCommunities() {
     // Navigator.push(
     //   context,
@@ -492,7 +497,6 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       MaterialPageRoute(
         builder: (context) => CommunityMembersScreen(
           communityId: widget.communityId,
-
         ),
       ),
     );
@@ -504,7 +508,6 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       MaterialPageRoute(
         builder: (context) => CommunityServicesScreen(
           communityId: widget.communityId,
-
         ),
       ),
     );
@@ -516,10 +519,104 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       MaterialPageRoute(
         builder: (context) => CommunityCampaignsScreen(
           communityId: widget.communityId,
-
         ),
       ),
     );
+  }
+
+  void _navigateToDashboard() async {
+    // Show loading indicator
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Primary),
+        ),
+      ),
+    );
+
+    try {
+      // Get current user ID from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final currentUserId = prefs.getString('user_id');
+
+      if (currentUserId == null || currentUserId.isEmpty) {
+        throw Exception('User not authenticated. Please login again.');
+      }
+
+      print('🔍 Current User ID: $currentUserId');
+
+      // Fetch community users to get current user's role
+      final provider = Provider.of<CommunityProvider>(context, listen: false);
+      await provider.fetchCommunityUsers(widget.communityId);
+
+      // Find current user in the members list
+      final membersList = (provider.communityUsers['data'] as List<dynamic>?) ?? [];
+      String userRole = 'member';
+      bool isAdmin = false;
+      bool isMember = false;
+
+      print('🔍 Searching for user in ${membersList.length} members...');
+
+      for (var member in membersList) {
+        final userId = member['userId']?['_id'] as String?;
+        print('   Checking member: $userId');
+
+        if (userId == currentUserId) {
+          userRole = member['userRole'] as String? ?? 'member';
+          isAdmin = member['isAdmin'] as bool? ?? false;
+          isMember = true;
+
+          print('✅ User found!');
+          print('   - Role: $userRole');
+          print('   - Is Admin: $isAdmin');
+          break;
+        }
+      }
+
+      if (!isMember) {
+        throw Exception('You are not a member of this community');
+      }
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+
+        // Navigate to dashboard with correct role
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => DashboardScreen(
+              communityId: widget.communityId,
+              userRole: userRole,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error in _navigateToDashboard: $e');
+
+      // Close loading dialog
+      if (mounted) {
+        Navigator.pop(context);
+
+        // Show error message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              e.toString().replaceAll('Exception: ', ''),
+              style: const TextStyle(color: Colors.white),
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -603,44 +700,57 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                 children: [
                   _buildHeaderCard(statsData),
 
-                  _buildStatsCard(
-                    title: 'Total Communities',
-                    value: (statsData['totalCommunities'] ?? 0).toString(),
-                    subtitle: 'Communities in hierarchy',
-                    icon: Icons.business,
-                    color: const Color(0xFF3B82F6),
+                  // Box 1: Communities, Services & Campaigns
+                  _buildGroupedStatsBox(
+                    title: 'Resources',
+                    primaryColor: const Color(0xFF8B5CF6),
                     index: 0,
-                    onTap: _navigateToCommunities,
+                    items: [
+                      {
+                        'title': 'Communities',
+                        'value': (statsData['totalCommunities'] ?? 0).toString(),
+                        'icon': Icons.business,
+                        'color': const Color(0xFF3B82F6),
+                        'onTap': _navigateToCommunities,
+                      },
+                      {
+                        'title': 'Services',
+                        'value': (statsData['totalServices'] ?? 0).toString(),
+                        'icon': Icons.business_center,
+                        'color': const Color(0xFFF59E0B),
+                        'onTap': _navigateToServices,
+                      },
+                      {
+                        'title': 'Campaigns',
+                        'value': (statsData['totalCampaigns'] ?? 0).toString(),
+                        'icon': Icons.campaign,
+                        'color': const Color(0xFFEC4899),
+                        'onTap': _navigateToCampaigns,
+                      },
+                    ],
                   ),
 
-                  _buildStatsCard(
-                    title: 'Active Users',
-                    value: (statsData['totalUsers'] ?? 0).toString(),
-                    subtitle: 'Registered members',
-                    icon: Icons.people,
-                    color: const Color(0xFF10B981),
+                  // Box 2: Dashboard & Users
+                  _buildGroupedStatsBox(
+                    title: 'Management',
+                    primaryColor: const Color(0xFF10B981),
                     index: 1,
-                    onTap: _navigateToUsers,
-                  ),
-
-                  _buildStatsCard(
-                    title: 'Available Services',
-                    value: (statsData['totalServices'] ?? 0).toString(),
-                    subtitle: 'Services offered',
-                    icon: Icons.business_center,
-                    color: const Color(0xFFF59E0B),
-                    index: 2,
-                    onTap: _navigateToServices,
-                  ),
-
-                  _buildStatsCard(
-                    title: 'Active Campaigns',
-                    value: (statsData['totalCampaigns'] ?? 0).toString(),
-                    subtitle: 'Running campaigns',
-                    icon: Icons.campaign,
-                    color: const Color(0xFF8B5CF6),
-                    index: 3,
-                    onTap: _navigateToCampaigns,
+                    items: [
+                      {
+                        'title': 'Dashboard',
+                        'value': 'View',
+                        'icon': Icons.dashboard,
+                        'color': const Color(0xFF6366F1),
+                        'onTap': _navigateToDashboard,
+                      },
+                      {
+                        'title': 'Active Users',
+                        'value': (statsData['totalUsers'] ?? 0).toString(),
+                        'icon': Icons.people,
+                        'color': const Color(0xFF10B981),
+                        'onTap': _navigateToUsers,
+                      },
+                    ],
                   ),
 
                   const SizedBox(height: 12),

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import 'communities_provider.dart';
 
 class AuthProvider with ChangeNotifier {
   User? _user;
@@ -157,15 +159,38 @@ class AuthProvider with ChangeNotifier {
     return result;
   }
 
-  Future<void> logout() async {
+// Updated logout method for AuthProvider
+// Replace your existing logout method with this
+
+  Future<void> logout(BuildContext? context) async {
     _setLoading(true);
-    
+
     final result = await AuthService.logout();
     print('✅ LOGOUT - API Response:');
     print(result);
-    
+
+    // Clear user data from SharedPreferences
     await _clearUserData();
     _user = null;
+
+    // IMPORTANT: Clear all provider data when logging out
+    if (context != null && context.mounted) {
+      try {
+        // Clear community provider data
+        final communityProvider = Provider.of<CommunityProvider>(context, listen: false);
+        communityProvider.clearAllData();
+        print('✅ Community data cleared on logout');
+
+        // You can add other provider clears here if needed
+        // Example:
+        // final postProvider = Provider.of<PostProvider>(context, listen: false);
+        // postProvider.clearAllData();
+
+      } catch (e) {
+        print('⚠️ Error clearing provider data: $e');
+      }
+    }
+
     _setLoading(false);
     notifyListeners();
   }

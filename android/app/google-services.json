@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "911116579451",
+    "project_id": "ixes-5bcec",
+    "storage_bucket": "ixes-5bcec.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:911116579451:android:7ad7e1cf01dd57cad568de",
+        "android_client_info": {
+          "package_name": "com.ixes.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApy-Ij_Ga2HtU6dX33HqIVunsdNg5qid8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

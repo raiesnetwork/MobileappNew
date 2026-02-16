@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../../providers/communities_provider.dart';
 import '../../constants/constants.dart';
@@ -15,25 +16,41 @@ class CommunityMembersScreen extends StatefulWidget {
 
 class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
   bool isViewerAdmin = false;
+  String? currentUserId;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
+    _initializeScreen();
+  }
+
+  Future<void> _initializeScreen() async {
+    // Get current user ID from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    currentUserId = prefs.getString('user_id');
+
+    if (currentUserId == null || currentUserId!.isEmpty) {
+      print('❌ No user ID found in SharedPreferences');
+      return;
+    }
+
+    print('✅ Current User ID loaded: $currentUserId');
+
     final provider = Provider.of<CommunityProvider>(context, listen: false);
-    provider.fetchCommunityUsers(widget.communityId).then((_) {
-      String currentUserId = '667ef2f47487c7d72afd9645'; // Placeholder: replace with actual currentUserId
-      final membersList = (provider.communityUsers['data'] as List<dynamic>?) ?? [];
-      for (var member in membersList) {
-        if (member['userId']['_id'] == currentUserId) {
-          setState(() {
-            isViewerAdmin = member['isAdmin'] as bool? ?? false;
-          });
-          break;
-        }
+    await provider.fetchCommunityUsers(widget.communityId);
+
+    final membersList = (provider.communityUsers['data'] as List<dynamic>?) ?? [];
+    for (var member in membersList) {
+      if (member['userId']['_id'] == currentUserId) {
+        setState(() {
+          isViewerAdmin = member['isAdmin'] as bool? ?? false;
+        });
+        print('✅ User is admin: $isViewerAdmin');
+        break;
       }
-    });
+    }
   }
 
   @override
@@ -94,8 +111,11 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
     final createdAt = member['createdAt'] as String? ?? '';
     final superAdmin = member['superAdmin'] as bool? ?? false;
     final userId = user['_id'] as String? ?? '';
-    String currentUserId = '667ef2f47487c7d72afd9645';
-    bool showMenu = isViewerAdmin && userId != currentUserId && !superAdmin;
+
+    bool showMenu = isViewerAdmin &&
+        currentUserId != null &&
+        userId != currentUserId &&
+        !superAdmin;
 
     showModalBottomSheet(
       context: context,
@@ -689,8 +709,11 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
 
                 final userId = user['_id'] as String? ?? '';
                 final status = member['status'] as String? ?? 'UNKNOWN';
-                String currentUserId = '667ef2f47487c7d72afd9645';
-                bool showMenu = isViewerAdmin && userId != currentUserId && !superAdmin;
+
+                bool showMenu = isViewerAdmin &&
+                    currentUserId != null &&
+                    userId != currentUserId &&
+                    !superAdmin;
 
                 return GestureDetector(
                   onTap: () => _showMemberDetails(context, member),

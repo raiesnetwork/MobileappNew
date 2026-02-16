@@ -35,10 +35,10 @@ class ApiService {
   }
 
   static Future<http.Response> post(
-    String endpoint,
-    Map<String, dynamic> body,
-    {bool requireAuth = true}
-  ) async {
+      String endpoint,
+      Map<String, dynamic> body,
+      {bool requireAuth = true}
+      ) async {
     final url = Uri.parse('$baseUrl$endpoint');
     print('POST: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
@@ -51,10 +51,10 @@ class ApiService {
   }
 
   static Future<http.Response> put(
-    String endpoint,
-    Map<String, dynamic> body,
-    {bool requireAuth = true}
-  ) async {
+      String endpoint,
+      Map<String, dynamic> body,
+      {bool requireAuth = true}
+      ) async {
     final url = Uri.parse('$baseUrl$endpoint');
     print('PUT: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
@@ -72,5 +72,38 @@ class ApiService {
     final headers = await _getHeaders(requireAuth: requireAuth);
 
     return await http.delete(url, headers: headers);
+  }
+
+  // Save FCM Token to backend
+  static Future<bool> saveFcmToken(String fcmToken) async {
+    try {
+      final platform = Platform.isAndroid ? "android" : "ios";
+      print('💾 Saving FCM token to backend...');
+      print('Platform: $platform');
+
+      final response = await post(
+        '/api/mobile/user/save-fcm',
+        {
+          "fcmToken": fcmToken,
+          "platform": platform,
+        },
+        requireAuth: true,
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ FCM Token saved successfully');
+        // Save token locally as well
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('fcm_token', fcmToken);
+        return true;
+      } else {
+        print('❌ Failed to save FCM token: ${response.statusCode}');
+        print('Response: ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error saving FCM token: $e');
+      return false;
+    }
   }
 }

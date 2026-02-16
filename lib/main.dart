@@ -1,12 +1,13 @@
-
-
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart'; // ADD THIS IMPORT
 import 'package:ixes.app/providers/announcement_provider.dart';
 import 'package:ixes.app/providers/campaign_provider.dart';
 import 'package:ixes.app/providers/chat_provider.dart';
 import 'package:ixes.app/providers/comment_provider.dart';
 import 'package:ixes.app/providers/communities_provider.dart';
 import 'package:ixes.app/providers/coupon_provider.dart';
+import 'package:ixes.app/providers/dash_board_provider.dart';
 import 'package:ixes.app/providers/generate_link_provider.dart';
 import 'package:ixes.app/providers/group_provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
@@ -31,8 +32,49 @@ import 'screens/auth/login_screen.dart';
 import 'screens/BottomNaviagation.dart';
 import 'utils/app_theme.dart';
 
+// ADD THIS FUNCTION - Initialize FCM
+Future<void> initFCM() async {
+  try {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // Request permission for notifications
+    NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+      provisional: false,
+    );
+
+    debugPrint('📬 Notification permission status: ${settings.authorizationStatus}');
+
+    // Get FCM token
+    String? token = await messaging.getToken();
+    debugPrint('🔥 FCM TOKEN: $token');
+
+    // Listen for token refresh
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      debugPrint('🔄 FCM Token refreshed: $newToken');
+      // TODO: Send new token to your backend
+    });
+
+    // TODO: Send token to your backend
+    // Example: await ApiService().updateDeviceToken(token);
+
+    return;
+  } catch (e) {
+    debugPrint('❌ Error initializing FCM: $e');
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp();
+
+  // Initialize FCM and get token
+  await initFCM();
+
   final prefs = await SharedPreferences.getInstance();
   final token = prefs.getString('auth_token');
   final userId = prefs.getString('user_id');
@@ -80,7 +122,9 @@ class IxesApp extends StatelessWidget {
             ChangeNotifierProvider(create: (_) => MeetingProvider()),
             ChangeNotifierProvider(create: (_) => VoiceCallProvider()),
             ChangeNotifierProvider(create: (_) => ProfileProvider()),
+            ChangeNotifierProvider(create: (_) => DashboardProvider()),
             ChangeNotifierProvider(create: (_) => MeetingOverlayService()),
+
           ],
           child: AppWithLifecycleObserver(
             initialToken: initialToken,
@@ -208,26 +252,26 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
               // Initialize Video Call
               context.read<VideoCallProvider>().initialize(
-                    userId: user.id,
-                    userName: displayName,
-                    authToken: widget.initialToken,
-                  );
+                userId: user.id,
+                userName: displayName,
+                authToken: widget.initialToken,
+              );
               debugPrint('✅ Video Call Provider initialized');
 
               // Initialize Voice Call
               context.read<VoiceCallProvider>().initialize(
-                    userId: user.id,
-                    userName: displayName,
-                    authToken: widget.initialToken,
-                  );
+                userId: user.id,
+                userName: displayName,
+                authToken: widget.initialToken,
+              );
               debugPrint('✅ Voice Call Provider initialized');
 
               // Initialize Meeting
               context.read<MeetingProvider>().initialize(
-                    userId: user.id,
-                    userName: displayName,
-                    authToken: widget.initialToken,
-                  );
+                userId: user.id,
+                userName: displayName,
+                authToken: widget.initialToken,
+              );
               debugPrint('✅ Meeting Provider initialized');
 
               debugPrint(
@@ -243,10 +287,10 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildMaterialApp(
           home: isLoggedIn
               ? VoiceCallListener(
-                  child: IncomingCallListener(
-                    child: const MainScreen(initialIndex: 0),
-                  ),
-                )
+            child: IncomingCallListener(
+              child: const MainScreen(initialIndex: 0),
+            ),
+          )
               : const SplashScreen(),
         );
       },
@@ -264,10 +308,10 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       routes: {
         '/login': (context) => const LoginScreen(),
         '/main': (context) => VoiceCallListener(
-              child: IncomingCallListener(
-                child: const MainScreen(initialIndex: 0),
-              ),
-            ),
+          child: IncomingCallListener(
+            child: const MainScreen(initialIndex: 0),
+          ),
+        ),
       },
     );
   }

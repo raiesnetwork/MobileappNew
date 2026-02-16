@@ -646,9 +646,10 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     );
 
     if (confirm == true) {
-      await authProvider.logout();
-      profileProvider.clearAllData();
+      // Logout handles clearing providers internally
+      await authProvider.logout(context);
 
+      // Navigate
       if (context.mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),

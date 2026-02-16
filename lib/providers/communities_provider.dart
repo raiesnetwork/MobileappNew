@@ -1111,6 +1111,80 @@ class CommunityProvider with ChangeNotifier {
     };
     notifyListeners();
   }
+  // Add this method to your CommunityProvider class
+
+  /// Clear all community data - call this on logout
+  void clearAllData() {
+    print('🧹 Clearing all community data...');
+
+    // Clear all communities data
+    _allCommunities = {
+      'error': true,
+      'message': 'Not loaded',
+      'data': [],
+      'totalPages': 0,
+    };
+
+    // Clear my communities data
+    _myCommunities = {
+      'error': true,
+      'message': 'Not loaded',
+      'data': []
+    };
+
+    // Clear community info
+    _communityInfo = {'message': 'Not loaded'};
+
+    // Clear community users
+    communityUsers = {'message': 'Not loaded', 'data': []};
+
+    // Clear campaigns, coupons, services
+    _communityCampaigns = {'message': 'Not loaded', 'data': []};
+    _communityCoupons = {'message': 'Not loaded', 'coupons': []};
+    _communityServices = {'message': 'Not loaded', 'services': []};
+
+    // Clear hierarchy stats
+    _communityHierarchyStats = {};
+
+    // Clear events
+    _communityEvents = {
+      'message': 'Not loaded',
+      'data': [],
+      'email': null,
+      'password': null
+    };
+
+    // Clear invite status
+    _communityData = null;
+    _inviteStatus = null;
+
+    // Reset all loading states
+    _isLoadingAll = false;
+    _isLoadingMy = false;
+    _isLoadingCampaigns = false;
+    _isLoadingCoupons = false;
+    _isLoadingServices = false;
+    _isLoadingInfo = false;
+    _isLoadingHierarchyStats = false;
+    _isLoadingEvents = false;
+    _isCheckingStatus = false;
+    _isSendingInvitation = false;
+
+    // Reset all error states
+    _allCommunitiesError = null;
+    _myCommunitiesError = null;
+    _campaignsError = null;
+    _couponsError = null;
+    _servicesError = null;
+    _infoError = null;
+    _hierarchyStatsError = null;
+    _eventsError = null;
+    _checkErrorMessage = null;
+    _sendInvitationMessage = null;
+
+    print('✅ All community data cleared');
+    notifyListeners();
+  }
 
 
 }
