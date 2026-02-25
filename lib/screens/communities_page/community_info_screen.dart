@@ -551,7 +551,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     // Validate form first
     if (!(formKey.currentState?.validate() ?? false)) return;
 
-    // Start loading - use local variable, not class variable
+
     setDialogState(() => _isSubmitting = true); // Remove the underscore
 
     try {
@@ -565,10 +565,9 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         userId: memberType == 'Exist' ? userIdController.text.trim() : null,
       );
 
-      // Stop loading
-      setDialogState(() => _isSubmitting = false); // Remove the underscore
 
-      // Show result message
+      setDialogState(() => _isSubmitting = false);
+
       if (mounted) {
         _showSnackBar(
           result['error'] == true
@@ -577,8 +576,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
           result['error'] == true ? Colors.red : Colors.green,
         );
       }
-
-      // Close dialog and refresh if successful
       if (!(result['error'] as bool)) {
         if (mounted) {
           Navigator.pop(context);
@@ -650,7 +647,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
                     Colors.green,
                   );
                   Navigator.pop(context);
-                  // Refresh community lists after successful exit
                   provider.fetchMyCommunities();
                   provider.fetchCommunities(page: 1);
                 }
@@ -884,7 +880,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Profile Image, Name, and Public/Private Status in a Row
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -927,7 +922,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // Community Name and Public/Private Status
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -969,7 +963,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
                     ),
                   ],
                 ),
-                // Action Buttons for all users
+
                 const SizedBox(height: 12),
                 _buildActionButtons(communityInfo, provider),
               ],
@@ -985,7 +979,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     final communityId = communityInfo['_id']?.toString() ?? '';
     final communityName = communityInfo['name']?.toString() ?? 'Unnamed Community';
 
-    // List of buttons for super admin
+
     final superAdminButtons = [
       _buildActionButton(
         Icons.share,
@@ -1020,12 +1014,12 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
       ),
     ];
 
-    // List of buttons for non-admin users
+
     final nonAdminButtons = [
       _buildActionButton(
         Icons.share,
         Colors.cyan,
-            () => _navigateToInviteStatusScreen(context, communityId, communityName), // Added navigation
+            () => _navigateToInviteStatusScreen(context, communityId, communityName),
       ),
       const SizedBox(width: 8),
       _buildActionButton(

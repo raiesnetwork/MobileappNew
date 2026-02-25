@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import '../services/fcm_service.dart';
 import 'communities_provider.dart';
 
 class AuthProvider with ChangeNotifier {
@@ -108,26 +109,27 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
- Future<bool> loginWithOTP({
-  required String mobile,
-  required String otp,
-}) async {
-  _setLoading(true);
-  _setError('');
+  Future<bool> loginWithOTP({
+    required String mobile,
+    required String otp,
+  }) async {
+    _setLoading(true);
+    _setError('');
 
-  final result = await AuthService.loginWithOTP(
-    mobile: mobile,
-    otp: otp,
-  );
+    final result = await AuthService.loginWithOTP(mobile: mobile, otp: otp);
 
-  print('✅ LOGIN WITH OTP - API Response: $result');
+    final success = result['success'] == true;
+    if (success) {
+      // ✅ Save FCM token to backend after login
+      await FcmService.saveFcmToken();
+      FcmService.listenForTokenRefresh();
+    } else {
+      _setError(result['message']);
+    }
 
-  final success = result['success'] == true;
-  if (!success) _setError(result['message']);
-
-  _setLoading(false);
-  return success;
-}
+    _setLoading(false);
+    return success;
+  }
 
 
   Future<bool> sendOTP(String mobile) async {

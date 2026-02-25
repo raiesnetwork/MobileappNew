@@ -15,7 +15,7 @@ class CommunityStatsScreen extends StatefulWidget {
   const CommunityStatsScreen({
     super.key,
     required this.communityId,
-    this.communityName = 'Community'
+    this.communityName = 'Community',
   });
 
   @override
@@ -26,6 +26,19 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+
+  /// Roles that are allowed to see the Dashboard card.
+  static const Set<String> _dashboardAllowedRoles = {
+    'Student',
+    'Head of Department (HOD)',
+    'Principal / Director',
+    'Placement Officer',
+  };
+
+  bool _canViewDashboard(String? userRole) {
+    if (userRole == null || userRole.trim().isEmpty) return false;
+    return _dashboardAllowedRoles.contains(userRole.trim());
+  }
 
   @override
   void initState() {
@@ -39,9 +52,18 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      print('🚀 Fetching community hierarchy stats for: ${widget.communityId}');
-      Provider.of<CommunityProvider>(context, listen: false)
-          .fetchCommunityHierarchyStats(widget.communityId);
+      final provider = Provider.of<CommunityProvider>(context, listen: false);
+
+      // ── KEY FIX ────────────────────────────────────────────────────────
+      // Clear any leftover hierarchy stats from the previously viewed
+      // community BEFORE the new fetch starts.  Without this, the old
+      // stats (and the wrong userRole) are visible for the ~200 ms it
+      // takes the new request to complete, causing the "first community
+      // flashes" bug.
+      provider.clearHierarchyStats();
+
+      print('🚀 Fetching hierarchy stats for: ${widget.communityId}');
+      provider.fetchCommunityHierarchyStats(widget.communityId);
     });
   }
 
@@ -51,12 +73,31 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // userRole helper
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Reads userRole ONLY when communityInfo in the provider belongs to THIS
+  /// community.  If the provider still holds stale info (different _id),
+  /// returns null so the dashboard card stays hidden until fresh data arrives.
+  String? _resolveUserRole(CommunityProvider provider) {
+    final loadedId = provider.communityInfo['_id']?.toString() ?? '';
+    if (loadedId != widget.communityId) return null; // stale — ignore
+    return provider.communityInfo['userRole'] as String?;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Widgets
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildGroupedStatsBox({
     required String title,
     required List<Map<String, dynamic>> items,
     required Color primaryColor,
     required int index,
   }) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
     return AnimatedBuilder(
       animation: _fadeAnimation,
       builder: (context, child) {
@@ -104,7 +145,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                             onTap: item['onTap'],
                             borderRadius: BorderRadius.circular(12),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 4),
                               child: Row(
                                 children: [
                                   Container(
@@ -114,23 +156,21 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                                       gradient: LinearGradient(
                                         colors: [
                                           item['color'],
-                                          item['color'].withOpacity(0.8)
+                                          item['color'].withOpacity(0.8),
                                         ],
                                         begin: Alignment.topLeft,
                                         end: Alignment.bottomRight,
                                       ),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: Icon(
-                                      item['icon'],
-                                      color: Colors.white,
-                                      size: 22,
-                                    ),
+                                    child: Icon(item['icon'],
+                                        color: Colors.white, size: 22),
                                   ),
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                      CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           item['title'],
@@ -158,11 +198,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                                       color: item['color'].withOpacity(0.1),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
-                                    child: Icon(
-                                      Icons.arrow_forward_ios,
-                                      color: item['color'],
-                                      size: 14,
-                                    ),
+                                    child: Icon(Icons.arrow_forward_ios,
+                                        color: item['color'], size: 14),
                                   ),
                                 ],
                               ),
@@ -171,10 +208,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                           if (!isLast) ...[
                             const SizedBox(height: 14),
                             Divider(
-                              color: Colors.grey[200],
-                              thickness: 1,
-                              height: 1,
-                            ),
+                                color: Colors.grey[200],
+                                thickness: 1,
+                                height: 1),
                             const SizedBox(height: 14),
                           ],
                         ],
@@ -221,11 +257,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     color: Colors.white.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(
-                    Icons.analytics,
-                    color: Colors.white,
-                    size: 20,
-                  ),
+                  child: const Icon(Icons.analytics,
+                      color: Colors.white, size: 20),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -287,10 +320,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     ),
                   ),
                   Container(
-                    width: 1,
-                    height: 35,
-                    color: Colors.white.withOpacity(0.3),
-                  ),
+                      width: 1,
+                      height: 35,
+                      color: Colors.white.withOpacity(0.3)),
                   Expanded(
                     child: Column(
                       children: [
@@ -306,11 +338,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.trending_up,
-                              color: Colors.green[300],
-                              size: 14,
-                            ),
+                            Icon(Icons.trending_up,
+                                color: Colors.green[300], size: 14),
                             const SizedBox(width: 4),
                             Text(
                               '+12.5%',
@@ -349,32 +378,23 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
         children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.grey[100],
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.analytics_outlined,
-              size: 48,
-              color: Colors.grey[400],
-            ),
+            decoration:
+            BoxDecoration(color: Colors.grey[100], shape: BoxShape.circle),
+            child: Icon(Icons.analytics_outlined,
+                size: 48, color: Colors.grey[400]),
           ),
           const SizedBox(height: 16),
           Text(
             'No Analytics Available',
             style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
-            ),
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[700]),
           ),
           const SizedBox(height: 6),
           Text(
             'Statistics for this community are not\navailable at the moment',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[500],
-            ),
+            style: TextStyle(fontSize: 12, color: Colors.grey[500]),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 16),
@@ -388,10 +408,10 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
             style: ElevatedButton.styleFrom(
               backgroundColor: Primary,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+                  borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ],
@@ -406,35 +426,25 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
         children: [
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: Colors.red[50],
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.red[400],
-            ),
+            decoration:
+            BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
+            child: Icon(Icons.error_outline, size: 48, color: Colors.red[400]),
           ),
           const SizedBox(height: 16),
           Text(
             'Failed to Load Analytics',
             style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[800],
-            ),
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[800]),
           ),
           const SizedBox(height: 8),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(
               error,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-                height: 1.4,
-              ),
+              style:
+              TextStyle(fontSize: 12, color: Colors.grey[600], height: 1.4),
               textAlign: TextAlign.center,
             ),
           ),
@@ -445,14 +455,15 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
               OutlinedButton.icon(
                 onPressed: () => Navigator.pop(context),
                 icon: const Icon(Icons.arrow_back, size: 16),
-                label: const Text('Go Back', style: TextStyle(fontSize: 12)),
+                label:
+                const Text('Go Back', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.grey[700],
                   side: BorderSide(color: Colors.grey[300]!),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -466,10 +477,10 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                      borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ],
@@ -479,65 +490,47 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     );
   }
 
-  void _navigateToCommunities() {
-    // Navigator.push(
-    //   context,
-    //   MaterialPageRoute(
-    //     builder: (context) => YourCommunitiesScreen(
-    //       communityId: widget.communityId,
-    //       communityName: widget.communityName,
-    //     ),
-    //   ),
-    // );
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Navigation
+  // ─────────────────────────────────────────────────────────────────────────
 
-  void _navigateToUsers() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CommunityMembersScreen(
-          communityId: widget.communityId,
-        ),
-      ),
-    );
-  }
+  void _navigateToCommunities() {}
 
-  void _navigateToServices() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CommunityServicesScreen(
-          communityId: widget.communityId,
-        ),
-      ),
-    );
-  }
+  void _navigateToUsers() => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) =>
+          CommunityMembersScreen(communityId: widget.communityId),
+    ),
+  );
 
-  void _navigateToCampaigns() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CommunityCampaignsScreen(
-          communityId: widget.communityId,
-        ),
-      ),
-    );
-  }
+  void _navigateToServices() => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) =>
+          CommunityServicesScreen(communityId: widget.communityId),
+    ),
+  );
 
-  void _navigateToDashboard() async {
-    // Show loading indicator
+  void _navigateToCampaigns() => Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (context) =>
+          CommunityCampaignsScreen(communityId: widget.communityId),
+    ),
+  );
+
+  Future<void> _navigateToDashboard(String userRole) async {
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => const Center(
         child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Primary),
-        ),
+            valueColor: AlwaysStoppedAnimation<Color>(Primary)),
       ),
     );
 
     try {
-      // Get current user ID from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
       final currentUserId = prefs.getString('user_id');
 
@@ -546,44 +539,10 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       }
 
       print('🔍 Current User ID: $currentUserId');
+      print('🎭 Dashboard userRole: $userRole');
 
-      // Fetch community users to get current user's role
-      final provider = Provider.of<CommunityProvider>(context, listen: false);
-      await provider.fetchCommunityUsers(widget.communityId);
-
-      // Find current user in the members list
-      final membersList = (provider.communityUsers['data'] as List<dynamic>?) ?? [];
-      String userRole = 'member';
-      bool isAdmin = false;
-      bool isMember = false;
-
-      print('🔍 Searching for user in ${membersList.length} members...');
-
-      for (var member in membersList) {
-        final userId = member['userId']?['_id'] as String?;
-        print('   Checking member: $userId');
-
-        if (userId == currentUserId) {
-          userRole = member['userRole'] as String? ?? 'member';
-          isAdmin = member['isAdmin'] as bool? ?? false;
-          isMember = true;
-
-          print('✅ User found!');
-          print('   - Role: $userRole');
-          print('   - Is Admin: $isAdmin');
-          break;
-        }
-      }
-
-      if (!isMember) {
-        throw Exception('You are not a member of this community');
-      }
-
-      // Close loading dialog
       if (mounted) {
         Navigator.pop(context);
-
-        // Navigate to dashboard with correct role
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -596,12 +555,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       }
     } catch (e) {
       print('❌ Error in _navigateToDashboard: $e');
-
-      // Close loading dialog
       if (mounted) {
         Navigator.pop(context);
-
-        // Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -611,13 +566,50 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
+                borderRadius: BorderRadius.circular(8)),
           ),
         );
       }
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Management box — Dashboard tile is role-gated
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildManagementBox(
+      Map<String, dynamic> statsData, String? userRole) {
+    final showDashboard = _canViewDashboard(userRole);
+
+    final List<Map<String, dynamic>> items = [
+      if (showDashboard)
+        {
+          'title': 'Dashboard',
+          'value': 'View',
+          'icon': Icons.dashboard,
+          'color': const Color(0xFF6366F1),
+          'onTap': () => _navigateToDashboard(userRole!),
+        },
+      {
+        'title': 'Active Users',
+        'value': (statsData['totalUsers'] ?? 0).toString(),
+        'icon': Icons.people,
+        'color': const Color(0xFF10B981),
+        'onTap': _navigateToUsers,
+      },
+    ];
+
+    return _buildGroupedStatsBox(
+      title: 'Management',
+      primaryColor: const Color(0xFF10B981),
+      index: 1,
+      items: items,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -627,10 +619,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
         title: const Text(
           'Community Analytics',
           style: TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
-          ),
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87),
         ),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -651,6 +642,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
       ),
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
+          // ── Loading ────────────────────────────────────────────────────
           if (provider.isLoadingHierarchyStats) {
             return const Center(
               child: Column(
@@ -664,33 +656,42 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                   Text(
                     'Loading community statistics...',
                     style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.w500,
-                    ),
+                        fontSize: 12,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
             );
           }
 
+          // ── Error ──────────────────────────────────────────────────────
           if (provider.hierarchyStatsError != null) {
             return _buildErrorState(provider.hierarchyStatsError!);
           }
 
-          final statsData = provider.communityHierarchyStats['data'] as Map<String, dynamic>? ?? {};
+          final statsData =
+              provider.communityHierarchyStats['data'] as Map<String, dynamic>?
+                  ?? {};
 
-          if (statsData.isEmpty) {
-            return _buildEmptyState();
-          }
+          // ── Empty / still-loading ──────────────────────────────────────
+          if (statsData.isEmpty) return _buildEmptyState();
 
-          // Start animation when data is loaded
+          // ── FIX: Resolve userRole safely ───────────────────────────────
+          // _resolveUserRole returns null when communityInfo._id ≠ this
+          // community's ID, meaning the provider still holds stale data
+          // from the previous community.  In that case we hide the
+          // Dashboard card rather than show the wrong role.
+          final String? userRole = _resolveUserRole(provider);
+
+          print('🎭 userRole: $userRole  |  communityId: ${widget.communityId}');
+          print('🔐 showDashboard: ${_canViewDashboard(userRole)}');
+
           _animationController.forward();
 
           return RefreshIndicator(
-            onRefresh: () async {
-              await provider.fetchCommunityHierarchyStats(widget.communityId);
-            },
+            onRefresh: () async =>
+                provider.fetchCommunityHierarchyStats(widget.communityId),
             color: Primary,
             child: SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -700,7 +701,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                 children: [
                   _buildHeaderCard(statsData),
 
-                  // Box 1: Communities, Services & Campaigns
+                  // Resources — always visible
                   _buildGroupedStatsBox(
                     title: 'Resources',
                     primaryColor: const Color(0xFF8B5CF6),
@@ -708,21 +709,24 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     items: [
                       {
                         'title': 'Communities',
-                        'value': (statsData['totalCommunities'] ?? 0).toString(),
+                        'value':
+                        (statsData['totalCommunities'] ?? 0).toString(),
                         'icon': Icons.business,
                         'color': const Color(0xFF3B82F6),
                         'onTap': _navigateToCommunities,
                       },
                       {
                         'title': 'Services',
-                        'value': (statsData['totalServices'] ?? 0).toString(),
+                        'value':
+                        (statsData['totalServices'] ?? 0).toString(),
                         'icon': Icons.business_center,
                         'color': const Color(0xFFF59E0B),
                         'onTap': _navigateToServices,
                       },
                       {
                         'title': 'Campaigns',
-                        'value': (statsData['totalCampaigns'] ?? 0).toString(),
+                        'value':
+                        (statsData['totalCampaigns'] ?? 0).toString(),
                         'icon': Icons.campaign,
                         'color': const Color(0xFFEC4899),
                         'onTap': _navigateToCampaigns,
@@ -730,28 +734,10 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                     ],
                   ),
 
-                  // Box 2: Dashboard & Users
-                  _buildGroupedStatsBox(
-                    title: 'Management',
-                    primaryColor: const Color(0xFF10B981),
-                    index: 1,
-                    items: [
-                      {
-                        'title': 'Dashboard',
-                        'value': 'View',
-                        'icon': Icons.dashboard,
-                        'color': const Color(0xFF6366F1),
-                        'onTap': _navigateToDashboard,
-                      },
-                      {
-                        'title': 'Active Users',
-                        'value': (statsData['totalUsers'] ?? 0).toString(),
-                        'icon': Icons.people,
-                        'color': const Color(0xFF10B981),
-                        'onTap': _navigateToUsers,
-                      },
-                    ],
-                  ),
+                  // Management — Dashboard tile is role-gated
+                  _buildManagementBox(statsData, userRole),
+
+                  
 
                   const SizedBox(height: 12),
                 ],

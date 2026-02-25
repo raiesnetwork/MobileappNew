@@ -9,60 +9,101 @@ class IncomingCallScreen extends StatefulWidget {
 }
 
 class _IncomingCallScreenState extends State<IncomingCallScreen> {
+  late final VideoCallProvider _provider;
+
+  bool _isActioning = false; // prevent double-tap
+  bool _isPopping   = false; // prevent double-pop → red screen bug
+
   @override
   void initState() {
     super.initState();
-    _setupCallEndListener();
+    _provider = context.read<VideoCallProvider>();
+    _provider.addListener(_handleCallStateChange);
   }
 
-  void _setupCallEndListener() {
-    final provider = context.read<VideoCallProvider>();
-    provider.addListener(_handleCallStateChange);
-  }
-
+  // ─────────────────────────────────────────────────────────────────────────
+  // Called when provider state changes (e.g. caller cancelled)
+  // ─────────────────────────────────────────────────────────────────────────
   void _handleCallStateChange() {
-    if (!mounted) return;
+    if (!mounted || _isActioning || _isPopping) return;
 
-    final provider = context.read<VideoCallProvider>();
-
-    // If call ended while on incoming screen, close this screen
-    if (provider.callState == CallState.ended) {
-      Navigator.of(context).pop();
-
-      if (provider.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(provider.errorMessage!)),
-        );
-      }
+    // ✅ Only pop on 'ended' — NOT on 'idle'
+    // Provider auto-resets ended → idle after 2s which was causing a
+    // second pop attempt → red screen / "Unknown" reappear bug
+    if (_provider.callState == CallState.ended) {
+      debugPrint('📵 IncomingCallScreen: caller cancelled → popping safely');
+      _safePop();
     }
+  }
+
+  /// Pop safely — never mid-build frame
+  void _safePop() {
+    if (_isPopping || !mounted) return;
+    _isPopping = true;
+
+    // Stop listening immediately so no further state changes fire
+    _provider.removeListener(_handleCallStateChange);
+
+    // ✅ addPostFrameCallback = never pop during a build → avoids red screen
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   @override
   void dispose() {
-    try {
-      final provider = context.read<VideoCallProvider>();
-      provider.removeListener(_handleCallStateChange);
-    } catch (e) {
-      debugPrint('Error removing listener: $e');
-    }
+    _provider.removeListener(_handleCallStateChange);
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Decline
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _onDecline() async {
+    if (_isActioning || _isPopping) return;
+    _isActioning = true;
+
+    // Remove listener BEFORE rejectCall() so the 'ended' state change
+    // doesn't re-trigger _handleCallStateChange → double-pop
+    _provider.removeListener(_handleCallStateChange);
+
+    await _provider.rejectCall();
+
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Accept
+  // ─────────────────────────────────────────────────────────────────────────
+  Future<void> _onAccept() async {
+    if (_isActioning || _isPopping) return;
+    _isActioning = true;
+
+    _provider.removeListener(_handleCallStateChange);
+
+    await _provider.acceptCall();
+
+    if (mounted) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => VideoCallScreen()),
+      );
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        // Prevent back button - user must accept or reject
+        await _onDecline();
         return false;
       },
       child: Scaffold(
         backgroundColor: Colors.black87,
         body: Consumer<VideoCallProvider>(
           builder: (context, provider, child) {
-            // Debug print to verify data
-            debugPrint('📱 Incoming call from: ${provider.currentCallerName}');
-            debugPrint('📱 Caller ID: ${provider.currentCallerId}');
-
             final callerName = provider.currentCallerName ?? 'Unknown Caller';
 
             return SafeArea(
@@ -71,14 +112,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                 children: [
                   const Spacer(),
 
-                  // Caller Avatar with pulse animation
+                  // Caller avatar with pulse animation
                   Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Pulse effect
-                      _PulseAnimation(),
-
-                      // Avatar
+                      const _PulseAnimation(),
                       Container(
                         width: 120,
                         height: 120,
@@ -92,7 +130,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                         ),
                         child: Center(
                           child: Text(
-                            callerName[0].toUpperCase(),
+                            callerName.isNotEmpty
+                                ? callerName[0].toUpperCase()
+                                : '?',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 48,
@@ -105,7 +145,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                   ),
                   const SizedBox(height: 32),
 
-                  // Caller Name
                   Text(
                     callerName,
                     style: const TextStyle(
@@ -116,31 +155,27 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Incoming call text
-                  Row(
+                  const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: const [
+                    children: [
                       Icon(Icons.videocam, color: Colors.white70, size: 20),
                       SizedBox(width: 8),
                       Text(
                         'Incoming Video Call...',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 18,
-                        ),
+                        style: TextStyle(color: Colors.white70, fontSize: 18),
                       ),
                     ],
                   ),
 
                   const Spacer(),
 
-                  // Action Buttons
+                  // Accept / Decline buttons
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 60),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        // Reject Button
+                        // Decline
                         Column(
                           children: [
                             Container(
@@ -154,33 +189,23 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                                     color: Colors.red.withOpacity(0.4),
                                     blurRadius: 20,
                                     spreadRadius: 2,
-                                  ),
+                                  )
                                 ],
                               ),
                               child: IconButton(
-                                onPressed: () {
-                                  provider.rejectCall();
-                                  Navigator.of(context).pop();
-                                },
-                                icon: const Icon(
-                                  Icons.call_end,
-                                  size: 32,
-                                  color: Colors.white,
-                                ),
+                                onPressed: _onDecline,
+                                icon: const Icon(Icons.call_end,
+                                    size: 32, color: Colors.white),
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Text(
-                              'Decline',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                              ),
-                            ),
+                            const Text('Decline',
+                                style: TextStyle(
+                                    color: Colors.white70, fontSize: 16)),
                           ],
                         ),
 
-                        // Accept Button
+                        // Accept
                         Column(
                           children: [
                             Container(
@@ -194,35 +219,19 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                                     color: Colors.green.withOpacity(0.4),
                                     blurRadius: 20,
                                     spreadRadius: 2,
-                                  ),
+                                  )
                                 ],
                               ),
                               child: IconButton(
-                                onPressed: () async {
-                                  await provider.acceptCall();
-
-                                  // Navigate to video call screen
-                                  Navigator.of(context).pushReplacement(
-                                    MaterialPageRoute(
-                                      builder: (context) => VideoCallScreen(),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(
-                                  Icons.videocam,
-                                  size: 32,
-                                  color: Colors.white,
-                                ),
+                                onPressed: _onAccept,
+                                icon: const Icon(Icons.videocam,
+                                    size: 32, color: Colors.white),
                               ),
                             ),
                             const SizedBox(height: 12),
-                            const Text(
-                              'Accept',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 16,
-                              ),
-                            ),
+                            const Text('Accept',
+                                style: TextStyle(
+                                    color: Colors.white70, fontSize: 16)),
                           ],
                         ),
                       ],
@@ -239,8 +248,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 }
 
-// Pulse animation widget
+// ─────────────────────────────────────────────────────────────────────────────
+// Pulse ring animation
+// ─────────────────────────────────────────────────────────────────────────────
 class _PulseAnimation extends StatefulWidget {
+  const _PulseAnimation();
+
   @override
   State<_PulseAnimation> createState() => _PulseAnimationState();
 }

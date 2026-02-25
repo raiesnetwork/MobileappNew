@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class VideoCallScreen extends StatefulWidget {
   @override
@@ -11,46 +14,36 @@ class VideoCallScreen extends StatefulWidget {
 }
 
 class _VideoCallScreenState extends State<VideoCallScreen> {
+  late final VideoCallProvider _provider;
+
   Room? _room;
-  bool _isMicEnabled = true;
+  bool _isMicEnabled    = true;
   bool _isCameraEnabled = true;
-  bool _isConnecting = true;
-  bool _isEnding = false;
+  bool _isConnecting    = true;
+  bool _isEnding        = false;
   CameraPosition _cameraPosition = CameraPosition.front;
 
   @override
   void initState() {
     super.initState();
-    _setupCallEndListener();
+    _provider = context.read<VideoCallProvider>();
+    _provider.addListener(_handleCallStateChange);
     _requestPermissions();
-  }
-
-  void _setupCallEndListener() {
-    final provider = context.read<VideoCallProvider>();
-    provider.addListener(_handleCallStateChange);
   }
 
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
-
-    final provider = context.read<VideoCallProvider>();
-
-    // If call ended by remote user, disconnect and close
-    if (provider.callState == CallState.ended) {
-      debugPrint('📴 Call ended by remote user, closing screen');
+    if (_provider.callState == CallState.ended) {
+      debugPrint('📴 VideoCallScreen: call ended remotely → closing');
       _isEnding = true;
-
-      // Disconnect room
       _room?.disconnect();
-
-      // Close this screen
-      Navigator.of(context).pop();
-
-      // Show message if any
-      if (provider.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(provider.errorMessage!)),
-        );
+      if (mounted) {
+        Navigator.of(context).pop();
+        if (_provider.errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_provider.errorMessage!)),
+          );
+        }
       }
     }
   }
@@ -58,65 +51,108 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   Future<void> _requestPermissions() async {
     await Permission.camera.request();
     await Permission.microphone.request();
-
     await _joinRoom();
   }
 
-  Future<void> _joinRoom() async {
-    final videoCallProvider = context.read<VideoCallProvider>();
-
+  // ════════════════════════════════════════════════════════════════════
+  // FETCH TWILIO ICE/TURN SERVERS
+  // Same endpoint as voice — replace URL with your actual API endpoint
+  // ════════════════════════════════════════════════════════════════════
+  Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      // Fetch LiveKit token
-      final success = await videoCallProvider.fetchLivekitToken();
+      final prefs    = await SharedPreferences.getInstance();
+      final token    = prefs.getString('auth_token') ?? '';
 
-      if (!success) {
-        _showError('Failed to join call');
-        return;
+      final response = await http.get(
+        // ✅ Replace with your actual Twilio ICE endpoint
+        Uri.parse('https://api.ixes.ai/api/chat/get-turn-credentials'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final body    = json.decode(response.body);
+        final data    = body['data'] as Map<String, dynamic>;
+        final iceList = data['iceServers'] as List<dynamic>;
+
+        debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
+
+        return iceList.map((server) {
+          final s          = server as Map<String, dynamic>;
+          final urls       = s['urls']?.toString() ?? s['url']?.toString() ?? '';
+          final username   = s['username']?.toString();
+          final credential = s['credential']?.toString();
+
+          return RTCIceServer(
+            urls: [urls],
+            username: username,
+            credential: credential,
+          );
+        }).toList();
       }
+    } catch (e) {
+      debugPrint('⚠️ Could not fetch ICE servers: $e — using defaults');
+    }
 
-      // Create room
+    // Fallback: Google STUN only
+    return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // JOIN LIVEKIT ROOM WITH TWILIO TURN SERVERS
+  // ════════════════════════════════════════════════════════════════════
+  Future<void> _joinRoom() async {
+    try {
+      // Step 1: Fetch LiveKit token
+      final success = await _provider.fetchLivekitToken();
+      if (!success) { _showError('Failed to get call token'); return; }
+
+      // Step 2: Fetch Twilio TURN/ICE servers
+      final iceServers = await _fetchIceServers();
+      debugPrint('🌐 Using ${iceServers.length} ICE servers for video room');
+
+      // Step 3: Connect to LiveKit with TURN servers injected
+      // ✅ livekit_client ^2.2.0: rtcConfig is a param of Room() constructor
       _room = Room();
-
-      // Connect to room
       await _room!.connect(
         'wss://meet.ixes.ai',
-        videoCallProvider.livekitToken!,
-        roomOptions: RoomOptions(
+        _provider.livekitToken!, // or livekitToken!
+        roomOptions: const RoomOptions(
           adaptiveStream: true,
           dynacast: true,
         ),
+        connectOptions: ConnectOptions(
+          rtcConfiguration: RTCConfiguration(
+            iceServers: iceServers,
+            iceTransportPolicy: RTCIceTransportPolicy.relay,
+          ),
+        ),
       );
 
-      // Enable camera and microphone
       await _room!.localParticipant?.setCameraEnabled(true);
       await _room!.localParticipant?.setMicrophoneEnabled(true);
-
-      // Notify that participant joined
-      videoCallProvider.notifyParticipantJoined();
-
-      // Setup listeners
+      _provider.notifyParticipantJoined();
       _room!.addListener(_onRoomUpdate);
 
-      setState(() {
-        _isConnecting = false;
-      });
+      if (mounted) setState(() { _isConnecting = false; });
+      debugPrint('✅ Joined video room: ${_provider.currentRoomName}');
     } catch (e) {
-      debugPrint('Error joining room: $e');
+      debugPrint('❌ Error joining video room: $e');
       _showError('Failed to join call: $e');
     }
   }
 
   void _onRoomUpdate() {
-    if (mounted && !_isEnding) {
-      setState(() {});
-    }
+    if (mounted && !_isEnding) setState(() {});
   }
 
   Future<void> _toggleCamera() async {
     if (_room != null) {
       _isCameraEnabled = !_isCameraEnabled;
       await _room!.localParticipant?.setCameraEnabled(_isCameraEnabled);
-      setState(() {});
+      if (mounted) setState(() {});
     }
   }
 
@@ -124,7 +160,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     if (_room != null) {
       _isMicEnabled = !_isMicEnabled;
       await _room!.localParticipant?.setMicrophoneEnabled(_isMicEnabled);
-      setState(() {});
+      if (mounted) setState(() {});
     }
   }
 
@@ -135,99 +171,50 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         _cameraPosition = _cameraPosition == CameraPosition.front
             ? CameraPosition.back
             : CameraPosition.front;
-
-        final videoPublication = localParticipant.videoTrackPublications.firstOrNull;
-
-        if (videoPublication != null) {
-          final videoTrack = videoPublication.track;
-
-          if (videoTrack != null && videoTrack is LocalVideoTrack) {
-            await videoTrack.setCameraPosition(_cameraPosition);
-            setState(() {});
-          }
+        final pub = localParticipant.videoTrackPublications.firstOrNull;
+        if (pub?.track is LocalVideoTrack) {
+          await (pub!.track as LocalVideoTrack).setCameraPosition(_cameraPosition);
+          if (mounted) setState(() {});
         }
       }
     } catch (e) {
       debugPrint('Error switching camera: $e');
-
-      try {
-        final localParticipant = _room?.localParticipant;
-        if (localParticipant != null) {
-          await localParticipant.setCameraEnabled(false);
-          await Future.delayed(const Duration(milliseconds: 300));
-
-          _cameraPosition = _cameraPosition == CameraPosition.front
-              ? CameraPosition.back
-              : CameraPosition.front;
-
-          await localParticipant.setCameraEnabled(true);
-          setState(() {});
-        }
-      } catch (e2) {
-        debugPrint('Error in fallback camera switch: $e2');
-      }
     }
   }
 
   Future<void> _endCall() async {
     if (_isEnding) return;
     _isEnding = true;
-
-    final videoCallProvider = context.read<VideoCallProvider>();
-
-    // Notify that participant left
-    videoCallProvider.notifyParticipantLeft();
-
-    // End the call (sends video-call-canceled event)
-    videoCallProvider.endCall();
-
-    // Disconnect from room
+    _provider.removeListener(_handleCallStateChange);
+    _provider.notifyParticipantLeft();
+    await _provider.endCall();  // ← add await
     await _room?.disconnect();
-
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _showError(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
       Navigator.of(context).pop();
     }
   }
 
-  // Get the name of the other participant based on call direction
   String _getOtherParticipantName() {
-    final provider = context.read<VideoCallProvider>();
-
-    // If I'm the receiver (someone called me), show caller's name
-    if (provider.currentCallerId != null &&
-        provider.currentCallerId != provider.currentUserId) {
-      return provider.currentCallerName ?? 'Unknown';
+    if (_provider.currentCallerId != null &&
+        _provider.currentCallerId != _provider.currentUserId) {
+      return _provider.currentCallerName ?? 'Unknown';
     }
-
-    // If I'm the caller, show receiver's name
-    if (provider.currentReceiverId != null) {
-      return provider.currentReceiverName ?? 'Unknown';
+    if (_provider.currentReceiverId != null) {
+      return _provider.currentReceiverName ?? 'Unknown';
     }
-
-    // Fallback
-    return provider.currentCallerName ??
-        provider.currentReceiverName ??
-        'Unknown';
+    return _provider.currentCallerName ??
+        _provider.currentReceiverName ?? 'Unknown';
   }
 
   @override
   void dispose() {
-    try {
-      final provider = context.read<VideoCallProvider>();
-      provider.removeListener(_handleCallStateChange);
-    } catch (e) {
-      debugPrint('Error removing listener: $e');
-    }
-
+    _provider.removeListener(_handleCallStateChange);
     _room?.removeListener(_onRoomUpdate);
     _room?.disconnect();
     super.dispose();
@@ -244,10 +231,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             children: const [
               CircularProgressIndicator(color: Colors.white),
               SizedBox(height: 20),
-              Text(
-                'Connecting...',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
+              Text('Connecting...', style: TextStyle(color: Colors.white, fontSize: 16)),
             ],
           ),
         ),
@@ -255,42 +239,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     }
 
     return WillPopScope(
-      onWillPop: () async {
-        await _endCall();
-        return false;
-      },
+      onWillPop: () async { await _endCall(); return false; },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            // Remote video (full screen)
             if (_room!.remoteParticipants.isNotEmpty)
               _buildRemoteVideo()
             else
               _buildWaitingView(),
-
-            // Local video (small preview)
-            Positioned(
-              top: 50,
-              right: 20,
-              child: _buildLocalVideo(),
-            ),
-
-            // Top info bar
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: _buildTopBar(),
-            ),
-
-            // Controls
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _buildControls(),
-            ),
+            Positioned(top: 50, right: 20, child: _buildLocalVideo()),
+            Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
+            Positioned(bottom: 0, left: 0, right: 0, child: _buildControls()),
           ],
         ),
       ),
@@ -298,28 +258,20 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Widget _buildRemoteVideo() {
-    final remoteParticipant = _room!.remoteParticipants.values.first;
-
-    TrackPublication? videoPublication;
-    for (var pub in remoteParticipant.trackPublications.values) {
-      if (pub.kind == TrackType.VIDEO) {
-        videoPublication = pub;
-        break;
-      }
+    final remote = _room!.remoteParticipants.values.first;
+    TrackPublication? videoPub;
+    for (var pub in remote.trackPublications.values) {
+      if (pub.kind == TrackType.VIDEO) { videoPub = pub; break; }
     }
-
-    if (videoPublication != null &&
-        videoPublication.subscribed &&
-        videoPublication.track != null &&
-        !videoPublication.muted) {
+    if (videoPub != null && videoPub.subscribed &&
+        videoPub.track != null && !videoPub.muted) {
       return SizedBox.expand(
         child: VideoTrackRenderer(
-          videoPublication.track as VideoTrack,
+          videoPub.track as VideoTrack,
           fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
         ),
       );
     }
-
     return Container(
       color: Colors.black,
       child: Center(
@@ -327,35 +279,18 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 100,
-              height: 100,
+              width: 100, height: 100,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.1),
-              ),
-              child: const Icon(
-                Icons.videocam_off,
-                size: 50,
-                color: Colors.white54,
-              ),
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.1)),
+              child: const Icon(Icons.videocam_off, size: 50, color: Colors.white54),
             ),
             const SizedBox(height: 20),
-            Text(
-              remoteParticipant.name ?? _getOtherParticipantName(),
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text(remote.name ?? _getOtherParticipantName(),
+                style: const TextStyle(color: Colors.white70, fontSize: 18)),
             const SizedBox(height: 8),
-            const Text(
-              'Camera is off',
-              style: TextStyle(
-                color: Colors.white38,
-                fontSize: 14,
-              ),
-            ),
+            const Text('Camera is off',
+                style: TextStyle(color: Colors.white38, fontSize: 14)),
           ],
         ),
       ),
@@ -363,56 +298,43 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   }
 
   Widget _buildWaitingView() {
-    final otherName = _getOtherParticipantName();
-
+    final name = _getOtherParticipantName();
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 120,
-            height: 120,
+            width: 120, height: 120,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                colors: [Colors.blue[400]!, Colors.purple[400]!],
-              ),
+                  colors: [Colors.blue[400]!, Colors.purple[400]!]),
             ),
             child: Center(
-              child: Text(
-                otherName[0].toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 48,
+                      fontWeight: FontWeight.bold)),
             ),
           ),
           const SizedBox(height: 20),
-          Text(
-            'Waiting for $otherName to join...',
-            style: const TextStyle(color: Colors.white70, fontSize: 16),
-          ),
+          Text('Waiting for $name to join...',
+              style: const TextStyle(color: Colors.white70, fontSize: 16)),
         ],
       ),
     );
   }
 
   Widget _buildLocalVideo() {
-    TrackPublication? localVideoPublication;
+    TrackPublication? localPub;
     if (_room!.localParticipant != null) {
       for (var pub in _room!.localParticipant!.trackPublications.values) {
-        if (pub.kind == TrackType.VIDEO) {
-          localVideoPublication = pub;
-          break;
-        }
+        if (pub.kind == TrackType.VIDEO) { localPub = pub; break; }
       }
     }
-
     return Container(
-      width: 120,
-      height: 160,
+      width: 120, height: 160,
       decoration: BoxDecoration(
         border: Border.all(color: Colors.white, width: 2),
         borderRadius: BorderRadius.circular(12),
@@ -420,65 +342,46 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: (localVideoPublication != null &&
-            localVideoPublication.track != null &&
-            _isCameraEnabled)
-            ? VideoTrackRenderer(
-          localVideoPublication.track as VideoTrack,
-          fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-        )
+        child: (localPub != null && localPub.track != null && _isCameraEnabled)
+            ? VideoTrackRenderer(localPub.track as VideoTrack,
+            fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)
             : Container(
-          color: Colors.black,
-          child: const Center(
-            child: Icon(Icons.videocam_off, color: Colors.white54, size: 40),
-          ),
-        ),
+            color: Colors.black,
+            child: const Center(
+                child: Icon(Icons.videocam_off,
+                    color: Colors.white54, size: 40))),
       ),
     );
   }
 
   Widget _buildTopBar() {
-    final otherName = _getOtherParticipantName();
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 50),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withOpacity(0.6),
-            Colors.transparent,
-          ],
+          colors: [Colors.black.withOpacity(0.6), Colors.transparent],
         ),
       ),
       child: Row(
         children: [
-          Text(
-            otherName,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(_getOtherParticipantName(),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600)),
           const Spacer(),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.green,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: const [
-                Icon(Icons.circle, color: Colors.white, size: 8),
-                SizedBox(width: 6),
-                Text(
-                  'Connected',
-                  style: TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ],
-            ),
+                color: Colors.green,
+                borderRadius: BorderRadius.circular(12)),
+            child: Row(children: const [
+              Icon(Icons.circle, color: Colors.white, size: 8),
+              SizedBox(width: 6),
+              Text('Connected', style: TextStyle(color: Colors.white, fontSize: 12)),
+            ]),
           ),
         ],
       ),
@@ -492,10 +395,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
-          colors: [
-            Colors.black.withOpacity(0.8),
-            Colors.transparent,
-          ],
+          colors: [Colors.black.withOpacity(0.8), Colors.transparent],
         ),
       ),
       child: Row(
@@ -504,27 +404,24 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           _buildControlButton(
             icon: _isCameraEnabled ? Icons.videocam : Icons.videocam_off,
             onPressed: _toggleCamera,
-            backgroundColor: _isCameraEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
+            backgroundColor:
+            _isCameraEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
           ),
-
           _buildControlButton(
             icon: _isMicEnabled ? Icons.mic : Icons.mic_off,
             onPressed: _toggleMicrophone,
-            backgroundColor: _isMicEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
+            backgroundColor:
+            _isMicEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
           ),
-
           Container(
-            width: 60,
-            height: 60,
+            width: 60, height: 60,
             decoration: BoxDecoration(
               color: Colors.red,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.red.withOpacity(0.4),
-                  blurRadius: 15,
-                  spreadRadius: 2,
-                ),
+                    color: Colors.red.withOpacity(0.4),
+                    blurRadius: 15, spreadRadius: 2)
               ],
             ),
             child: IconButton(
@@ -532,18 +429,14 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
               icon: const Icon(Icons.call_end, size: 28, color: Colors.white),
             ),
           ),
-
           _buildControlButton(
-            icon: Icons.flip_camera_ios,
-            onPressed: _switchCamera,
-            backgroundColor: Colors.white.withOpacity(0.2),
-          ),
-
+              icon: Icons.flip_camera_ios,
+              onPressed: _switchCamera,
+              backgroundColor: Colors.white.withOpacity(0.2)),
           _buildControlButton(
-            icon: Icons.more_vert,
-            onPressed: _showMoreOptions,
-            backgroundColor: Colors.white.withOpacity(0.2),
-          ),
+              icon: Icons.more_vert,
+              onPressed: _showMoreOptions,
+              backgroundColor: Colors.white.withOpacity(0.2)),
         ],
       ),
     );
@@ -555,16 +448,11 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     required Color backgroundColor,
   }) {
     return Container(
-      width: 50,
-      height: 50,
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        shape: BoxShape.circle,
-      ),
+      width: 50, height: 50,
+      decoration: BoxDecoration(color: backgroundColor, shape: BoxShape.circle),
       child: IconButton(
-        onPressed: onPressed,
-        icon: Icon(icon, color: Colors.white, size: 24),
-      ),
+          onPressed: onPressed,
+          icon: Icon(icon, color: Colors.white, size: 24)),
     );
   }
 
@@ -573,65 +461,36 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       context: context,
       backgroundColor: Colors.grey[900],
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey[600],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
+                width: 40, height: 4,
+                decoration: BoxDecoration(
+                    color: Colors.grey[600],
+                    borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 20),
             ListTile(
               leading: const Icon(Icons.person_add, color: Colors.white),
-              title: const Text(
-                'Invite Participant',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('Invite Participant',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Invite participant feature coming soon!'),
-                  ),
-                );
+                    const SnackBar(content: Text('Coming soon!')));
               },
             ),
             ListTile(
               leading: const Icon(Icons.screen_share, color: Colors.white),
-              title: const Text(
-                'Share Screen',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('Share Screen',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Screen sharing feature coming soon!'),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings, color: Colors.white),
-              title: const Text(
-                'Settings',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Settings feature coming soon!'),
-                  ),
-                );
+                    const SnackBar(content: Text('Coming soon!')));
               },
             ),
             const SizedBox(height: 20),

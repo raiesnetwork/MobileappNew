@@ -12,30 +12,29 @@ enum VoiceCallState {
 class VoiceCallProvider extends ChangeNotifier {
   final VoiceCallService _service = VoiceCallService();
 
-  // Current user info
   String? _currentUserId;
   String? _currentUserName;
   String? _authToken;
 
-  // Call state
   VoiceCallState _callState = VoiceCallState.idle;
   bool _isConnected = false;
   String? _errorMessage;
   String? _successMessage;
 
-  // Current call data
   String? _currentRoomName;
   String? _currentCallerId;
   String? _currentCallerName;
   String? _currentReceiverId;
   String? _currentReceiverName;
   bool _isConference = false;
+  bool _listenersSetUp = false;
 
-  // LiveKit token
   String? _voiceToken;
-
-  // Participants (for conference calls)
   List<Map<String, dynamic>> _participants = [];
+
+  // ✅ True when user already accepted via CallKit Answer button.
+  // VoiceCallListener must check this and skip showing IncomingVoiceCallDialog.
+  bool _acceptedViaCallKit = false;
 
   // Getters
   VoiceCallService get service => _service;
@@ -53,6 +52,7 @@ class VoiceCallProvider extends ChangeNotifier {
   bool get isConference => _isConference;
   String? get voiceToken => _voiceToken;
   List<Map<String, dynamic>> get participants => _participants;
+  bool get acceptedViaCallKit => _acceptedViaCallKit;
 
   // ============================================================================
   // INITIALIZATION
@@ -67,107 +67,109 @@ class VoiceCallProvider extends ChangeNotifier {
     _currentUserName = userName;
     _authToken = authToken;
 
-    debugPrint('🎙️ Initializing voice call provider for: $userName ($userId)');
-
-    // CRITICAL: Setup listeners BEFORE connecting
     _service.connectSocket();
-    _setupListeners();
 
-    // Connect after listeners are set up
+    // ✅ Only register listeners ONCE
+    if (!_listenersSetUp) {
+      _setupListeners();
+      _listenersSetUp = true;
+    }
+
     _service.connect();
-
-    debugPrint('🎙️ Voice call provider initialized');
   }
 
   void _setupListeners() {
     debugPrint('👂 Setting up voice call listeners...');
 
-    // Connection listeners - MUST be set before connect()
     _service.onConnect(() {
-      debugPrint('✅ Voice call socket connected - Provider callback');
+      debugPrint('✅ Voice socket connected');
       _isConnected = true;
-
-      // Register user immediately after connection
       if (_currentUserId != null) {
         _service.registerUser(_currentUserId!);
         debugPrint('📝 User registered: $_currentUserId');
-      } else {
-        debugPrint('⚠️ Cannot register: No user ID');
       }
-
       _safeNotifyListeners();
     });
 
     _service.onDisconnect(() {
-      debugPrint('❌ Voice call socket disconnected - Provider callback');
+      debugPrint('❌ Voice socket disconnected');
       _isConnected = false;
       _safeNotifyListeners();
     });
 
     // Incoming voice call
     _service.onIncomingVoiceCall((data) {
-      debugPrint('📞 PROVIDER: Incoming voice call received');
-      debugPrint('📞 Call data: $data');
-
+      debugPrint('📞 PROVIDER: Incoming voice call: $data');
       _currentRoomName = data['roomName'];
       _currentCallerId = data['callerId'];
       _currentCallerName = data['callerName'];
       _isConference = data['isConference'] ?? false;
       _callState = VoiceCallState.ringing;
-
-      debugPrint('📞 Updated state: roomName=$_currentRoomName, caller=$_currentCallerName, state=$_callState');
-
       _safeNotifyListeners();
     });
 
-    // Call accepted
+    // Call accepted (receiver accepted our outgoing call)
     _service.onCallAcceptedVoice((data) {
-      debugPrint('✅ PROVIDER: Voice call accepted');
-      debugPrint('✅ Accept data: $data');
-
+      debugPrint('✅ PROVIDER: Voice call accepted: $data');
       _successMessage = data['message'];
       _isConference = data['isConference'] ?? false;
       _callState = VoiceCallState.connected;
-
       _safeNotifyListeners();
     });
 
-    // Call rejected
+    // Call rejected (receiver rejected our outgoing call)
+    // ✅ This is how the CALLER knows to close their outgoing screen
     _service.onCallRejectedVoice((data) {
-      debugPrint('❌ PROVIDER: Voice call rejected');
-      debugPrint('❌ Reject data: $data');
-
+      debugPrint('❌ PROVIDER: Voice call rejected: $data');
       _errorMessage = data['message'];
       _callState = VoiceCallState.ended;
       _clearCallData();
       _safeNotifyListeners();
+
+      // ✅ Delay idle reset long enough for UI to fully dismiss (3s not 2s)
+      // and only reset if nobody started a new call in the meantime
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == VoiceCallState.ended) {
+          _callState = VoiceCallState.idle;
+          // ✅ Do NOT call _clearCallData() here again — it's already cleared above
+          // and calling it again would wipe a NEW incoming call's data
+          _safeNotifyListeners();
+        }
+      });
     });
 
-    // Call ended
     _service.onVoiceCallEnded((data) {
-      debugPrint('📴 PROVIDER: Voice call ended');
-      debugPrint('📴 End data: $data');
-
+      debugPrint('📴 PROVIDER: Voice call ended: $data');
       _callState = VoiceCallState.ended;
-      _clearCallData();
+      _clearCallData(); // ✅ Clear immediately
       _safeNotifyListeners();
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == VoiceCallState.ended) {
+          _callState = VoiceCallState.idle;
+          _safeNotifyListeners();
+        }
+      });
     });
 
-    // User offline
     _service.onUserOfflineVoice((message) {
-      debugPrint('🔴 PROVIDER: User offline - $message');
-
+      debugPrint('🔴 PROVIDER: User offline: $message');
       _errorMessage = message.toString();
       _callState = VoiceCallState.ended;
       _clearCallData();
       _safeNotifyListeners();
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == VoiceCallState.ended) {
+          _callState = VoiceCallState.idle;
+          _safeNotifyListeners();
+        }
+      });
     });
 
     // New participant invited (conference)
     _service.onNewParticipantInvitedVoice((data) {
-      debugPrint('📧 PROVIDER: New participant invited');
-      debugPrint('📧 Invite data: $data');
-
+      debugPrint('📧 PROVIDER: New participant invited: $data');
       _currentRoomName = data['roomName'];
       _currentCallerId = data['callerId'];
       _currentCallerName = data['callerName'];
@@ -176,46 +178,40 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Participant joined
+    // ✅ FIXED: Register onParticipantJoinedVoiceCall ONCE only
+    // Previously registered TWICE which caused double "Call accepted" events
     _service.onParticipantJoinedVoiceCall((data) {
-      debugPrint('👤 PROVIDER: Participant joined');
-      debugPrint('👤 Join data: $data');
+      debugPrint('👤 PROVIDER: Participant joined: $data');
 
-      if (!_participants.any((p) => p['participantId'] == data['participantId'])) {
-        _participants.add(Map<String, dynamic>.from(data));
-        _safeNotifyListeners();
-      }
-    });
-
-    // Participant joined
-    _service.onParticipantJoinedVoiceCall((data) {
-      debugPrint('👤 PROVIDER: Participant joined');
-      debugPrint('👤 Join data: $data');
-
-      // Add participant to list
       if (!_participants.any((p) => p['participantId'] == data['participantId'])) {
         _participants.add(Map<String, dynamic>.from(data));
       }
 
-      // 🔥 FIX: Update call state to connected when receiver joins
-      // Only update if we're the caller and we're in calling state
+      // Update to connected when the receiver joins our outgoing call
       if (_callState == VoiceCallState.calling &&
           data['participantId'] == _currentReceiverId) {
-        debugPrint('🎯 Receiver joined! Updating state to CONNECTED');
+        debugPrint('🎯 Receiver joined — state → CONNECTED');
         _callState = VoiceCallState.connected;
       }
 
       _safeNotifyListeners();
     });
 
-    debugPrint('✅ All voice call listeners set up');
+    // Participant left
+    _service.onParticipantLeftVoiceCall((data) {
+      debugPrint('👋 PROVIDER: Participant left: $data');
+      _participants.removeWhere((p) => p['participantId'] == data['participantId']);
+      _safeNotifyListeners();
+    });
+
+    debugPrint('✅ Voice call listeners set up');
   }
+
 
   // ============================================================================
   // CALL OPERATIONS
   // ============================================================================
 
-  /// Check if user is busy
   Future<bool> checkUserBusy(String receiverId) async {
     debugPrint('🔍 Checking if user $receiverId is busy...');
     final result = await _service.checkUserBusy(receiverId);
@@ -223,11 +219,9 @@ class VoiceCallProvider extends ChangeNotifier {
       debugPrint('🔍 Busy check result: ${result['busy']}');
       return result['busy'] ?? false;
     }
-    debugPrint('🔍 Busy check returned null');
     return false;
   }
 
-  /// Initiate voice call
   Future<void> initiateVoiceCall({
     required String receiverId,
     required String receiverName,
@@ -237,19 +231,22 @@ class VoiceCallProvider extends ChangeNotifier {
 
     if (_currentUserId == null || _currentUserName == null) {
       _errorMessage = 'User not initialized';
-      debugPrint('❌ Cannot initiate: User not initialized');
       _safeNotifyListeners();
       return;
     }
 
     if (!_isConnected) {
       _errorMessage = 'Not connected to server';
-      debugPrint('❌ Cannot initiate: Not connected');
       _safeNotifyListeners();
       return;
     }
 
-    // Check if user is busy
+    // ✅ If previous call ended, reset before starting new one
+    if (_callState == VoiceCallState.ended) {
+      _callState = VoiceCallState.idle;
+      _clearCallData();
+    }
+
     final isBusy = await checkUserBusy(receiverId);
     if (isBusy) {
       _errorMessage = '$receiverName is currently in another call';
@@ -263,10 +260,9 @@ class VoiceCallProvider extends ChangeNotifier {
     _currentReceiverName = receiverName;
     _isConference = isConference;
     _callState = VoiceCallState.calling;
+    _errorMessage = null;
 
     debugPrint('📞 Room name: $_currentRoomName');
-    debugPrint('📞 Call state changed to: $_callState');
-
     _safeNotifyListeners();
 
     _service.initiateVoiceCall(
@@ -279,14 +275,26 @@ class VoiceCallProvider extends ChangeNotifier {
 
     debugPrint('📞 Voice call initiated via service');
   }
+  void cancelIncomingCall() {
+    if (_callState != VoiceCallState.ringing && _callState != VoiceCallState.calling) return;
+    debugPrint('📵 VoiceCallProvider.cancelIncomingCall()');
+    _callState = VoiceCallState.ended;
+    _clearCallData();
+    _safeNotifyListeners();
 
-  /// Accept voice call
+    Future.delayed(const Duration(seconds: 3), () {
+      if (_callState == VoiceCallState.ended) {
+        _callState = VoiceCallState.idle;
+        _safeNotifyListeners();
+      }
+    });
+  }
+
   Future<void> acceptVoiceCall() async {
     debugPrint('✅ ACCEPTING VOICE CALL from $_currentCallerName ($_currentCallerId)');
 
     if (_currentCallerId == null) {
       _errorMessage = 'No caller ID found';
-      debugPrint('❌ Cannot accept: No caller ID');
       _safeNotifyListeners();
       return;
     }
@@ -298,21 +306,14 @@ class VoiceCallProvider extends ChangeNotifier {
 
     _callState = VoiceCallState.connected;
     _successMessage = 'Call accepted';
-
-    debugPrint('✅ Call accepted, state changed to: $_callState');
-
     _safeNotifyListeners();
   }
 
-  /// Reject voice call
   Future<void> rejectVoiceCall() async {
     debugPrint('❌ REJECTING VOICE CALL from $_currentCallerName ($_currentCallerId)');
 
-    if (_currentCallerId == null ||
-        _currentUserName == null ||
-        _currentUserId == null) {
+    if (_currentCallerId == null || _currentUserName == null || _currentUserId == null) {
       _errorMessage = 'Missing call data';
-      debugPrint('❌ Cannot reject: Missing data');
       _safeNotifyListeners();
       return;
     }
@@ -326,19 +327,25 @@ class VoiceCallProvider extends ChangeNotifier {
     _callState = VoiceCallState.ended;
     _successMessage = 'Call rejected';
     _clearCallData();
-
-    debugPrint('❌ Call rejected');
-
     _safeNotifyListeners();
+
+    // ✅ Reset to idle so the rejected party can call again
+    Future.delayed(const Duration(seconds: 1), () {
+      if (_callState == VoiceCallState.ended) {
+        _callState = VoiceCallState.idle;
+        _safeNotifyListeners();
+      }
+    });
   }
 
-  /// End voice call
   Future<void> endVoiceCall() async {
     debugPrint('📴 ENDING VOICE CALL');
 
     if (_currentUserId == null || _currentUserName == null) {
-      _errorMessage = 'User not initialized';
       debugPrint('❌ Cannot end: User not initialized');
+      // ✅ Still reset state even if we can't send the socket event
+      _callState = VoiceCallState.idle;
+      _clearCallData();
       _safeNotifyListeners();
       return;
     }
@@ -347,45 +354,40 @@ class VoiceCallProvider extends ChangeNotifier {
     String receiverName = _currentReceiverName ?? _currentCallerName ?? '';
 
     if (receiverId.isEmpty) {
-      _errorMessage = 'No active call to end';
-      debugPrint('❌ Cannot end: No active call');
+      debugPrint('❌ Cannot end: No active call — resetting state anyway');
+      _callState = VoiceCallState.idle;
+      _clearCallData();
       _safeNotifyListeners();
       return;
     }
 
-    // Notify that participant is leaving
     if (_currentRoomName != null) {
       notifyParticipantLeft();
     }
 
-    _service.endVoiceCall(
-      receiverId: receiverId,
-      receiverName: receiverName,
-      callerName: _currentUserName!,
-      callerId: _currentUserId!,
-    );
-
-    _callState = VoiceCallState.ended;
+    try {
+      _service.endVoiceCall(
+        receiverId: receiverId,
+        receiverName: receiverName,
+        callerName: _currentUserName!,
+        callerId: _currentUserId!,
+      );
+    } catch (e) {
+      debugPrint('⚠️ endVoiceCall ignored: $e');
+    }
+    _callState = VoiceCallState.idle; // ✅ Go straight to idle, not ended
     _successMessage = 'Call ended';
     _clearCallData();
-
-    debugPrint('📴 Call ended');
-
+    debugPrint('📴 Call ended, state → idle');
     _safeNotifyListeners();
   }
 
-  /// Invite participant to voice call (conference)
   Future<void> inviteToVoiceCall({
     required String receiverId,
     required String receiverName,
   }) async {
-    debugPrint('📧 INVITING $receiverName to voice call');
-
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
       _errorMessage = 'Missing required data';
-      debugPrint('❌ Cannot invite: Missing data');
       _safeNotifyListeners();
       return;
     }
@@ -399,55 +401,40 @@ class VoiceCallProvider extends ChangeNotifier {
     );
 
     _successMessage = 'Invitation sent to $receiverName';
-    debugPrint('📧 Invitation sent');
     _safeNotifyListeners();
   }
 
-  /// Notify others that participant joined
   void notifyParticipantJoined() {
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
       debugPrint('⚠️ Cannot notify join: Missing data');
       return;
     }
-
     _service.participantJoinedVoiceCall(
       participantId: _currentUserId!,
       participantName: _currentUserName!,
       roomName: _currentRoomName!,
     );
-
     debugPrint('👤 Notified others of join');
   }
 
-  /// Notify others that participant left
   void notifyParticipantLeft() {
     if (_currentUserId == null) {
       debugPrint('⚠️ Cannot notify leave: Missing user ID');
       return;
     }
-
-    _service.participantLeftVoiceCall(
-      participantId: _currentUserId!,
-    );
-
+    _service.participantLeftVoiceCall(participantId: _currentUserId!);
     debugPrint('👋 Notified others of leave');
   }
 
   // ============================================================================
-  // LIVEKIT TOKEN
+  // TOKEN
   // ============================================================================
 
-  /// Fetch LiveKit voice token
   Future<bool> fetchVoiceToken() async {
     debugPrint('🎫 FETCHING VOICE TOKEN');
 
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
-      _errorMessage = 'Missing required data for token generation';
-      debugPrint('❌ Cannot fetch token: Missing data');
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
+      _errorMessage = 'Missing required data for token';
       _safeNotifyListeners();
       return false;
     }
@@ -474,13 +461,11 @@ class VoiceCallProvider extends ChangeNotifier {
   }
 
   // ============================================================================
-  // UTILITY METHODS
+  // UTILITY
   // ============================================================================
 
   void _safeNotifyListeners() {
-    if (hasListeners) {
-      notifyListeners();
-    }
+    if (hasListeners) notifyListeners();
   }
 
   void clearMessages() {
@@ -497,6 +482,7 @@ class VoiceCallProvider extends ChangeNotifier {
     _currentReceiverName = null;
     _isConference = false;
     _voiceToken = null;
+    _acceptedViaCallKit = false;
     _participants.clear();
   }
 
@@ -507,23 +493,38 @@ class VoiceCallProvider extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
-  // ============================================================================
-  // DEBUG HELPERS
-  // ============================================================================
+  void setIncomingCallFromFCM({
+    required String roomName,
+    required String callerId,
+    required String callerName,
+    bool acceptedViaCallKit = false,
+  }) {
+    _currentRoomName = roomName;
+    _currentCallerId = callerId;
+    _currentCallerName = callerName;
+    _acceptedViaCallKit = acceptedViaCallKit;
+
+    // ✅ Only set ringing if user hasn't already accepted.
+    // If acceptedViaCallKit=true, setting ringing would cause
+    // VoiceCallListener to show IncomingVoiceCallDialog on top of VoiceRoomScreen.
+    if (!acceptedViaCallKit) {
+      _callState = VoiceCallState.ringing;
+    }
+
+    debugPrint('📲 FCM voice call set — room: $roomName | caller: $callerName | acceptedViaCallKit=$acceptedViaCallKit');
+    notifyListeners();
+  }
 
   void printStatus() {
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint('Voice Call Provider Status:');
+    debugPrint('VoiceCallProvider Status:');
     debugPrint('  User: $_currentUserName ($_currentUserId)');
     debugPrint('  Connected: $_isConnected');
-    debugPrint('  Registered: ${_service.isRegistered}');
     debugPrint('  Call State: $_callState');
-    debugPrint('  Current Room: $_currentRoomName');
+    debugPrint('  Room: $_currentRoomName');
     debugPrint('  Caller: $_currentCallerName ($_currentCallerId)');
     debugPrint('  Receiver: $_currentReceiverName ($_currentReceiverId)');
-    debugPrint('  Socket ID: ${_service.socketId}');
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    _service.printStatus();
   }
 
   // ============================================================================
@@ -533,8 +534,6 @@ class VoiceCallProvider extends ChangeNotifier {
   @override
   void dispose() {
     debugPrint('🧹 Cleaning up VoiceCallProvider');
-
-    // Remove all listeners
     _service.offIncomingVoiceCall();
     _service.offCallAcceptedVoice();
     _service.offCallRejectedVoice();
@@ -543,11 +542,8 @@ class VoiceCallProvider extends ChangeNotifier {
     _service.offNewParticipantInvitedVoice();
     _service.offParticipantJoinedVoiceCall();
     _service.offParticipantLeftVoiceCall();
-
-    // Disconnect and dispose socket
     _service.disconnect();
     _service.dispose();
-
     super.dispose();
   }
 }

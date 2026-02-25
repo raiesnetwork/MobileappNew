@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'dart:async';
 
 class VoiceRoomScreen extends StatefulWidget {
@@ -12,128 +15,179 @@ class VoiceRoomScreen extends StatefulWidget {
 }
 
 class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
+  late final VoiceCallProvider _provider;
+
   Room? _room;
   bool _isMicEnabled = true;
-  bool _isSpeakerOn = true;
+  bool _isSpeakerOn  = true;
   bool _isConnecting = true;
+  bool _isEnding     = false;
   Timer? _callTimer;
-  int _callDuration = 0;
+  int _callDuration  = 0;
 
   @override
   void initState() {
     super.initState();
+    _provider = context.read<VoiceCallProvider>();
+    _provider.addListener(_handleCallStateChange);
     _joinRoom();
     _startCallTimer();
   }
 
+  void _handleCallStateChange() {
+    if (!mounted || _isEnding) return;
+    if (_provider.callState == VoiceCallState.ended ||
+        _provider.callState == VoiceCallState.idle) {
+      debugPrint('📴 VoiceRoomScreen: remote ended → closing');
+      _isEnding = true;
+      _provider.removeListener(_handleCallStateChange);
+      _room?.disconnect();
+      _callTimer?.cancel();
+      if (mounted) Navigator.of(context).pop();
+    }
+  }
+
   void _startCallTimer() {
-    _callTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) {
-        setState(() {
-          _callDuration++;
-        });
-      }
+    _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() { _callDuration++; });
     });
   }
 
   String _formatDuration(int seconds) {
-    final minutes = (seconds / 60).floor();
-    final remainingSeconds = seconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${remainingSeconds.toString().padLeft(2, '0')}';
+    final m = (seconds / 60).floor();
+    final s = seconds % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  Future<void> _joinRoom() async {
-    final provider = context.read<VoiceCallProvider>();
-
+  // ════════════════════════════════════════════════════════════════════
+  // FETCH TWILIO ICE/TURN SERVERS
+  // Calls your backend API that returns the Twilio TURN credentials.
+  // Replace the URL below with your actual API endpoint.
+  // ════════════════════════════════════════════════════════════════════
+  Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      // Fetch voice token
-      final success = await provider.fetchVoiceToken();
-      if (!success) {
-        _showError('Failed to join call');
-        return;
+      final prefs    = await SharedPreferences.getInstance();
+      final token    = prefs.getString('auth_token') ?? '';
+
+      final response = await http.get(
+        // ✅ Replace with your actual Twilio ICE endpoint
+        Uri.parse('https://api.ixes.ai/api/chat/get-turn-credentials'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        final body       = json.decode(response.body);
+        final data       = body['data'] as Map<String, dynamic>;
+        final iceList    = data['iceServers'] as List<dynamic>;
+
+        debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
+
+        return iceList.map((server) {
+          final s          = server as Map<String, dynamic>;
+          final urls       = s['urls']?.toString() ?? s['url']?.toString() ?? '';
+          final username   = s['username']?.toString();
+          final credential = s['credential']?.toString();
+
+          return RTCIceServer(
+            urls: [urls],
+            username: username,
+            credential: credential,
+          );
+        }).toList();
       }
+    } catch (e) {
+      debugPrint('⚠️ Could not fetch ICE servers: $e — using defaults');
+    }
 
-      // Create and connect to room
+    // Fallback: Google STUN only (no TURN — may fail on strict networks)
+    return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // JOIN LIVEKIT ROOM WITH TWILIO TURN SERVERS
+  // ════════════════════════════════════════════════════════════════════
+  Future<void> _joinRoom() async {
+    try {
+      // Step 1: Fetch LiveKit token
+      final success = await _provider.fetchVoiceToken();
+      if (!success) { _showError('Failed to get call token'); return; }
+
+      // Step 2: Fetch Twilio TURN/ICE servers
+      final iceServers = await _fetchIceServers();
+      debugPrint('🌐 Using ${iceServers.length} ICE servers for voice room');
+
+      // Step 3: Connect to LiveKit with TURN servers injected
+      // ✅ livekit_client ^2.2.0: rtcConfig is a param of Room() constructor
       _room = Room();
-
       await _room!.connect(
         'wss://meet.ixes.ai',
-        provider.voiceToken!,
-        roomOptions: RoomOptions(
+        _provider.voiceToken!, // or livekitToken!
+        roomOptions: const RoomOptions(
           adaptiveStream: true,
           dynacast: true,
         ),
+        connectOptions: ConnectOptions(
+          rtcConfiguration: RTCConfiguration(
+            iceServers: iceServers,
+            iceTransportPolicy: RTCIceTransportPolicy.relay,
+          ),
+        ),
       );
 
-      // Enable microphone only (no camera for voice call)
       await _room!.localParticipant?.setMicrophoneEnabled(true);
-
-      // Setup listeners
       _room!.addListener(_onRoomUpdate);
+      _provider.notifyParticipantJoined();
 
-      // Notify joined
-      provider.notifyParticipantJoined();
-
-      setState(() {
-        _isConnecting = false;
-      });
-
-      debugPrint('✅ Joined voice room successfully');
+      if (mounted) setState(() { _isConnecting = false; });
+      debugPrint('✅ Joined voice room: ${_provider.currentRoomName}');
     } catch (e) {
-      debugPrint('❌ Error joining room: $e');
+      debugPrint('❌ Error joining voice room: $e');
       _showError('Failed to join call: $e');
     }
   }
 
   void _onRoomUpdate() {
-    if (mounted) {
-      setState(() {});
-    }
+    if (mounted && !_isEnding) setState(() {});
   }
 
   Future<void> _toggleMicrophone() async {
     if (_room != null) {
       _isMicEnabled = !_isMicEnabled;
       await _room!.localParticipant?.setMicrophoneEnabled(_isMicEnabled);
-      setState(() {});
+      if (mounted) setState(() {});
     }
   }
 
   void _toggleSpeaker() {
-    setState(() {
-      _isSpeakerOn = !_isSpeakerOn;
-    });
-    // Implement actual speaker toggle based on your audio setup
+    if (mounted) setState(() { _isSpeakerOn = !_isSpeakerOn; });
   }
 
   Future<void> _endCall() async {
-    final provider = context.read<VoiceCallProvider>();
-
-    provider.notifyParticipantLeft();
-    provider.endVoiceCall();
-
+    if (_isEnding) return;
+    _isEnding = true;
+    _provider.removeListener(_handleCallStateChange);
+    _provider.notifyParticipantLeft();
+    await _provider.endVoiceCall();
     await _room?.disconnect();
     _callTimer?.cancel();
-
-    if (mounted) {
-      Navigator.pop(context);
-    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _showError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
-      Navigator.pop(context);
+      Navigator.of(context).pop();
     }
   }
 
   @override
   void dispose() {
+    _provider.removeListener(_handleCallStateChange);
     _callTimer?.cancel();
     _room?.removeListener(_onRoomUpdate);
     _room?.disconnect();
@@ -143,446 +197,248 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isConnecting) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF1A1A2E),
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0F),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
+            children: [
               CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
               ),
               SizedBox(height: 20),
-              Text(
-                'Connecting to call...',
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
+              Text('Connecting...', style: TextStyle(color: Colors.white54, fontSize: 16)),
             ],
           ),
         ),
       );
     }
 
+    final callerName = _provider.currentReceiverName ??
+        _provider.currentCallerName ?? 'Voice Call';
+
     return WillPopScope(
-      onWillPop: () async {
-        _showEndCallDialog();
-        return false;
-      },
+      onWillPop: () async { _showEndCallDialog(); return false; },
       child: Scaffold(
-        backgroundColor: const Color(0xFF1A1A2E),
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Top bar
-              _buildTopBar(),
-
-              // Participants view
-              Expanded(
-                child: _buildParticipantsView(),
+        backgroundColor: const Color(0xFF0D0D14),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -0.3),
+                  radius: 1.2,
+                  colors: [Color(0xFF1A1A2E), Color(0xFF0D0D14)],
+                ),
               ),
-
-              // Controls
-              _buildControls(),
-            ],
-          ),
+            ),
+            SafeArea(
+              child: Column(
+                children: [
+                  _buildTopBar(),
+                  Expanded(child: _buildCenterContent(callerName)),
+                  _buildControls(),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildTopBar() {
-    return Consumer<VoiceCallProvider>(
-      builder: (context, provider, child) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withOpacity(0.3),
-                Colors.transparent,
-              ],
-            ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          _circleIconButton(
+            icon: Icons.keyboard_arrow_down,
+            onTap: () => Navigator.of(context).pop(),
           ),
-          child: Row(
+          const Spacer(),
+          Row(
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    provider.currentReceiverName ??
-                        provider.currentCallerName ??
-                        'Voice Call',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _formatDuration(_callDuration),
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
-                      fontSize: 14,
-                    ),
+              Icon(Icons.lock_outline, size: 13, color: Colors.white.withOpacity(0.5)),
+              const SizedBox(width: 4),
+              Text('End-to-end encrypted',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+            ],
+          ),
+          const Spacer(),
+          _circleIconButton(icon: Icons.person_add_alt_1_outlined, onTap: () {}),
+        ],
+      ),
+    );
+  }
+
+  Widget _circleIconButton({required IconData icon, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44, height: 44,
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.08),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white70, size: 22),
+      ),
+    );
+  }
+
+  Widget _buildCenterContent(String callerName) {
+    return Consumer<VoiceCallProvider>(
+      builder: (_, provider, __) {
+        final isWaiting = provider.participants.isEmpty;
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 160, height: 160,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF4A90D9), Color(0xFF845EC2)],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF4A90D9).withOpacity(0.35),
+                    blurRadius: 40, spreadRadius: 8,
                   ),
                 ],
               ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: const [
-                    Icon(Icons.circle, color: Colors.white, size: 8),
-                    SizedBox(width: 6),
-                    Text(
-                      'Connected',
-                      style: TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildParticipantsView() {
-    return Consumer<VoiceCallProvider>(
-      builder: (context, provider, child) {
-        return SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 20),
-            child: Column(
-              children: [
-                // Local user (current user)
-                _buildParticipantCard(
-                  name: provider.currentUserName ?? 'You',
-                  isMuted: !_isMicEnabled,
-                  isLocal: true,
-                ),
-                const SizedBox(height: 20),
-
-                // Remote participants
-                if (provider.participants.isEmpty)
-                  _buildWaitingView()
-                else
-                  ...provider.participants.map(
-                        (p) => Padding(
-                      padding: const EdgeInsets.only(bottom: 20),
-                      child: _buildParticipantCard(
-                        name: p['participantName'] ?? 'User',
-                        isMuted: false,
-                        isLocal: false,
-                      ),
-                    ),
-                  ),
-              ],
+              child: const Icon(Icons.person, size: 80, color: Colors.white),
             ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildParticipantCard({
-    required String name,
-    required bool isMuted,
-    required bool isLocal,
-  }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.1),
-        ),
-      ),
-      child: Row(
-        children: [
-          // Avatar
-          Stack(
-            children: [
-              Container(
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [
-                      Colors.blue[400]!,
-                      Colors.purple[400]!,
-                    ],
-                  ),
-                ),
-                child: const Icon(
-                  Icons.person,
-                  size: 30,
-                  color: Colors.white,
-                ),
-              ),
-              if (isMuted)
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.mic_off,
-                      size: 14,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(width: 16),
-
-          // Name and status
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
+            const SizedBox(height: 28),
+            Text(callerName,
+                style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.3)),
+            const SizedBox(height: 12),
+            if (isWaiting)
+              Text('Ringing...',
+                  style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 16))
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8, height: 8,
+                    decoration: const BoxDecoration(
+                        color: Colors.greenAccent, shape: BoxShape.circle),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(
-                      isMuted ? Icons.mic_off : Icons.mic,
-                      size: 14,
-                      color: isMuted ? Colors.red : Colors.green,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      isMuted ? 'Muted' : 'Speaking',
+                  const SizedBox(width: 8),
+                  Text(_formatDuration(_callDuration),
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // Local indicator
-          if (isLocal)
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 4,
+                          color: Colors.white.withOpacity(0.8), fontSize: 16)),
+                ],
               ),
-              decoration: BoxDecoration(
-                color: Colors.blue.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Text(
-                'You',
-                style: TextStyle(
-                  color: Colors.blue,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWaitingView() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 40),
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.person_add,
-            size: 50,
-            color: Colors.white.withOpacity(0.3),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Waiting for others to join...',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 16,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+          ],
+        );
+      },
     );
   }
 
   Widget _buildControls() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 30),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: [
-            Colors.black.withOpacity(0.5),
-            Colors.transparent,
-          ],
-        ),
+        color: Colors.white.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Mute/Unmute button
-          _buildControlButton(
-            icon: _isMicEnabled ? Icons.mic : Icons.mic_off,
-            label: _isMicEnabled ? 'Mute' : 'Unmute',
+          _smallControlButton(
+            icon: Icons.more_horiz,
+            color: Colors.white.withOpacity(0.12),
+            onPressed: () {},
+          ),
+          _smallControlButton(
+            icon: _isSpeakerOn ? Icons.volume_up_rounded : Icons.volume_down_rounded,
+            color: _isSpeakerOn
+                ? Colors.white.withOpacity(0.12)
+                : Colors.white.withOpacity(0.06),
+            onPressed: _toggleSpeaker,
+          ),
+          GestureDetector(
+            onTap: _showEndCallDialog,
+            child: Container(
+              width: 68, height: 68,
+              decoration: BoxDecoration(
+                color: Colors.redAccent,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.redAccent.withOpacity(0.45),
+                    blurRadius: 24, spreadRadius: 2,
+                  )
+                ],
+              ),
+              child: const Icon(Icons.call_end_rounded, size: 30, color: Colors.white),
+            ),
+          ),
+          _smallControlButton(
+            icon: _isMicEnabled ? Icons.mic_none_rounded : Icons.mic_off_rounded,
             color: _isMicEnabled
-                ? Colors.white.withOpacity(0.2)
-                : Colors.red,
+                ? Colors.white.withOpacity(0.12)
+                : Colors.redAccent.withOpacity(0.8),
             onPressed: _toggleMicrophone,
           ),
-
-          // End Call button
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.red.withOpacity(0.4),
-                      blurRadius: 20,
-                      spreadRadius: 3,
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  onPressed: _showEndCallDialog,
-                  icon: const Icon(
-                    Icons.call_end,
-                    size: 32,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'End',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                ),
-              ),
-            ],
-          ),
-
-          // Speaker button
-          _buildControlButton(
-            icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
-            label: 'Speaker',
-            color: _isSpeakerOn
-                ? Colors.blue
-                : Colors.white.withOpacity(0.2),
-            onPressed: _toggleSpeaker,
+          _smallControlButton(
+            icon: Icons.dialpad_rounded,
+            color: Colors.white.withOpacity(0.12),
+            onPressed: () {},
           ),
         ],
       ),
     );
   }
 
-  Widget _buildControlButton({
+  Widget _smallControlButton({
     required IconData icon,
-    required String label,
     required Color color,
     required VoidCallback onPressed,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            onPressed: onPressed,
-            icon: Icon(icon, color: Colors.white, size: 28),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-          ),
-        ),
-      ],
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: 52, height: 52,
+        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 24),
+      ),
     );
   }
 
   void _showEndCallDialog() {
     showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('End Call?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        content: const Text('Are you sure you want to end this call?',
+            style: TextStyle(color: Colors.white60)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
           ),
-          title: const Text('End Call?'),
-          content: const Text(
-            'Are you sure you want to end this voice call?',
+          TextButton(
+            onPressed: () { Navigator.pop(ctx); _endCall(); },
+            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('End Call', style: TextStyle(fontWeight: FontWeight.w700)),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _endCall();
-              },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-              child: const Text('End Call'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }

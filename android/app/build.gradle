@@ -32,9 +32,11 @@ android {
         targetSdk = 35
         versionCode = flutterVersionCode.toInteger()
         versionName = flutterVersionName
+        multiDexEnabled true  // ✅ ADDED — required for desugaring
     }
 
     compileOptions {
+        coreLibraryDesugaringEnabled true  // ✅ ADDED — fixes flutter_local_notifications error
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -73,7 +75,6 @@ android {
             signingConfig signingConfigs.release
         }
     }
-
 }
 
 flutter {
@@ -81,7 +82,11 @@ flutter {
 }
 
 dependencies {
+    // ✅ CORRECT
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    implementation 'androidx.multidex:multidex:2.0.1'
     implementation 'com.google.android.gms:play-services-auth:20.7.0'
     implementation 'com.google.android.gms:play-services-base:18.3.0'
 }
+
 apply plugin: 'com.google.gms.google-services'

@@ -1,5 +1,4 @@
 import 'package:flutter/cupertino.dart';
-
 import '../services/video_call_service.dart';
 
 enum CallState {
@@ -13,29 +12,25 @@ enum CallState {
 class VideoCallProvider extends ChangeNotifier {
   final VideoCallService _service = VideoCallService();
 
-  // Current user info
   String? _currentUserId;
   String? _currentUserName;
   String? _authToken;
 
-  // Call state
   CallState _callState = CallState.idle;
   bool _isConnected = false;
   String? _errorMessage;
   String? _successMessage;
 
-  // Current call data
   String? _currentRoomName;
   String? _currentCallerId;
   String? _currentCallerName;
   String? _currentReceiverId;
   String? _currentReceiverName;
 
-  // LiveKit token
   String? _livekitToken;
-
-  // Participants
   List<Map<String, dynamic>> _participants = [];
+
+  bool _acceptedViaCallKit = false;
 
   // Getters
   VideoCallService get service => _service;
@@ -52,6 +47,7 @@ class VideoCallProvider extends ChangeNotifier {
   String? get currentReceiverName => _currentReceiverName;
   String? get livekitToken => _livekitToken;
   List<Map<String, dynamic>> get participants => _participants;
+  bool get acceptedViaCallKit => _acceptedViaCallKit;
 
   // ============================================================================
   // INITIALIZATION
@@ -72,9 +68,8 @@ class VideoCallProvider extends ChangeNotifier {
   }
 
   void _setupListeners() {
-    // Connection listeners
     _service.onConnect(() {
-      debugPrint('✅ Socket connected');
+      debugPrint('✅ Video socket connected');
       _isConnected = true;
       if (_currentUserId != null) {
         _service.registerUser(_currentUserId!);
@@ -83,14 +78,13 @@ class VideoCallProvider extends ChangeNotifier {
     });
 
     _service.onDisconnect(() {
-      debugPrint('❌ Socket disconnected');
+      debugPrint('❌ Video socket disconnected');
       _isConnected = false;
       _safeNotifyListeners();
     });
 
-    // Incoming call
     _service.onIncomingVideoCall((data) {
-      debugPrint('📞 Incoming call: $data');
+      debugPrint('📞 Incoming video call: $data');
       _currentRoomName = data['roomName'];
       _currentCallerId = data['callerId'];
       _currentCallerName = data['callerName'];
@@ -98,7 +92,6 @@ class VideoCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Call accepted
     _service.onCallAccepted((data) {
       debugPrint('✅ Call accepted: $data');
       _successMessage = data['message'];
@@ -106,33 +99,56 @@ class VideoCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Call rejected
+    // ✅ FIX: Only clear data ONCE here, not again in the idle reset.
+    // Clearing again on idle would wipe a NEW incoming call's data → "Unknown" bug.
     _service.onCallRejected((data) {
       debugPrint('❌ Call rejected: $data');
       _errorMessage = data['message'];
       _callState = CallState.ended;
-      _clearCallData();
+      _clearCallData(); // ✅ Clear immediately on ended
       _safeNotifyListeners();
+
+      // ✅ Delay increased to 3s (was 2s) to give UI time to fully dismiss.
+      // Only reset state, do NOT call _clearCallData() again here.
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == CallState.ended) {
+          _callState = CallState.idle;
+          _safeNotifyListeners();
+        }
+      });
     });
 
-    // Call ended
+    // ✅ FIX: Same pattern — clear once, reset state after delay only
     _service.onVideoCallEnded((data) {
       debugPrint('📴 Call ended: $data');
       _callState = CallState.ended;
-      _clearCallData();
+      _clearCallData(); // ✅ Clear immediately
       _safeNotifyListeners();
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == CallState.ended) {
+          _callState = CallState.idle;
+          _safeNotifyListeners();
+        }
+      });
     });
 
-    // User offline
+    // ✅ FIX: Same pattern for user offline
     _service.onUserOffline((message) {
       debugPrint('🔴 User offline: $message');
       _errorMessage = message.toString();
       _callState = CallState.ended;
-      _clearCallData();
+      _clearCallData(); // ✅ Clear immediately
       _safeNotifyListeners();
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (_callState == CallState.ended) {
+          _callState = CallState.idle;
+          _safeNotifyListeners();
+        }
+      });
     });
 
-    // Participant joined
     _service.onParticipantJoinedCall((data) {
       debugPrint('👤 Participant joined: $data');
       if (!_participants.any((p) => p['userId'] == data['userId'])) {
@@ -141,7 +157,6 @@ class VideoCallProvider extends ChangeNotifier {
       }
     });
 
-    // Participant left
     _service.onParticipantLeftCall((data) {
       debugPrint('👋 Participant left: $data');
       _participants.removeWhere((p) => p['userId'] == data['userId']);
@@ -153,16 +168,12 @@ class VideoCallProvider extends ChangeNotifier {
   // CALL OPERATIONS
   // ============================================================================
 
-  /// Check if a user is currently busy (in another call)
   Future<bool> checkUserBusy(String receiverId) async {
     final result = await _service.checkUserBusy(receiverId);
-    if (result != null) {
-      return result['busy'] ?? false;
-    }
+    if (result != null) return result['busy'] ?? false;
     return false;
   }
 
-  /// Initiate a video call to another user
   Future<void> initiateCall({
     required String receiverId,
     required String receiverName,
@@ -173,7 +184,11 @@ class VideoCallProvider extends ChangeNotifier {
       return;
     }
 
-    // Check if user is busy
+    if (_callState == CallState.ended) {
+      _callState = CallState.idle;
+      _clearCallData();
+    }
+
     final isBusy = await checkUserBusy(receiverId);
     if (isBusy) {
       _errorMessage = '$receiverName is currently in another call';
@@ -185,6 +200,7 @@ class VideoCallProvider extends ChangeNotifier {
     _currentReceiverId = receiverId;
     _currentReceiverName = receiverName;
     _callState = CallState.calling;
+    _errorMessage = null;
     notifyListeners();
 
     _service.initiateVideoCall(
@@ -195,7 +211,6 @@ class VideoCallProvider extends ChangeNotifier {
     );
   }
 
-  /// Accept an incoming video call
   Future<void> acceptCall() async {
     if (_currentCallerId == null) {
       _errorMessage = 'No caller ID found';
@@ -204,18 +219,12 @@ class VideoCallProvider extends ChangeNotifier {
     }
 
     debugPrint('✅ Accepting call from: $_currentCallerId');
-
-    // Emit call-accepted event
     _service.acceptCall(_currentCallerId!);
-
-    // Update call state
     _callState = CallState.connected;
     _successMessage = 'Call accepted';
-
     notifyListeners();
   }
 
-  /// Reject an incoming video call
   Future<void> rejectCall() async {
     if (_currentCallerId == null || _currentUserName == null) {
       _errorMessage = 'Missing call data';
@@ -224,45 +233,48 @@ class VideoCallProvider extends ChangeNotifier {
     }
 
     debugPrint('❌ Rejecting call from: $_currentCallerId');
-
-    // Emit call-rejected event
     _service.rejectCall(
       callerId: _currentCallerId!,
       receiverName: _currentUserName!,
     );
 
-    // Update state and clear data
     _callState = CallState.ended;
     _successMessage = 'Call rejected';
     _clearCallData();
-
     notifyListeners();
+
+    // ✅ Delay 3s and only reset state — do NOT clear data again
+    Future.delayed(const Duration(seconds: 3), () {
+      if (_callState == CallState.ended) {
+        _callState = CallState.idle;
+        _safeNotifyListeners();
+      }
+    });
   }
 
-  /// End an active call or cancel an outgoing call
   Future<void> endCall() async {
     if (_currentUserId == null || _currentUserName == null) {
-      _errorMessage = 'User not initialized';
-      notifyListeners();
+      debugPrint('❌ Cannot end: User not initialized — resetting anyway');
+      _callState = CallState.idle;
+      _clearCallData();
+      _safeNotifyListeners();
       return;
     }
 
-    // Determine receiver info based on call direction
     String receiverId = _currentReceiverId ?? _currentCallerId ?? '';
     String receiverName = _currentReceiverName ?? _currentCallerName ?? '';
 
     if (receiverId.isEmpty) {
-      _errorMessage = 'No active call to end';
-      notifyListeners();
+      debugPrint('❌ Cannot end: No active call — resetting state');
+      _callState = CallState.idle;
+      _clearCallData();
+      _safeNotifyListeners();
       return;
     }
 
     debugPrint('📴 Ending call with: $receiverId');
-
-    // Notify that participant is leaving
     notifyParticipantLeft();
 
-    // Emit video-call-canceled event
     _service.cancelVideoCall(
       receiverId: receiverId,
       receiverName: receiverName,
@@ -270,28 +282,21 @@ class VideoCallProvider extends ChangeNotifier {
       callerId: _currentUserId!,
     );
 
-    // Update state and clear data
-    _callState = CallState.ended;
+    _callState = CallState.idle;
     _successMessage = 'Call ended';
     _clearCallData();
-
     notifyListeners();
   }
 
-  /// Invite additional participant to ongoing call (group call)
   Future<void> inviteParticipant({
     required String receiverId,
     required String receiverName,
   }) async {
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
       _errorMessage = 'Missing required data';
       notifyListeners();
       return;
     }
-
-    debugPrint('📧 Inviting $receiverName to call');
 
     _service.inviteToCall(
       roomName: _currentRoomName!,
@@ -305,15 +310,11 @@ class VideoCallProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Notify other participants that current user joined the call
   void notifyParticipantJoined() {
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
       debugPrint('⚠️ Cannot notify join: Missing data');
       return;
     }
-
     _service.participantJoinedCall(
       userId: _currentUserId!,
       userName: _currentUserName!,
@@ -321,15 +322,11 @@ class VideoCallProvider extends ChangeNotifier {
     );
   }
 
-  /// Notify other participants that current user left the call
   void notifyParticipantLeft() {
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
       debugPrint('⚠️ Cannot notify leave: Missing data');
       return;
     }
-
     _service.participantLeftCall(
       userId: _currentUserId!,
       userName: _currentUserName!,
@@ -341,18 +338,14 @@ class VideoCallProvider extends ChangeNotifier {
   // LIVEKIT TOKEN
   // ============================================================================
 
-  /// Fetch LiveKit token for joining the video call room
   Future<bool> fetchLivekitToken() async {
-    if (_currentUserId == null ||
-        _currentUserName == null ||
-        _currentRoomName == null) {
-      _errorMessage = 'Missing required data for token generation';
+    if (_currentUserId == null || _currentUserName == null || _currentRoomName == null) {
+      _errorMessage = 'Missing required data for token';
       notifyListeners();
       return false;
     }
 
     debugPrint('🎫 Fetching LiveKit token...');
-
     final result = await _service.generateLivekitToken(
       roomName: _currentRoomName!,
       participantName: _currentUserName!,
@@ -375,24 +368,19 @@ class VideoCallProvider extends ChangeNotifier {
   }
 
   // ============================================================================
-  // UTILITY METHODS
+  // UTILITY
   // ============================================================================
 
-  /// Safely notify listeners only if there are listeners
   void _safeNotifyListeners() {
-    if (hasListeners) {
-      notifyListeners();
-    }
+    if (hasListeners) notifyListeners();
   }
 
-  /// Clear error and success messages
   void clearMessages() {
     _errorMessage = null;
     _successMessage = null;
     _safeNotifyListeners();
   }
 
-  /// Clear all call-related data
   void _clearCallData() {
     _currentRoomName = null;
     _currentCallerId = null;
@@ -400,15 +388,48 @@ class VideoCallProvider extends ChangeNotifier {
     _currentReceiverId = null;
     _currentReceiverName = null;
     _livekitToken = null;
+    _acceptedViaCallKit = false;
     _participants.clear();
   }
 
-  /// Reset call state to idle
   void resetCallState() {
     _callState = CallState.idle;
     _clearCallData();
     clearMessages();
     notifyListeners();
+  }
+
+  void setIncomingCallFromFCM({
+    required String roomName,
+    required String callerId,
+    required String callerName,
+    bool acceptedViaCallKit = false,
+  }) {
+    _currentRoomName = roomName;
+    _currentCallerId = callerId;
+    _currentCallerName = callerName;
+    _acceptedViaCallKit = acceptedViaCallKit;
+
+    if (!acceptedViaCallKit) {
+      _callState = CallState.ringing;
+    }
+
+    debugPrint('📲 FCM call set — room: $roomName | caller: $callerName | acceptedViaCallKit=$acceptedViaCallKit');
+    notifyListeners();
+  }
+  void cancelIncomingCall() {
+    if (_callState != CallState.ringing && _callState != CallState.calling) return;
+    debugPrint('📵 VideoCallProvider.cancelIncomingCall()');
+    _callState = CallState.ended;
+    _clearCallData();
+    _safeNotifyListeners();
+
+    Future.delayed(const Duration(seconds: 3), () {
+      if (_callState == CallState.ended) {
+        _callState = CallState.idle;
+        _safeNotifyListeners();
+      }
+    });
   }
 
   // ============================================================================
@@ -418,8 +439,6 @@ class VideoCallProvider extends ChangeNotifier {
   @override
   void dispose() {
     debugPrint('🧹 Cleaning up VideoCallProvider');
-
-    // Remove all listeners
     _service.offIncomingVideoCall();
     _service.offCallAccepted();
     _service.offCallRejected();
@@ -427,11 +446,8 @@ class VideoCallProvider extends ChangeNotifier {
     _service.offUserOffline();
     _service.offParticipantJoinedCall();
     _service.offParticipantLeftCall();
-
-    // Disconnect and dispose socket
     _service.disconnect();
     _service.dispose();
-
     super.dispose();
   }
 }
