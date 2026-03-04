@@ -21,6 +21,7 @@ class VideoCallProvider extends ChangeNotifier {
   String? _errorMessage;
   String? _successMessage;
 
+
   String? _currentRoomName;
   String? _currentCallerId;
   String? _currentCallerName;
@@ -46,6 +47,7 @@ class VideoCallProvider extends ChangeNotifier {
   String? get currentReceiverId => _currentReceiverId;
   String? get currentReceiverName => _currentReceiverName;
   String? get livekitToken => _livekitToken;
+
   List<Map<String, dynamic>> get participants => _participants;
   bool get acceptedViaCallKit => _acceptedViaCallKit;
 
@@ -99,17 +101,12 @@ class VideoCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // ✅ FIX: Only clear data ONCE here, not again in the idle reset.
-    // Clearing again on idle would wipe a NEW incoming call's data → "Unknown" bug.
     _service.onCallRejected((data) {
       debugPrint('❌ Call rejected: $data');
       _errorMessage = data['message'];
       _callState = CallState.ended;
-      _clearCallData(); // ✅ Clear immediately on ended
+      _clearCallData();
       _safeNotifyListeners();
-
-      // ✅ Delay increased to 3s (was 2s) to give UI time to fully dismiss.
-      // Only reset state, do NOT call _clearCallData() again here.
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == CallState.ended) {
           _callState = CallState.idle;
@@ -118,13 +115,11 @@ class VideoCallProvider extends ChangeNotifier {
       });
     });
 
-    // ✅ FIX: Same pattern — clear once, reset state after delay only
     _service.onVideoCallEnded((data) {
       debugPrint('📴 Call ended: $data');
       _callState = CallState.ended;
-      _clearCallData(); // ✅ Clear immediately
+      _clearCallData();
       _safeNotifyListeners();
-
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == CallState.ended) {
           _callState = CallState.idle;
@@ -133,14 +128,12 @@ class VideoCallProvider extends ChangeNotifier {
       });
     });
 
-    // ✅ FIX: Same pattern for user offline
     _service.onUserOffline((message) {
       debugPrint('🔴 User offline: $message');
       _errorMessage = message.toString();
       _callState = CallState.ended;
-      _clearCallData(); // ✅ Clear immediately
+      _clearCallData();
       _safeNotifyListeners();
-
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == CallState.ended) {
           _callState = CallState.idle;
@@ -162,6 +155,30 @@ class VideoCallProvider extends ChangeNotifier {
       _participants.removeWhere((p) => p['userId'] == data['userId']);
       _safeNotifyListeners();
     });
+  }
+
+  // ============================================================================
+  // ACCEPT CALL
+  // ✅ KEY FIX: waits for socket connected + user registered before emitting
+  // When app is killed and user presses Answer on CallKit notification,
+  // the socket may still be connecting. We wait up to 5s for it.
+  // ============================================================================
+  Future<void> acceptCall() async {
+    if (_currentCallerId == null || _currentUserId == null) {
+      debugPrint('❌ acceptCall: missing callerId or userId');
+      return;
+    }
+
+    debugPrint('✅ acceptCall: callerId=$_currentCallerId | userId=$_currentUserId');
+
+    await _service.acceptCall(
+      userId: _currentUserId!,        // ← pass userId
+      callerId: _currentCallerId!,
+    );
+
+    _callState = CallState.connected;
+    _successMessage = 'Call accepted';
+    _safeNotifyListeners();
   }
 
   // ============================================================================
@@ -211,20 +228,6 @@ class VideoCallProvider extends ChangeNotifier {
     );
   }
 
-  Future<void> acceptCall() async {
-    if (_currentCallerId == null) {
-      _errorMessage = 'No caller ID found';
-      notifyListeners();
-      return;
-    }
-
-    debugPrint('✅ Accepting call from: $_currentCallerId');
-    _service.acceptCall(_currentCallerId!);
-    _callState = CallState.connected;
-    _successMessage = 'Call accepted';
-    notifyListeners();
-  }
-
   Future<void> rejectCall() async {
     if (_currentCallerId == null || _currentUserName == null) {
       _errorMessage = 'Missing call data';
@@ -243,7 +246,6 @@ class VideoCallProvider extends ChangeNotifier {
     _clearCallData();
     notifyListeners();
 
-    // ✅ Delay 3s and only reset state — do NOT clear data again
     Future.delayed(const Duration(seconds: 3), () {
       if (_callState == CallState.ended) {
         _callState = CallState.idle;
@@ -417,6 +419,7 @@ class VideoCallProvider extends ChangeNotifier {
     debugPrint('📲 FCM call set — room: $roomName | caller: $callerName | acceptedViaCallKit=$acceptedViaCallKit');
     notifyListeners();
   }
+
   void cancelIncomingCall() {
     if (_callState != CallState.ringing && _callState != CallState.calling) return;
     debugPrint('📵 VideoCallProvider.cancelIncomingCall()');

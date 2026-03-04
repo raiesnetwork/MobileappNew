@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
@@ -19,16 +20,23 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   Room? _room;
   bool _isMicEnabled = true;
-  bool _isSpeakerOn  = true;
+  bool _isSpeakerOn = true;
   bool _isConnecting = true;
-  bool _isEnding     = false;
+  bool _isEnding = false;
+
+  // ── Key fix: track whether we have successfully joined LiveKit ──────
+  // Only allow state-change listener to close the screen AFTER we joined.
+  // This prevents idle/ended state from a previous call closing us immediately.
+  bool _hasJoined = false;
+
   Timer? _callTimer;
-  int _callDuration  = 0;
+  int _callDuration = 0;
 
   @override
   void initState() {
     super.initState();
     _provider = context.read<VoiceCallProvider>();
+    debugPrint('🏁 VoiceRoomScreen: initState | callState=${_provider.callState} | acceptedViaCallKit=${_provider.acceptedViaCallKit}');
     _provider.addListener(_handleCallStateChange);
     _joinRoom();
     _startCallTimer();
@@ -36,15 +44,33 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
+
+    debugPrint('🔔 VoiceRoomScreen: callState=${_provider.callState} | hasJoined=$_hasJoined | isEnding=$_isEnding');
+
+    // ── CRITICAL FIX ──────────────────────────────────────────────────
+    // Only close if we have successfully joined LiveKit room.
+    // Without this guard, an idle/ended state from a previous call
+    // (before socket reconnects) would close this screen immediately.
+    if (!_hasJoined) {
+      debugPrint('⚠️ VoiceRoomScreen: ignoring state change — not joined yet');
+      return;
+    }
+
     if (_provider.callState == VoiceCallState.ended ||
         _provider.callState == VoiceCallState.idle) {
       debugPrint('📴 VoiceRoomScreen: remote ended → closing');
-      _isEnding = true;
-      _provider.removeListener(_handleCallStateChange);
-      _room?.disconnect();
-      _callTimer?.cancel();
-      if (mounted) Navigator.of(context).pop();
+      _closeScreen();
     }
+  }
+
+  void _closeScreen() {
+    if (_isEnding) return;
+    _isEnding = true;
+    _provider.removeListener(_handleCallStateChange);
+    _room?.disconnect();
+    _callTimer?.cancel();
+    FlutterCallkitIncoming.endAllCalls(); // ✅ ADD
+    if (mounted) Navigator.of(context).pop();
   }
 
   void _startCallTimer() {
@@ -59,18 +85,12 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // FETCH TWILIO ICE/TURN SERVERS
-  // Calls your backend API that returns the Twilio TURN credentials.
-  // Replace the URL below with your actual API endpoint.
-  // ════════════════════════════════════════════════════════════════════
   Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      final prefs    = await SharedPreferences.getInstance();
-      final token    = prefs.getString('auth_token') ?? '';
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
 
       final response = await http.get(
-        // ✅ Replace with your actual Twilio ICE endpoint
         Uri.parse('https://api.ixes.ai/api/chat/get-turn-credentials'),
         headers: {
           'Authorization': 'Bearer $token',
@@ -79,52 +99,49 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
-        final body       = json.decode(response.body);
-        final data       = body['data'] as Map<String, dynamic>;
-        final iceList    = data['iceServers'] as List<dynamic>;
-
+        final body = json.decode(response.body);
+        final data = body['data'] as Map<String, dynamic>;
+        final iceList = data['iceServers'] as List<dynamic>;
         debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
-
         return iceList.map((server) {
-          final s          = server as Map<String, dynamic>;
-          final urls       = s['urls']?.toString() ?? s['url']?.toString() ?? '';
-          final username   = s['username']?.toString();
+          final s = server as Map<String, dynamic>;
+          final urls = s['urls']?.toString() ?? s['url']?.toString() ?? '';
+          final username = s['username']?.toString();
           final credential = s['credential']?.toString();
-
-          return RTCIceServer(
-            urls: [urls],
-            username: username,
-            credential: credential,
-          );
+          return RTCIceServer(urls: [urls], username: username, credential: credential);
         }).toList();
       }
     } catch (e) {
       debugPrint('⚠️ Could not fetch ICE servers: $e — using defaults');
     }
-
-    // Fallback: Google STUN only (no TURN — may fail on strict networks)
     return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // JOIN LIVEKIT ROOM WITH TWILIO TURN SERVERS
-  // ════════════════════════════════════════════════════════════════════
   Future<void> _joinRoom() async {
     try {
-      // Step 1: Fetch LiveKit token
+      final bool wasAutoAccepted = _provider.acceptedViaCallKit;
+      debugPrint('🔑 VoiceRoomScreen: autoAccepted=$wasAutoAccepted | roomName=${_provider.currentRoomName}');
+
+      // Step 1: Fetch voice token
+      debugPrint('🎫 VoiceRoomScreen: fetching voice token...');
       final success = await _provider.fetchVoiceToken();
-      if (!success) { _showError('Failed to get call token'); return; }
+      if (!success) {
+        debugPrint('❌ VoiceRoomScreen: token fetch failed');
+        _showError('Failed to get call token');
+        return;
+      }
+      debugPrint('✅ VoiceRoomScreen: token fetched');
 
-      // Step 2: Fetch Twilio TURN/ICE servers
+      // Step 2: Fetch ICE servers
       final iceServers = await _fetchIceServers();
-      debugPrint('🌐 Using ${iceServers.length} ICE servers for voice room');
+      debugPrint('🌐 VoiceRoomScreen: using ${iceServers.length} ICE servers');
 
-      // Step 3: Connect to LiveKit with TURN servers injected
-      // ✅ livekit_client ^2.2.0: rtcConfig is a param of Room() constructor
+      // Step 3: Connect to LiveKit
+      debugPrint('🔌 VoiceRoomScreen: connecting to LiveKit...');
       _room = Room();
       await _room!.connect(
         'wss://meet.ixes.ai',
-        _provider.voiceToken!, // or livekitToken!
+        _provider.voiceToken!,
         roomOptions: const RoomOptions(
           adaptiveStream: true,
           dynacast: true,
@@ -141,10 +158,15 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       _room!.addListener(_onRoomUpdate);
       _provider.notifyParticipantJoined();
 
+      // ── Mark as joined AFTER successful LiveKit connection ──────────
+      // Only now will _handleCallStateChange be allowed to close the screen
+      _hasJoined = true;
+      debugPrint('✅ VoiceRoomScreen: joined LiveKit room | _hasJoined=true');
+
       if (mounted) setState(() { _isConnecting = false; });
       debugPrint('✅ Joined voice room: ${_provider.currentRoomName}');
     } catch (e) {
-      debugPrint('❌ Error joining voice room: $e');
+      debugPrint('❌ VoiceRoomScreen: error joining room: $e');
       _showError('Failed to join call: $e');
     }
   }
@@ -167,16 +189,22 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   Future<void> _endCall() async {
     if (_isEnding) return;
+    debugPrint('📴 VoiceRoomScreen: user ended call');
     _isEnding = true;
     _provider.removeListener(_handleCallStateChange);
     _provider.notifyParticipantLeft();
     await _provider.endVoiceCall();
     await _room?.disconnect();
     _callTimer?.cancel();
+
+    // ✅ ADD THIS — dismisses the ongoing call notification
+    await FlutterCallkitIncoming.endAllCalls();
+
     if (mounted) Navigator.of(context).pop();
   }
 
   void _showError(String message) {
+    debugPrint('❌ VoiceRoomScreen: error: $message');
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -187,6 +215,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   @override
   void dispose() {
+    debugPrint('🧹 VoiceRoomScreen: dispose | _hasJoined=$_hasJoined');
     _provider.removeListener(_handleCallStateChange);
     _callTimer?.cancel();
     _room?.removeListener(_onRoomUpdate);
@@ -321,7 +350,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                     letterSpacing: 0.3)),
             const SizedBox(height: 12),
             if (isWaiting)
-              Text('Ringing...',
+              Text('Connecting...',
                   style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 16))
             else
               Row(

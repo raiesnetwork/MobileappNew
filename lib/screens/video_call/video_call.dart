@@ -7,6 +7,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
 class VideoCallScreen extends StatefulWidget {
   @override
@@ -17,54 +18,74 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
   late final VideoCallProvider _provider;
 
   Room? _room;
-  bool _isMicEnabled    = true;
+  bool _isMicEnabled = true;
   bool _isCameraEnabled = true;
-  bool _isConnecting    = true;
-  bool _isEnding        = false;
+  bool _isConnecting = true;
+  bool _isEnding = false;
   CameraPosition _cameraPosition = CameraPosition.front;
+
+  // ── Key fix: only allow state listener to close AFTER LiveKit join ──
+  // Prevents stale ended/idle state from a previous call closing the screen.
+  bool _hasJoined = false;
 
   @override
   void initState() {
     super.initState();
     _provider = context.read<VideoCallProvider>();
+    debugPrint('🏁 VideoCallScreen: initState | callState=${_provider.callState} | acceptedViaCallKit=${_provider.acceptedViaCallKit}');
     _provider.addListener(_handleCallStateChange);
     _requestPermissions();
   }
 
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
+
+    debugPrint('🔔 VideoCallScreen: callState=${_provider.callState} | hasJoined=$_hasJoined | isEnding=$_isEnding');
+
+    // ── CRITICAL FIX ──────────────────────────────────────────────────
+    // Only close the screen AFTER we have successfully joined LiveKit.
+    // Without this guard, a stale CallState.ended from a previous call
+    // or an idle state before socket reconnects would close us immediately.
+    if (!_hasJoined) {
+      debugPrint('⚠️ VideoCallScreen: ignoring state change — not joined yet');
+      return;
+    }
+
     if (_provider.callState == CallState.ended) {
       debugPrint('📴 VideoCallScreen: call ended remotely → closing');
-      _isEnding = true;
-      _room?.disconnect();
-      if (mounted) {
-        Navigator.of(context).pop();
-        if (_provider.errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_provider.errorMessage!)),
-          );
-        }
+      _closeScreen();
+    }
+  }
+
+  void _closeScreen() {
+    if (_isEnding) return;
+    _isEnding = true;
+    _provider.removeListener(_handleCallStateChange);
+    _room?.disconnect();
+    FlutterCallkitIncoming.endAllCalls(); // ✅ ADD
+    if (mounted) {
+      if (_provider.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_provider.errorMessage!)),
+        );
       }
+      Navigator.of(context).pop();
     }
   }
 
   Future<void> _requestPermissions() async {
+    debugPrint('🔑 VideoCallScreen: requesting permissions...');
     await Permission.camera.request();
     await Permission.microphone.request();
     await _joinRoom();
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // FETCH TWILIO ICE/TURN SERVERS
-  // Same endpoint as voice — replace URL with your actual API endpoint
-  // ════════════════════════════════════════════════════════════════════
   Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      final prefs    = await SharedPreferences.getInstance();
-      final token    = prefs.getString('auth_token') ?? '';
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token') ?? '';
 
       final response = await http.get(
-        // ✅ Replace with your actual Twilio ICE endpoint
         Uri.parse('https://api.ixes.ai/api/chat/get-turn-credentials'),
         headers: {
           'Authorization': 'Bearer $token',
@@ -73,52 +94,49 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       ).timeout(const Duration(seconds: 5));
 
       if (response.statusCode == 200) {
-        final body    = json.decode(response.body);
-        final data    = body['data'] as Map<String, dynamic>;
+        final body = json.decode(response.body);
+        final data = body['data'] as Map<String, dynamic>;
         final iceList = data['iceServers'] as List<dynamic>;
-
         debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
-
         return iceList.map((server) {
-          final s          = server as Map<String, dynamic>;
-          final urls       = s['urls']?.toString() ?? s['url']?.toString() ?? '';
-          final username   = s['username']?.toString();
+          final s = server as Map<String, dynamic>;
+          final urls = s['urls']?.toString() ?? s['url']?.toString() ?? '';
+          final username = s['username']?.toString();
           final credential = s['credential']?.toString();
-
-          return RTCIceServer(
-            urls: [urls],
-            username: username,
-            credential: credential,
-          );
+          return RTCIceServer(urls: [urls], username: username, credential: credential);
         }).toList();
       }
     } catch (e) {
       debugPrint('⚠️ Could not fetch ICE servers: $e — using defaults');
     }
-
-    // Fallback: Google STUN only
     return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // JOIN LIVEKIT ROOM WITH TWILIO TURN SERVERS
-  // ════════════════════════════════════════════════════════════════════
   Future<void> _joinRoom() async {
     try {
+      final bool wasAutoAccepted = _provider.acceptedViaCallKit;
+      debugPrint('🔑 VideoCallScreen: autoAccepted=$wasAutoAccepted | roomName=${_provider.currentRoomName}');
+
       // Step 1: Fetch LiveKit token
+      debugPrint('🎫 VideoCallScreen: fetching livekit token...');
       final success = await _provider.fetchLivekitToken();
-      if (!success) { _showError('Failed to get call token'); return; }
+      if (!success) {
+        debugPrint('❌ VideoCallScreen: token fetch failed');
+        _showError('Failed to get call token');
+        return;
+      }
+      debugPrint('✅ VideoCallScreen: token fetched');
 
-      // Step 2: Fetch Twilio TURN/ICE servers
+      // Step 2: Fetch ICE servers
       final iceServers = await _fetchIceServers();
-      debugPrint('🌐 Using ${iceServers.length} ICE servers for video room');
+      debugPrint('🌐 VideoCallScreen: using ${iceServers.length} ICE servers');
 
-      // Step 3: Connect to LiveKit with TURN servers injected
-      // ✅ livekit_client ^2.2.0: rtcConfig is a param of Room() constructor
+      // Step 3: Connect to LiveKit
+      debugPrint('🔌 VideoCallScreen: connecting to LiveKit...');
       _room = Room();
       await _room!.connect(
         'wss://meet.ixes.ai',
-        _provider.livekitToken!, // or livekitToken!
+        _provider.livekitToken!,
         roomOptions: const RoomOptions(
           adaptiveStream: true,
           dynacast: true,
@@ -136,10 +154,15 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       _provider.notifyParticipantJoined();
       _room!.addListener(_onRoomUpdate);
 
+      // ── Mark as joined AFTER successful LiveKit connection ──────────
+      // Only now will _handleCallStateChange be allowed to close the screen
+      _hasJoined = true;
+      debugPrint('✅ VideoCallScreen: joined LiveKit room | _hasJoined=true');
+
       if (mounted) setState(() { _isConnecting = false; });
       debugPrint('✅ Joined video room: ${_provider.currentRoomName}');
     } catch (e) {
-      debugPrint('❌ Error joining video room: $e');
+      debugPrint('❌ VideoCallScreen: error joining room: $e');
       _showError('Failed to join call: $e');
     }
   }
@@ -178,21 +201,27 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         }
       }
     } catch (e) {
-      debugPrint('Error switching camera: $e');
+      debugPrint('❌ VideoCallScreen: error switching camera: $e');
     }
   }
 
   Future<void> _endCall() async {
     if (_isEnding) return;
+    debugPrint('📴 VideoCallScreen: user ended call');
     _isEnding = true;
     _provider.removeListener(_handleCallStateChange);
     _provider.notifyParticipantLeft();
-    await _provider.endCall();  // ← add await
+    await _provider.endCall();
     await _room?.disconnect();
+
+    // ✅ ADD THIS — dismisses the ongoing call notification
+    await FlutterCallkitIncoming.endAllCalls();
+
     if (mounted) Navigator.of(context).pop();
   }
 
   void _showError(String message) {
+    debugPrint('❌ VideoCallScreen: error: $message');
     if (mounted) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));
@@ -214,6 +243,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   @override
   void dispose() {
+    debugPrint('🧹 VideoCallScreen: dispose | _hasJoined=$_hasJoined');
     _provider.removeListener(_handleCallStateChange);
     _room?.removeListener(_onRoomUpdate);
     _room?.disconnect();
@@ -319,7 +349,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          Text('Waiting for $name to join...',
+          Text('Connecting with $name...',
               style: const TextStyle(color: Colors.white70, fontSize: 16)),
         ],
       ),
@@ -348,8 +378,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             : Container(
             color: Colors.black,
             child: const Center(
-                child: Icon(Icons.videocam_off,
-                    color: Colors.white54, size: 40))),
+                child: Icon(Icons.videocam_off, color: Colors.white54, size: 40))),
       ),
     );
   }
@@ -418,11 +447,9 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
             decoration: BoxDecoration(
               color: Colors.red,
               shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                    color: Colors.red.withOpacity(0.4),
-                    blurRadius: 15, spreadRadius: 2)
-              ],
+              boxShadow: [BoxShadow(
+                  color: Colors.red.withOpacity(0.4),
+                  blurRadius: 15, spreadRadius: 2)],
             ),
             child: IconButton(
               onPressed: _endCall,

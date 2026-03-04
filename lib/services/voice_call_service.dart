@@ -17,29 +17,18 @@ class VoiceCallService {
   // SOCKET CONNECTION
   // ============================================================================
 
-  /// Initialize socket connection
   void connectSocket() {
     _socket = IO.io(
       socketUrl,
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
-          .setTimeout(10000)  // Add timeout
+          .setTimeout(10000)
           .setReconnectionDelay(2000)
           .setReconnectionAttempts(5)
-          .enableReconnection()  // Enable auto-reconnection
+          .enableReconnection()
           .build(),
     );
-
-    // Add basic connection listeners for debugging
-    _socket?.onConnect((_) {
-      debugPrint('✅ Socket CONNECTED to $socketUrl');
-      debugPrint('Socket ID: ${_socket?.id}');
-    });
-
-    _socket?.onConnecting((_) {
-      debugPrint('🔄 Socket CONNECTING...');
-    });
 
     _socket?.onConnectError((error) {
       debugPrint('❌ Socket CONNECT ERROR: $error');
@@ -64,25 +53,21 @@ class VoiceCallService {
     debugPrint('🎙️ Voice call socket configured');
   }
 
-  /// Connect to socket
   void connect() {
     if (_socket == null) {
       debugPrint('⚠️ Socket not initialized, initializing now...');
       connectSocket();
     }
-
     _socket?.connect();
     debugPrint('🔌 Connecting to voice call socket: $socketUrl');
   }
 
-  /// Disconnect socket
   void disconnect() {
     _isRegistered = false;
     _socket?.disconnect();
     debugPrint('🔌 Disconnected from voice call socket');
   }
 
-  /// Dispose socket
   void dispose() {
     _isRegistered = false;
     _socket?.dispose();
@@ -90,40 +75,97 @@ class VoiceCallService {
   }
 
   // ============================================================================
-  // SOCKET EMIT METHODS
+  // ✅ KEY FIX: RELIABLE ensureConnectedAndRegistered
+  // Uses polling instead of once('connect') to avoid race conditions
+  // where the connect event fires before once() is attached.
   // ============================================================================
+  Future<void> ensureConnectedAndRegistered(String userId) async {
+    debugPrint('🔌 ensureConnectedAndRegistered: start | connected=${_socket?.connected} | registered=$_isRegistered');
 
-  /// Register user for receiving voice calls
+    // Step 1: Initialize socket if null
+    if (_socket == null) {
+      debugPrint('⚠️ Socket is null — initializing');
+      connectSocket();
+    }
+
+    // Step 2: Trigger connect if not connected
+    if (_socket?.connected != true) {
+      debugPrint('🔌 Socket not connected — calling connect()');
+      _socket?.connect();
+    }
+
+    // Step 3: Poll until connected (max 10 seconds)
+    const pollInterval = Duration(milliseconds: 200);
+    const maxWait = Duration(seconds: 10);
+    final deadline = DateTime.now().add(maxWait);
+
+    while (_socket?.connected != true) {
+      if (DateTime.now().isAfter(deadline)) {
+        debugPrint('⏰ ensureConnectedAndRegistered: timeout waiting for connection');
+        return; // Caller handles the not-connected case
+      }
+      debugPrint('⏳ Waiting for socket connection...');
+      await Future.delayed(pollInterval);
+    }
+
+    // Step 4: Register user
+    debugPrint('✅ ensureConnectedAndRegistered: connected — registering $userId');
+    _socket?.emit('register-user', userId);
+    _isRegistered = true;
+
+    // Small buffer for server to process registration
+    await Future.delayed(const Duration(milliseconds: 300));
+    debugPrint('✅ ensureConnectedAndRegistered: done | socketId=${_socket?.id}');
+  }
+
+  // ============================================================================
+  // ACCEPT VOICE CALL
+  // ============================================================================
+  Future<void> acceptVoiceCall({
+    required String userId,
+    required String receiverId,
+    bool isConference = false,
+  }) async {
+    debugPrint('🔌 acceptVoiceCall: ensuring connected+registered for $userId');
+    await ensureConnectedAndRegistered(userId);
+
+    if (_socket?.connected != true) {
+      debugPrint('❌ acceptVoiceCall: still not connected — aborting');
+      return;
+    }
+
+    final data = {'receiverId': receiverId, 'isConference': isConference};
+    _socket?.emit('call-accepted-voice', data);
+    debugPrint('✅ Emitted call-accepted-voice: $data | socketId=${_socket?.id}');
+  }
+
+  // ============================================================================
+  // REGISTER USER
+  // ============================================================================
   void registerUser(String userId) {
     if (_socket?.connected != true) {
       debugPrint('⚠️ Cannot register: Socket not connected');
       return;
     }
-
     _socket?.emit('register-user', userId);
     _isRegistered = true;
     debugPrint('📝 Registered user for voice calls: $userId');
     debugPrint('Socket ID after registration: ${_socket?.id}');
   }
 
-  /// Check registration status
   bool get isRegistered => _isRegistered;
 
-  /// Check if user is busy (in another call)
+  // ============================================================================
+  // CHECK USER BUSY
+  // ============================================================================
   Future<Map<String, dynamic>?> checkUserBusy(String receiverId) async {
     try {
-      if (_socket == null) {
-        debugPrint('⚠️ Socket not initialized');
-        return null;
-      }
-
-      if (_socket?.connected != true) {
-        debugPrint('⚠️ Socket not connected');
+      if (_socket == null || _socket?.connected != true) {
+        debugPrint('⚠️ Socket not connected for busy check');
         return null;
       }
 
       final completer = Completer<Map<String, dynamic>?>();
-
       debugPrint('🔍 Checking if user $receiverId is busy...');
 
       _socket!.emitWithAck(
@@ -132,13 +174,9 @@ class VoiceCallService {
         ack: (data) {
           try {
             debugPrint('📨 Received busy check response: $data');
-
             if (data == null) {
               completer.complete(null);
-              return;
-            }
-
-            if (data is Map) {
+            } else if (data is Map) {
               completer.complete(Map<String, dynamic>.from(data));
             } else if (data is List && data.isNotEmpty && data[0] is Map) {
               completer.complete(Map<String, dynamic>.from(data[0]));
@@ -165,7 +203,10 @@ class VoiceCallService {
     }
   }
 
-  /// Initiate voice call
+  // ============================================================================
+  // CALL OPERATIONS
+  // ============================================================================
+
   void initiateVoiceCall({
     required String roomName,
     required String callerId,
@@ -177,7 +218,6 @@ class VoiceCallService {
       debugPrint('⚠️ Cannot initiate call: Socket not connected');
       return;
     }
-
     final data = {
       'roomName': roomName,
       'callerId': callerId,
@@ -185,32 +225,11 @@ class VoiceCallService {
       'receiverId': receiverId,
       'isConference': isConference,
     };
-
     _socket?.emit('initiate-voice-call', data);
     debugPrint('📞 Initiating voice call: $data');
     debugPrint('Socket ID: ${_socket?.id}');
   }
 
-  /// Accept voice call
-  void acceptVoiceCall({
-    required String receiverId,
-    bool isConference = false,
-  }) {
-    if (_socket?.connected != true) {
-      debugPrint('⚠️ Cannot accept call: Socket not connected');
-      return;
-    }
-
-    final data = {
-      'receiverId': receiverId,
-      'isConference': isConference,
-    };
-
-    _socket?.emit('call-accepted-voice', data);
-    debugPrint('✅ Accepting voice call: $data');
-  }
-
-  /// Reject voice call
   void rejectVoiceCall({
     required String callerId,
     required String receiverName,
@@ -220,18 +239,15 @@ class VoiceCallService {
       debugPrint('⚠️ Cannot reject call: Socket not connected');
       return;
     }
-
     final data = {
       'callerId': callerId,
       'receiverName': receiverName,
       'currentUserId': currentUserId,
     };
-
     _socket?.emit('call-rejected-voice', data);
     debugPrint('❌ Rejecting voice call: $data');
   }
 
-  /// End voice call
   void endVoiceCall({
     required String receiverId,
     required String receiverName,
@@ -242,19 +258,16 @@ class VoiceCallService {
       debugPrint('⚠️ Cannot end call: Socket not connected');
       return;
     }
-
     final data = {
       'receiverId': receiverId,
       'receiverName': receiverName,
       'callerName': callerName,
       'callerId': callerId,
     };
-
     _socket?.emit('voice-call-ended', data);
     debugPrint('📴 Ending voice call: $data');
   }
 
-  /// Invite to voice call (conference)
   void inviteToVoiceCall({
     required String roomName,
     required String callerId,
@@ -266,7 +279,6 @@ class VoiceCallService {
       debugPrint('⚠️ Cannot invite: Socket not connected');
       return;
     }
-
     final data = {
       'roomName': roomName,
       'callerId': callerId,
@@ -274,12 +286,10 @@ class VoiceCallService {
       'receiverId': receiverId,
       'receiverName': receiverName,
     };
-
     _socket?.emit('invite-to-voice-call', data);
     debugPrint('📧 Inviting to voice call: $data');
   }
 
-  /// Participant joined voice call
   void participantJoinedVoiceCall({
     required String participantId,
     required String participantName,
@@ -289,39 +299,28 @@ class VoiceCallService {
       debugPrint('⚠️ Cannot notify join: Socket not connected');
       return;
     }
-
     final data = {
       'participantId': participantId,
       'participantName': participantName,
       'roomName': roomName,
     };
-
     _socket?.emit('participant-joined-voice-call', data);
     debugPrint('👤 Participant joined voice call: $data');
   }
 
-  /// Participant left voice call
-  void participantLeftVoiceCall({
-    required String participantId,
-  }) {
+  void participantLeftVoiceCall({required String participantId}) {
     if (_socket?.connected != true) {
       debugPrint('⚠️ Cannot notify leave: Socket not connected');
       return;
     }
-
-    final data = {
-      'participantId': participantId,
-    };
-
+    final data = {'participantId': participantId};
     _socket?.emit('participant-left-voice-call', data);
     debugPrint('👋 Participant left voice call: $data');
   }
 
   // ============================================================================
-  // REST API METHODS
+  // REST API
   // ============================================================================
-
-  /// Generate LiveKit voice token
   Future<Map<String, dynamic>> generateVoiceToken({
     required String roomName,
     required String participantName,
@@ -333,7 +332,6 @@ class VoiceCallService {
         'Content-Type': 'application/json',
         if (authToken != null) 'Authorization': 'Bearer $authToken',
       };
-
       final body = json.encode({
         'roomName': roomName,
         'participantName': participantName,
@@ -358,27 +356,20 @@ class VoiceCallService {
         return result;
       } else {
         try {
-          final result = json.decode(response.body);
-          debugPrint('❌ Token generation failed: ${result['message']}');
-          return result;
+          return json.decode(response.body);
         } catch (e) {
-          debugPrint('❌ Invalid response: ${response.body}');
-          return {
-            'error': true,
-            'message': 'Server error: ${response.statusCode}',
-          };
+          return {'error': true, 'message': 'Server error: ${response.statusCode}'};
         }
       }
     } catch (e) {
       debugPrint('❌ Error generating voice token: $e');
-      return {
-        'error': true,
-        'message': 'Failed to generate token: $e',
-      };
+      return {'error': true, 'message': 'Failed to generate token: $e'};
     }
   }
 
-
+  // ============================================================================
+  // EVENT LISTENERS
+  // ============================================================================
   void onConnect(Function() callback) {
     _socket?.onConnect((_) {
       debugPrint('✅ Voice call socket connected (callback)');
@@ -458,64 +449,15 @@ class VoiceCallService {
     debugPrint('👂 Listening for participant-left-voice-call events');
   }
 
+  void offIncomingVoiceCall() => _socket?.off('incoming-voice-call');
+  void offCallAcceptedVoice() => _socket?.off('call-accepted-voice');
+  void offCallRejectedVoice() => _socket?.off('call-rejected-voice');
+  void offVoiceCallEnded() => _socket?.off('voice-call-ended');
+  void offUserOfflineVoice() => _socket?.off('user-offline-voice');
+  void offNewParticipantInvitedVoice() => _socket?.off('new-participant-invited-voice');
+  void offParticipantJoinedVoiceCall() => _socket?.off('participant-joined-voice-call');
+  void offParticipantLeftVoiceCall() => _socket?.off('participant-left-voice-call');
 
-
-  void offIncomingVoiceCall() {
-    _socket?.off('incoming-voice-call');
-    debugPrint('🔇 Removed incoming-voice-call listener');
-  }
-
-  void offCallAcceptedVoice() {
-    _socket?.off('call-accepted-voice');
-    debugPrint('🔇 Removed call-accepted-voice listener');
-  }
-
-  void offCallRejectedVoice() {
-    _socket?.off('call-rejected-voice');
-    debugPrint('🔇 Removed call-rejected-voice listener');
-  }
-
-  void offVoiceCallEnded() {
-    _socket?.off('voice-call-ended');
-    debugPrint('🔇 Removed voice-call-ended listener');
-  }
-
-  void offUserOfflineVoice() {
-    _socket?.off('user-offline-voice');
-    debugPrint('🔇 Removed user-offline-voice listener');
-  }
-
-  void offNewParticipantInvitedVoice() {
-    _socket?.off('new-participant-invited-voice');
-    debugPrint('🔇 Removed new-participant-invited-voice listener');
-  }
-
-  void offParticipantJoinedVoiceCall() {
-    _socket?.off('participant-joined-voice-call');
-    debugPrint('🔇 Removed participant-joined-voice-call listener');
-  }
-
-  void offParticipantLeftVoiceCall() {
-    _socket?.off('participant-left-voice-call');
-    debugPrint('🔇 Removed participant-left-voice-call listener');
-  }
-
-
-
-  /// Get current connection status
   bool get isConnected => _socket?.connected ?? false;
-
-  /// Get socket ID
   String? get socketId => _socket?.id;
-
-  /// Print current socket status
-  void printStatus() {
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint('Socket Status:');
-    debugPrint('  Connected: ${_socket?.connected}');
-    debugPrint('  Socket ID: ${_socket?.id}');
-    debugPrint('  Registered: $_isRegistered');
-    debugPrint('  URL: $socketUrl');
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  }
 }

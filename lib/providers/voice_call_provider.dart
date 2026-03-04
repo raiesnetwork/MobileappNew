@@ -32,8 +32,6 @@ class VoiceCallProvider extends ChangeNotifier {
   String? _voiceToken;
   List<Map<String, dynamic>> _participants = [];
 
-  // ✅ True when user already accepted via CallKit Answer button.
-  // VoiceCallListener must check this and skip showing IncomingVoiceCallDialog.
   bool _acceptedViaCallKit = false;
 
   // Getters
@@ -69,7 +67,6 @@ class VoiceCallProvider extends ChangeNotifier {
 
     _service.connectSocket();
 
-    // ✅ Only register listeners ONCE
     if (!_listenersSetUp) {
       _setupListeners();
       _listenersSetUp = true;
@@ -97,7 +94,6 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Incoming voice call
     _service.onIncomingVoiceCall((data) {
       debugPrint('📞 PROVIDER: Incoming voice call: $data');
       _currentRoomName = data['roomName'];
@@ -108,7 +104,6 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Call accepted (receiver accepted our outgoing call)
     _service.onCallAcceptedVoice((data) {
       debugPrint('✅ PROVIDER: Voice call accepted: $data');
       _successMessage = data['message'];
@@ -117,22 +112,15 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // Call rejected (receiver rejected our outgoing call)
-    // ✅ This is how the CALLER knows to close their outgoing screen
     _service.onCallRejectedVoice((data) {
       debugPrint('❌ PROVIDER: Voice call rejected: $data');
       _errorMessage = data['message'];
       _callState = VoiceCallState.ended;
       _clearCallData();
       _safeNotifyListeners();
-
-      // ✅ Delay idle reset long enough for UI to fully dismiss (3s not 2s)
-      // and only reset if nobody started a new call in the meantime
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == VoiceCallState.ended) {
           _callState = VoiceCallState.idle;
-          // ✅ Do NOT call _clearCallData() here again — it's already cleared above
-          // and calling it again would wipe a NEW incoming call's data
           _safeNotifyListeners();
         }
       });
@@ -141,9 +129,8 @@ class VoiceCallProvider extends ChangeNotifier {
     _service.onVoiceCallEnded((data) {
       debugPrint('📴 PROVIDER: Voice call ended: $data');
       _callState = VoiceCallState.ended;
-      _clearCallData(); // ✅ Clear immediately
+      _clearCallData();
       _safeNotifyListeners();
-
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == VoiceCallState.ended) {
           _callState = VoiceCallState.idle;
@@ -158,7 +145,6 @@ class VoiceCallProvider extends ChangeNotifier {
       _callState = VoiceCallState.ended;
       _clearCallData();
       _safeNotifyListeners();
-
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == VoiceCallState.ended) {
           _callState = VoiceCallState.idle;
@@ -167,7 +153,6 @@ class VoiceCallProvider extends ChangeNotifier {
       });
     });
 
-    // New participant invited (conference)
     _service.onNewParticipantInvitedVoice((data) {
       debugPrint('📧 PROVIDER: New participant invited: $data');
       _currentRoomName = data['roomName'];
@@ -178,26 +163,19 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotifyListeners();
     });
 
-    // ✅ FIXED: Register onParticipantJoinedVoiceCall ONCE only
-    // Previously registered TWICE which caused double "Call accepted" events
     _service.onParticipantJoinedVoiceCall((data) {
       debugPrint('👤 PROVIDER: Participant joined: $data');
-
       if (!_participants.any((p) => p['participantId'] == data['participantId'])) {
         _participants.add(Map<String, dynamic>.from(data));
       }
-
-      // Update to connected when the receiver joins our outgoing call
       if (_callState == VoiceCallState.calling &&
           data['participantId'] == _currentReceiverId) {
         debugPrint('🎯 Receiver joined — state → CONNECTED');
         _callState = VoiceCallState.connected;
       }
-
       _safeNotifyListeners();
     });
 
-    // Participant left
     _service.onParticipantLeftVoiceCall((data) {
       debugPrint('👋 PROVIDER: Participant left: $data');
       _participants.removeWhere((p) => p['participantId'] == data['participantId']);
@@ -207,6 +185,30 @@ class VoiceCallProvider extends ChangeNotifier {
     debugPrint('✅ Voice call listeners set up');
   }
 
+  // ============================================================================
+  // ACCEPT VOICE CALL
+  // ✅ KEY FIX: waits for socket to be connected + user registered
+  // before emitting call-accepted-voice.
+  // When app is killed and user presses Answer, socket may not be
+  // connected yet. We wait up to 5s for it.
+  // ============================================================================
+  Future<void> acceptVoiceCall() async {
+    if (_currentCallerId == null || _currentUserId == null) {
+      debugPrint('❌ acceptVoiceCall: missing callerId or userId');
+      return;
+    }
+
+    debugPrint('✅ acceptVoiceCall: callerId=$_currentCallerId | userId=$_currentUserId');
+
+    await _service.acceptVoiceCall(
+      userId: _currentUserId!,        // ← pass userId
+      receiverId: _currentCallerId!,
+      isConference: _isConference,
+    );
+
+    _callState = VoiceCallState.connected;
+    _safeNotifyListeners();
+  }
 
   // ============================================================================
   // CALL OPERATIONS
@@ -235,13 +237,6 @@ class VoiceCallProvider extends ChangeNotifier {
       return;
     }
 
-    if (!_isConnected) {
-      _errorMessage = 'Not connected to server';
-      _safeNotifyListeners();
-      return;
-    }
-
-    // ✅ If previous call ended, reset before starting new one
     if (_callState == VoiceCallState.ended) {
       _callState = VoiceCallState.idle;
       _clearCallData();
@@ -275,38 +270,19 @@ class VoiceCallProvider extends ChangeNotifier {
 
     debugPrint('📞 Voice call initiated via service');
   }
+
   void cancelIncomingCall() {
     if (_callState != VoiceCallState.ringing && _callState != VoiceCallState.calling) return;
     debugPrint('📵 VoiceCallProvider.cancelIncomingCall()');
     _callState = VoiceCallState.ended;
     _clearCallData();
     _safeNotifyListeners();
-
     Future.delayed(const Duration(seconds: 3), () {
       if (_callState == VoiceCallState.ended) {
         _callState = VoiceCallState.idle;
         _safeNotifyListeners();
       }
     });
-  }
-
-  Future<void> acceptVoiceCall() async {
-    debugPrint('✅ ACCEPTING VOICE CALL from $_currentCallerName ($_currentCallerId)');
-
-    if (_currentCallerId == null) {
-      _errorMessage = 'No caller ID found';
-      _safeNotifyListeners();
-      return;
-    }
-
-    _service.acceptVoiceCall(
-      receiverId: _currentCallerId!,
-      isConference: _isConference,
-    );
-
-    _callState = VoiceCallState.connected;
-    _successMessage = 'Call accepted';
-    _safeNotifyListeners();
   }
 
   Future<void> rejectVoiceCall() async {
@@ -329,7 +305,6 @@ class VoiceCallProvider extends ChangeNotifier {
     _clearCallData();
     _safeNotifyListeners();
 
-    // ✅ Reset to idle so the rejected party can call again
     Future.delayed(const Duration(seconds: 1), () {
       if (_callState == VoiceCallState.ended) {
         _callState = VoiceCallState.idle;
@@ -343,7 +318,6 @@ class VoiceCallProvider extends ChangeNotifier {
 
     if (_currentUserId == null || _currentUserName == null) {
       debugPrint('❌ Cannot end: User not initialized');
-      // ✅ Still reset state even if we can't send the socket event
       _callState = VoiceCallState.idle;
       _clearCallData();
       _safeNotifyListeners();
@@ -354,7 +328,7 @@ class VoiceCallProvider extends ChangeNotifier {
     String receiverName = _currentReceiverName ?? _currentCallerName ?? '';
 
     if (receiverId.isEmpty) {
-      debugPrint('❌ Cannot end: No active call — resetting state anyway');
+      debugPrint('❌ Cannot end: No active call');
       _callState = VoiceCallState.idle;
       _clearCallData();
       _safeNotifyListeners();
@@ -375,7 +349,8 @@ class VoiceCallProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('⚠️ endVoiceCall ignored: $e');
     }
-    _callState = VoiceCallState.idle; // ✅ Go straight to idle, not ended
+
+    _callState = VoiceCallState.idle;
     _successMessage = 'Call ended';
     _clearCallData();
     debugPrint('📴 Call ended, state → idle');
@@ -504,27 +479,12 @@ class VoiceCallProvider extends ChangeNotifier {
     _currentCallerName = callerName;
     _acceptedViaCallKit = acceptedViaCallKit;
 
-    // ✅ Only set ringing if user hasn't already accepted.
-    // If acceptedViaCallKit=true, setting ringing would cause
-    // VoiceCallListener to show IncomingVoiceCallDialog on top of VoiceRoomScreen.
     if (!acceptedViaCallKit) {
       _callState = VoiceCallState.ringing;
     }
 
     debugPrint('📲 FCM voice call set — room: $roomName | caller: $callerName | acceptedViaCallKit=$acceptedViaCallKit');
     notifyListeners();
-  }
-
-  void printStatus() {
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint('VoiceCallProvider Status:');
-    debugPrint('  User: $_currentUserName ($_currentUserId)');
-    debugPrint('  Connected: $_isConnected');
-    debugPrint('  Call State: $_callState');
-    debugPrint('  Room: $_currentRoomName');
-    debugPrint('  Caller: $_currentCallerName ($_currentCallerId)');
-    debugPrint('  Receiver: $_currentReceiverName ($_currentReceiverId)');
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }
 
   // ============================================================================
