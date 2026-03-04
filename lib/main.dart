@@ -635,6 +635,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     _navigate(data);
   }
 
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
