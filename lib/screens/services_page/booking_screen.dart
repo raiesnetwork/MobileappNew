@@ -175,7 +175,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
   void _openRazorpayCheckout(Map<String, dynamic> order) {
     var options = {
-      'key': 'rzp_test_R9SkYwGQh6HuUF',
+      'key': 'rzp_live_SL4ZRZsuETGg36',
       'amount': order['amount'],
       'order_id': order['id'],
       'name': widget.serviceName,
@@ -203,21 +203,15 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    await Future.delayed(const Duration(milliseconds: 500));
-
+    // ✅ Longer delay to wait for Razorpay popup to auto-dismiss
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
-
     setState(() => _isProcessing = true);
 
     try {
       final provider = Provider.of<ServicesProvider>(context, listen: false);
 
-      // ✅ Convert selected slots to time ranges (start - end format)
-      final selectedSlotsList = _selectedTimeSlots
-          .toList()
-        ..sort(); // Sort first
-
-      // Convert each slot to time range format
+      final selectedSlotsList = _selectedTimeSlots.toList()..sort();
       final selectedSlotsWithRanges = selectedSlotsList
           .map((slot) => _convertToTimeRange(slot))
           .toList();
@@ -233,36 +227,40 @@ class _BookingScreenState extends State<BookingScreen> {
         },
         serviceId: widget.serviceId,
         amount: totalAmount,
-        date: _selectedDate!.toIso8601String().split('T')[0], // ✅ Send only date: YYYY-MM-DD
+        date: _selectedDate!.toIso8601String().split('T')[0],
         slots: _selectedTimeSlots.length,
-        selectedSlots: selectedSlotsWithRanges, // ✅ Send time ranges
+        selectedSlots: selectedSlotsWithRanges,
       );
 
       if (!mounted) return;
-
       setState(() => _isProcessing = false);
 
-      final hasError = verifyResult['err'] == true ||
-          verifyResult['err'] == 'true' ||
-          verifyResult['err'] == null;
+      print('🔍 verifyResult keys: ${verifyResult.keys.toList()}');
+      print('🔍 booking type: ${verifyResult['booking'].runtimeType}');
 
-      if (!hasError) {
-        final booking = verifyResult['booking'];
-        if (booking != null && booking.isNotEmpty) {
-          _showSuccessDialog(booking);
-        } else {
-          _showSnackBar('Payment successful but booking data is missing', isError: true);
-        }
+      final rawBooking = verifyResult['booking'];
+      if (rawBooking != null && rawBooking is Map && (rawBooking as Map).isNotEmpty) {
+        final booking = Map<String, dynamic>.from(rawBooking);
+        print('✅ Showing success dialog with booking id: ${booking['_id']}');
+        // ✅ Extra delay to ensure Razorpay UI is fully gone
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        _showSuccessDialog(booking);
       } else {
+        print('❌ Booking is null or empty: $rawBooking');
         final message = verifyResult['message'] ?? 'Payment verification failed';
         _showSnackBar(message, isError: true);
       }
-    } catch (e) {
+
+    } catch (e, stack) {
+      print('❌ Exception in _handlePaymentSuccess: $e');
+      print('❌ Stack: $stack');
       if (!mounted) return;
       setState(() => _isProcessing = false);
       _showSnackBar('Error verifying payment: ${e.toString()}', isError: true);
     }
   }
+
 
   void _handlePaymentError(PaymentFailureResponse response) {
     Future.delayed(const Duration(milliseconds: 500), () {
@@ -281,11 +279,24 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   void _showSuccessDialog(Map<String, dynamic> booking) {
-    // Convert selected slots to display format with ranges
     final displaySlots = _selectedTimeSlots
         .toList()
         .map((slot) => _convertToTimeRange(slot))
         .join(', ');
+
+    // ✅ Safely extract booking ID
+    final bookingId = booking['_id']?.toString() ?? 'N/A';
+
+    // ✅ Safely extract service name from nested or flat
+    final serviceIdField = booking['serviceId'];
+    final serviceName = serviceIdField is Map
+        ? serviceIdField['name']?.toString() ?? widget.serviceName
+        : widget.serviceName;
+
+    // ✅ Safe date formatting
+    final bookingDate = _selectedDate != null
+        ? _formatDate(_selectedDate!)
+        : booking['bookingDate']?.toString().split('T')[0] ?? 'N/A';
 
     showDialog(
       context: context,
@@ -333,14 +344,18 @@ class _BookingScreenState extends State<BookingScreen> {
                 ),
                 child: Column(
                   children: [
-                    _buildDetailRow(Icons.business_center_rounded, 'Service', widget.serviceName),
+                    _buildDetailRow(Icons.business_center_rounded, 'Service', serviceName),
                     const SizedBox(height: 12),
-                    _buildDetailRow(Icons.calendar_today_rounded, 'Date', _formatDate(_selectedDate!)),
+                    _buildDetailRow(Icons.calendar_today_rounded, 'Date', bookingDate),
                     const SizedBox(height: 12),
                     _buildDetailRow(Icons.access_time_rounded, 'Time Slots', displaySlots),
                     const SizedBox(height: 12),
-                    _buildDetailRow(Icons.account_balance_wallet_rounded, 'Amount Paid',
-                        '${widget.currency} $totalAmount', isHighlight: true),
+                    _buildDetailRow(
+                      Icons.account_balance_wallet_rounded,
+                      'Amount Paid',
+                      '${widget.currency} $totalAmount',
+                      isHighlight: true,
+                    ),
                   ],
                 ),
               ),
@@ -352,7 +367,7 @@ class _BookingScreenState extends State<BookingScreen> {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  'ID: ${booking['_id'] ?? 'N/A'}',
+                  'ID: $bookingId',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -373,10 +388,13 @@ class _BookingScreenState extends State<BookingScreen> {
                     backgroundColor: Primary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
                   ),
-                  child: const Text('Done', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  child: const Text('Done',
+                      style:
+                      TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 ),
               ),
             ],

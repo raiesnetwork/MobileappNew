@@ -602,7 +602,7 @@ class ServicesProvider with ChangeNotifier {
     required num amount,
     required String date,
     required int slots,
-    required List<String> selectedSlots, // ✅ ADDED
+    required List<String> selectedSlots,
   }) async {
     _isPaymentLoading = true;
     _hasPaymentError = false;
@@ -617,16 +617,18 @@ class ServicesProvider with ChangeNotifier {
         amount: amount,
         date: date,
         slots: slots,
-        selectedSlots: selectedSlots, // ✅ PASS IT TO SERVICE
+        selectedSlots: selectedSlots,
       );
 
-      if (!result['err']) {
-        _booking = result['booking'] ?? {};
+      // ✅ Check if booking exists instead of trusting err flag
+      final booking = result['booking'];
+      if (booking != null && (booking is Map && booking.isNotEmpty)) {
+        _booking = Map<String, dynamic>.from(booking);
         _paymentMessage = result['message'] ?? 'Payment verified successfully';
         _hasPaymentError = false;
         print('✅ Payment verified and booking created: $_booking');
 
-        // Optionally refresh services after booking
+        // Refresh services after booking
         await fetchMyServices();
       } else {
         _hasPaymentError = true;

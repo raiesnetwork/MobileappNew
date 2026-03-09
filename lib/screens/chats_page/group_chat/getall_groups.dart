@@ -67,25 +67,7 @@ class _GroupListScreenState extends State<GroupListScreen> {
         elevation: 0,
         shadowColor: Colors.grey[200],
         surfaceTintColor: Colors.transparent,
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => MyGroupsScreen(),
-                ),
-              );
-            },
-            child: const Text(
-              'My groups',
-              style: TextStyle(
-                color: Colors.blue,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
+
       ),
       body: Column(
         children: [
@@ -629,9 +611,7 @@ class GroupListItem extends StatelessWidget {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
             isRequested ? 'Request Pending' : 'Join Group',
             style: const TextStyle(fontWeight: FontWeight.w600),
@@ -639,32 +619,59 @@ class GroupListItem extends StatelessWidget {
           content: Text(
             isRequested
                 ? 'Your request to join "${group['name']}" is pending approval.'
-                : 'You need to be a member to view messages in "${group['name']}".',
+                : 'Send a request to join "${group['name']}"?',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
+              child: const Text('Cancel'),
             ),
-            if (!isRequested) ...[
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  // TODO: Implement join group functionality
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Join request sent for "${group['name']}"'),
-                      behavior: SnackBarBehavior.floating,
+            if (!isRequested)
+              Consumer<GroupChatProvider>(
+                builder: (context, provider, _) {
+                  return ElevatedButton(
+                    onPressed: provider.isRequestingGroup
+                        ? null
+                        : () async {
+                      print('🔘 [UI] Join button tapped for group: ${group['_id']}');
+                      await provider.requestToJoinGroup(group['_id']);
+                      print('📣 [UI] requestToJoinGroup result: ${provider.groupRequestMessage}');
+
+                      if (context.mounted) {
+                        Navigator.of(context).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(provider.groupRequestMessage.isNotEmpty
+                                ? provider.groupRequestMessage
+                                : 'Request sent for "${group['name']}"'),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor:
+                            provider.groupRequestMessage.toLowerCase().contains('already')
+                                ? Colors.orange
+                                : Colors.green,
+                          ),
+                        );
+                        // Update local group state so button switches to "Requested"
+                        group['isRequested'] = true;
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6C5CE7),
+                      foregroundColor: Colors.white,
                     ),
+                    child: provider.isRequestingGroup
+                        ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                        : const Text('Request to Join'),
                   );
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Join'),
               ),
-            ],
           ],
         );
       },

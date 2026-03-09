@@ -5,6 +5,7 @@ import 'dart:convert';
 import '../../../providers/group_provider.dart';
 
 import 'create_group.dart';
+import 'getall_groups.dart';
 import 'group_chat_detail.dart';
 
 class MyGroupsScreen extends StatefulWidget {
@@ -587,6 +588,21 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         actions: [
+          // ✅ ADD THIS - Discover button to find groups to join
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const GroupListScreen(), // your existing screen
+                ),
+              );
+            },
+            icon: Icon(Icons.explore_rounded, color: Colors.blue[600]),
+            tooltip: 'Discover Groups',
+          ),
+
+          // your existing Requests button
           TextButton(
             onPressed: () {
               Navigator.push(

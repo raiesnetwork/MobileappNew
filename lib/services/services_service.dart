@@ -840,7 +840,7 @@ class ServicesService {
     required num amount,
     required String date,
     required int slots,
-    required List<String> selectedSlots, // ✅ ADDED
+    required List<String> selectedSlots,
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -861,7 +861,7 @@ class ServicesService {
       print('💰 Amount: $amount');
       print('📅 Date: $date');
       print('🎫 Slots count: $slots');
-      print('🎫 Selected slots: $selectedSlots'); // ✅ ADDED LOG
+      print('🎫 Selected slots: $selectedSlots');
 
       final body = {
         'response': response,
@@ -869,7 +869,7 @@ class ServicesService {
         'amount': amount,
         'date': date,
         'slots': slots,
-        'selectedSlots': selectedSlots, // ✅ ADDED TO BODY
+        'selectedSlots': selectedSlots,
       };
 
       print('📤 Request Body: ${jsonEncode(body)}');
@@ -894,20 +894,76 @@ class ServicesService {
 
         return {
           'err': decoded['err'] ?? false,
-          'message': decoded['message'] ?? 'Payment verified and booking created successfully',
+          'message': decoded['message'] ?? 'Payment verified successfully',
           'booking': decoded['booking'] ?? {}
+        };
+      } else if (httpResponse.statusCode == 500) {
+        print('⚠️ Server returned 500 - attempting fallback booking fetch...');
+
+        // ✅ Backend crashed after booking was created, fetch latest booking manually
+        try {
+          final bookingUri = Uri.parse('${apiBaseUrl}api/service/my-bookings?limit=1');
+          print('🔍 Fetching latest booking from: $bookingUri');
+
+          final bookingResponse = await http.get(
+            bookingUri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+          );
+
+          print('📡 Fallback Booking Response Status: ${bookingResponse.statusCode}');
+          print('📦 Fallback Booking Response Body: ${bookingResponse.body}');
+
+          if (bookingResponse.statusCode == 200) {
+            final bookingDecoded = jsonDecode(bookingResponse.body);
+            final bookings = bookingDecoded['bookings'] as List?;
+
+            if (bookings != null && bookings.isNotEmpty) {
+              final latestBooking = bookings.first;
+              final bookingServiceId =
+                  latestBooking['serviceId']?['_id'] ?? latestBooking['serviceId'];
+
+              print('🔍 Latest booking serviceId: $bookingServiceId');
+              print('🔍 Expected serviceId: $serviceId');
+
+              // ✅ Confirm it's for the same service
+              if (bookingServiceId?.toString() == serviceId) {
+                print('✅ Fallback booking matched! Returning success.');
+                return {
+                  'err': false,
+                  'message': 'Payment verified successfully',
+                  'booking': latestBooking
+                };
+              } else {
+                print('❌ Fallback booking serviceId mismatch');
+              }
+            } else {
+              print('❌ No bookings found in fallback response');
+            }
+          }
+        } catch (fallbackError) {
+          print('❌ Fallback booking fetch failed: $fallbackError');
+        }
+
+        // If fallback also fails, return error
+        final decoded = jsonDecode(httpResponse.body);
+        return {
+          'err': true,
+          'message': decoded['message'] ?? 'Failed to verify payment',
+          'booking': {},
+          'errorDetails': decoded['error']
         };
       } else {
         final decoded = jsonDecode(httpResponse.body);
 
-        // DETAILED ERROR LOGGING
         print('❌ HTTP Error - Status Code: ${httpResponse.statusCode}');
         print('❌ Error Response - Full Body: ${httpResponse.body}');
         print('❌ Error Response - err: ${decoded['err']}');
         print('❌ Error Response - message: ${decoded['message']}');
         print('❌ Error Response - error object: ${decoded['error']}');
 
-        // Check if error object has more details
         if (decoded['error'] != null && decoded['error'] is Map) {
           final errorMap = decoded['error'] as Map;
           print('❌ Error Details:');
@@ -916,14 +972,13 @@ class ServicesService {
           });
         }
 
-        // Check for any other fields in response
         print('❌ All response keys: ${decoded.keys.toList()}');
 
         return {
           'err': true,
           'message': decoded['message'] ?? 'Failed to verify payment',
           'booking': {},
-          'errorDetails': decoded['error'] // Include error details
+          'errorDetails': decoded['error']
         };
       }
     } catch (e, stackTrace) {

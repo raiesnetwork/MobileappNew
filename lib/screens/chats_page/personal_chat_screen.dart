@@ -6,6 +6,9 @@ import '../../providers/personal_chat_provider.dart';
 import '../meeting/create_meeting_screen.dart';
 import '../meeting/meeting_list_screen.dart';
 import './chat_detail_screen.dart';
+import 'add_user_to_chat_screen.dart';
+import 'group_chat/getall_groups.dart';
+import 'group_chat/my_groups.dart';
 
 class PersonalChatScreen extends StatefulWidget {
   const PersonalChatScreen({
@@ -113,8 +116,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
               height: 24,
             ),
             onPressed: () {
-              // Navigator.push(context,
-              //     MaterialPageRoute(builder: (context) => CreateMeetScreen()));
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (context) => MyGroupsScreen()));
             },
           ),
         ],
@@ -310,6 +313,47 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             ),
           );
         },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final user = await Navigator.push(
+            context,
+            PageRouteBuilder(
+              pageBuilder: (context, animation, secondaryAnimation) =>
+              const AddChatUserScreen(),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                return SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 1),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  )),
+                  child: child,
+                );
+              },
+              transitionDuration: const Duration(milliseconds: 350),
+            ),
+          );
+
+          if (user != null) {
+            // Navigate to ChatDetailScreen with selected user
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatDetailScreen(
+                  userId: user['_id']?.toString() ?? '',
+                  chatTitle: user['profile']?['name'] ?? 'Chat',
+                  userProfile: user,
+                ),
+              ),
+            );
+          }
+        },
+        backgroundColor: Primary,
+        elevation: 4,
+        child: const Icon(Icons.add, color: Colors.white, size: 22),
       ),
     );
   }

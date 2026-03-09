@@ -2,97 +2,120 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../services/group_chat_service.dart';
 
-import 'package:socket_io_client/socket_io_client.dart' as IO;
-
+// ═══════════════════════════════════════════════════════════════════════════
+// GroupChatProvider — wires every GroupChatService method to the UI
+// ═══════════════════════════════════════════════════════════════════════════
 class GroupChatProvider with ChangeNotifier {
-  final GroupChatService _groupChatService = GroupChatService();
+  final GroupChatService _svc = GroupChatService();
 
-  // Loading states
-  bool _isLoading = false;
-  bool _isSearching = false;
-  bool _isCreatingGroup = false;
-  bool _isJoiningGroup = false;
-  bool _isLeavingGroup = false;
-  bool _isLoadingMessages = false;
-  bool _isSendingMessage = false;
-  bool _isSendingFile = false;
+  // ── Loading flags ───────────────────────────────────────────────────────
+  bool _isLoading          = false;
+  bool _isSearching        = false;
+  bool _isCreatingGroup    = false;
+  bool _isRequestingGroup  = false;
+  bool _isCancellingRequest = false;
+  bool _isUpdatingRequest  = false;
+  bool _isLoadingMessages  = false;
+  bool _isSendingMessage   = false;
+  bool _isSendingFile      = false;
+  bool _isSendingVoice     = false;
+  bool _isSendingCamera    = false;
+  bool _isAddingMembers    = false;
+  bool _isRemovingMember   = false;
+  bool _isFetchingUsers    = false;
+  bool _isLoadingMyGroups  = false;
+  bool _isLoadingRequests  = false;
 
-  // Error states
+  // ── Error messages ──────────────────────────────────────────────────────
   String? _error;
   String? _createGroupError;
-  String? _joinGroupError;
-  String? _leaveGroupError;
   String? _messagesError;
   String? _sendMessageError;
   String? _sendFileError;
+  String? _sendVoiceError;
+  String? _myGroupsError;
+  String? _requestsError;
 
-  // Data
-  List<Map<String, dynamic>> _groups = [];
+  // ── Result messages (for snackbars) ────────────────────────────────────
+  String _groupRequestMessage   = '';
+  String _addMemberMessage      = '';
+  String _removeMessage         = '';
+  String _updateRequestMessage  = '';
+
+  // ── Data ────────────────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _groups         = [];
   List<Map<String, dynamic>> _filteredGroups = [];
-  String _currentSearchQuery = '';
-
-  // Messages data
+  List<Map<String, dynamic>> _myGroups       = [];
+  List<Map<String, dynamic>> _pendingRequests = [];
+  List<dynamic>              _allUsers       = [];
   Map<String, List<Map<String, dynamic>>> _groupMessages = {};
+
+  String  _currentSearchQuery = '';
   String? _currentGroupId;
+  String? _currentCommunityId;
+  double  _fileUploadProgress  = 0.0;
+  int     _allUsersTotalPages  = 1;
+  int     _allUsersCurrentPage = 1;
 
-  // File upload progress
-  double _fileUploadProgress = 0.0;
+  // ── Getters ────────────────────────────────────────────────────────────
+  bool get isLoading           => _isLoading;
+  bool get isSearching         => _isSearching;
+  bool get isCreatingGroup     => _isCreatingGroup;
+  bool get isRequestingGroup   => _isRequestingGroup;
+  bool get isCancellingRequest => _isCancellingRequest;
+  bool get isUpdatingRequest   => _isUpdatingRequest;
+  bool get isLoadingMessages   => _isLoadingMessages;
+  bool get isSendingMessage    => _isSendingMessage;
+  bool get isSendingFile       => _isSendingFile;
+  bool get isSendingVoice      => _isSendingVoice;
+  bool get isSendingCamera     => _isSendingCamera;
+  bool get isAddingMembers     => _isAddingMembers;
+  bool get isRemovingMember    => _isRemovingMember;
+  bool get isFetchingUsers     => _isFetchingUsers;
+  bool get isLoadingMyGroups   => _isLoadingMyGroups;
+  bool get isLoadingRequests   => _isLoadingRequests;
 
-  // Getters
-  bool get isLoading => _isLoading;
-
-  bool get isSearching => _isSearching;
-
-  bool get isCreatingGroup => _isCreatingGroup;
-
-  bool get isJoiningGroup => _isJoiningGroup;
-
-  bool get isLeavingGroup => _isLeavingGroup;
-
-  bool get isLoadingMessages => _isLoadingMessages;
-
-  bool get isSendingMessage => _isSendingMessage;
-
-  bool get isSendingFile => _isSendingFile;
-
-  String? get error => _error;
-
+  String? get error            => _error;
   String? get createGroupError => _createGroupError;
-
-  String? get joinGroupError => _joinGroupError;
-
-  String? get leaveGroupError => _leaveGroupError;
-
-  String? get messagesError => _messagesError;
-
+  String? get messagesError    => _messagesError;
   String? get sendMessageError => _sendMessageError;
+  String? get sendFileError    => _sendFileError;
+  String? get sendVoiceError   => _sendVoiceError;
+  String? get myGroupsError    => _myGroupsError;
+  String? get requestsError    => _requestsError;
 
-  String? get sendFileError => _sendFileError;
+  String get groupRequestMessage  => _groupRequestMessage;
+  String get addMemberMessage     => _addMemberMessage;
+  String get removeMessage        => _removeMessage;
+  String get updateRequestMessage => _updateRequestMessage;
 
   List<Map<String, dynamic>> get groups =>
       _filteredGroups.isNotEmpty || _currentSearchQuery.isNotEmpty
           ? _filteredGroups
           : _groups;
+  List<Map<String, dynamic>> get myGroups         => _myGroups;
+  List<Map<String, dynamic>> get pendingRequests  => _pendingRequests;
+  List<dynamic>              get allUsers         => _allUsers;
 
-  String get currentSearchQuery => _currentSearchQuery;
+  String  get currentSearchQuery  => _currentSearchQuery;
+  String? get currentGroupId      => _currentGroupId;
+  double  get fileUploadProgress  => _fileUploadProgress;
+  int     get allUsersTotalPages  => _allUsersTotalPages;
+  int     get allUsersCurrentPage => _allUsersCurrentPage;
+  bool    get hasMyGroups         => _myGroups.isNotEmpty;
+  int     get myGroupsCount       => _myGroups.length;
 
-  String? get currentGroupId => _currentGroupId;
-
-  double get fileUploadProgress => _fileUploadProgress;
-
-  // Get messages for current group
   List<Map<String, dynamic>> get currentGroupMessages =>
       _currentGroupId != null ? _groupMessages[_currentGroupId] ?? [] : [];
 
-  // Get messages for specific group
-  List<Map<String, dynamic>> getMessagesForGroup(String groupId) =>
-      _groupMessages[groupId] ?? [];
+  List<Map<String, dynamic>> getMessagesForGroup(String id) =>
+      _groupMessages[id] ?? [];
 
-  // Methods
-
-  /// Initialize the provider
+  // ══════════════════════════════════════════════════════════════════════
+  // INIT / RESET
+  // ══════════════════════════════════════════════════════════════════════
   void initialize() {
-    _clearErrors();
+    _clearAllErrors();
     _groups.clear();
     _filteredGroups.clear();
     _currentSearchQuery = '';
@@ -102,669 +125,459 @@ class GroupChatProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Fetch all groups
-  Future<void> fetchGroups() async {
-    _setLoading(true);
-    _clearErrors();
+  // ══════════════════════════════════════════════════════════════════════
+  // ALL GROUPS
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> fetchGroups({int pageNo = 1}) async {
+    print('🔄 [Provider] fetchGroups page=$pageNo');
+    _isLoading = true; _error = null; notifyListeners();
 
-    try {
-      final result = await _groupChatService.getAllGroups();
-
-      if (!result['error']) {
-        _groups = List<Map<String, dynamic>>.from(result['data'] ?? []);
-
-        // If there's an active search, filter the results
-        if (_currentSearchQuery.isNotEmpty) {
-          _filterGroupsLocally(_currentSearchQuery);
-        } else {
-          _filteredGroups.clear();
-        }
-
-        print('✅ Successfully fetched ${_groups.length} groups');
-      } else {
-        _error = result['message'];
-        print('❌ Error fetching groups: $_error');
-      }
-    } catch (e) {
-      _error = 'Failed to fetch groups: ${e.toString()}';
-      print('💥 Exception in fetchGroups: $e');
+    final r = await _svc.getAllGroups(pageNo: pageNo);
+    if (!r['error']) {
+      _groups = List<Map<String, dynamic>>.from(r['data'] ?? []);
+      if (_currentSearchQuery.isNotEmpty) _filterLocally(_currentSearchQuery);
+      else _filteredGroups.clear();
+    } else {
+      _error = r['message'];
     }
-
-    _setLoading(false);
+    _isLoading = false; notifyListeners();
   }
 
   Future<void> searchGroups(String query) async {
     _currentSearchQuery = query;
+    if (query.isEmpty) { _filteredGroups.clear(); notifyListeners(); return; }
 
-    if (query.isEmpty) {
-      // Clear search results and show all groups
-      _filteredGroups.clear();
-      notifyListeners();
-      return;
-    }
+    print('🔍 [Provider] searchGroups: "$query"');
+    _isSearching = true; _error = null; notifyListeners();
 
-    _isSearching = true;
-    _clearErrors();
-    notifyListeners();
-
-    try {
-      final result = await _groupChatService.getAllGroups(searchQuery: query);
-
-      if (!result['error']) {
-        _filteredGroups = List<Map<String, dynamic>>.from(result['data'] ?? []);
-        print(
-            '✅ Successfully searched groups with query "$query": ${_filteredGroups.length} results');
-      } else {
-        _error = result['message'];
-        _filteredGroups.clear();
-        print('❌ Error searching groups: $_error');
-      }
-    } catch (e) {
-      _error = 'Failed to search groups: ${e.toString()}';
-      _filteredGroups.clear();
-      print('💥 Exception in searchGroups: $e');
-    }
-
-    _isSearching = false;
-    notifyListeners();
+    final r = await _svc.getAllGroups(searchQuery: query);
+    _filteredGroups = r['error'] ? [] : List<Map<String, dynamic>>.from(r['data'] ?? []);
+    if (r['error']) _error = r['message'];
+    _isSearching = false; notifyListeners();
   }
 
-  /// Filter groups locally (for immediate UI feedback)
-  void _filterGroupsLocally(String query) {
-    if (query.isEmpty) {
-      _filteredGroups.clear();
-      return;
-    }
-
-    _filteredGroups = _groups.where((group) {
-      final name = group['name']?.toString().toLowerCase() ?? '';
-      final description = group['description']?.toString().toLowerCase() ?? '';
-      final searchQuery = query.toLowerCase();
-
-      return name.contains(searchQuery) || description.contains(searchQuery);
+  void _filterLocally(String q) {
+    if (q.isEmpty) { _filteredGroups.clear(); return; }
+    final lq = q.toLowerCase();
+    _filteredGroups = _groups.where((g) {
+      return (g['name']?.toString().toLowerCase().contains(lq) ?? false) ||
+          (g['description']?.toString().toLowerCase().contains(lq) ?? false);
     }).toList();
   }
 
-  /// Clear search and show all groups
   void clearSearch() {
     _currentSearchQuery = '';
     _filteredGroups.clear();
     notifyListeners();
   }
 
-  // Add this method to your GroupChatProvider class
-  void clearCreateGroupError() {
-    _createGroupError = null;
+  // ══════════════════════════════════════════════════════════════════════
+  // MY GROUPS
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> fetchMyGroups({String? communityId}) async {
+    print('🔄 [Provider] fetchMyGroups communityId=$communityId');
+    _isLoadingMyGroups = true; _myGroupsError = null;
+    _currentCommunityId = communityId; notifyListeners();
+
+    final r = await _svc.getMyGroups(communityId: communityId);
+    _myGroups = r['error'] ? [] : List<Map<String, dynamic>>.from(r['data'] ?? []);
+    if (r['error']) _myGroupsError = r['message'];
+    _isLoadingMyGroups = false; notifyListeners();
+  }
+
+  Future<void> refreshMyGroups() async =>
+      fetchMyGroups(communityId: _currentCommunityId);
+
+  void clearMyGroups() {
+    _myGroups.clear(); _myGroupsError = null; _currentCommunityId = null;
     notifyListeners();
   }
 
-// Updated createGroup method
+  bool isMyGroup(String groupId) => _myGroups.any((g) => g['_id'] == groupId);
+
+  List<Map<String, dynamic>> filterMyGroups(String q) {
+    if (q.isEmpty) return _myGroups;
+    final lq = q.toLowerCase();
+    return _myGroups.where((g) =>
+    (g['name']?.toString().toLowerCase().contains(lq) ?? false) ||
+        (g['description']?.toString().toLowerCase().contains(lq) ?? false)).toList();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CREATE GROUP
+  // ══════════════════════════════════════════════════════════════════════
   Future<bool> createGroup({
     required String name,
     required String description,
     String? profileImage,
+    List<String> members = const [],
   }) async {
-    _isCreatingGroup = true;
-    _createGroupError = null;
-    notifyListeners();
+    print('🔄 [Provider] createGroup "$name"');
+    _isCreatingGroup = true; _createGroupError = null; notifyListeners();
 
-    try {
-      print('🚀 Creating group: $name');
+    final r = await _svc.createGroup(
+        name: name, description: description,
+        profileImage: profileImage, members: members);
 
-      final result = await _groupChatService.createGroup(
-        name: name,
-        description: description,
-        profileImage: profileImage,
-      );
-
-      print('📋 Create group result: $result');
-
-      if (!result['error']) {
-        print('✅ Successfully created group: $name');
-
-        // Add the new group to the local list if data is returned
-        if (result['data'] != null) {
-          final newGroup = result['data'] as Map<String, dynamic>;
-          _groups.insert(0, newGroup); // Add to beginning of list
-          print('📝 Added new group to local list');
-        }
-
-        // Refresh the groups list to get the latest data
-        await fetchGroups();
-
-        _isCreatingGroup = false;
-        notifyListeners();
-        return true;
-      } else {
-        _createGroupError = result['message'] ?? 'Failed to create group';
-        print('❌ Error creating group: $_createGroupError');
-
-        _isCreatingGroup = false;
-        notifyListeners();
-        return false;
-      }
-    } catch (e) {
-      _createGroupError = 'Failed to create group: ${e.toString()}';
-      print('💥 Exception in createGroup: $e');
-
-      _isCreatingGroup = false;
-      notifyListeners();
-      return false;
+    if (!r['error']) {
+      if (r['data'] != null) _groups.insert(0, r['data'] as Map<String, dynamic>);
+      await fetchGroups();
+      _isCreatingGroup = false; notifyListeners();
+      return true;
     }
+    _createGroupError = r['message'];
+    _isCreatingGroup = false; notifyListeners();
+    return false;
   }
 
-  /// Fetch messages for a specific group
-  Future<void> fetchGroupMessages(String groupId) async {
-    _isLoadingMessages = true;
-    _messagesError = null;
-    _currentGroupId = groupId;
-    notifyListeners();
 
-    try {
-      print('🔍 Fetching messages for group: $groupId');
 
-      final result = await _groupChatService.getGroupMessages(groupId);
 
-      if (!result['error']) {
-        final messages = List<Map<String, dynamic>>.from(result['data'] ?? []);
-        _groupMessages[groupId] = messages;
+  // ══════════════════════════════════════════════════════════════════════
+  // MESSAGES
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> fetchGroupMessages(String groupId, {int pageNo = 1}) async {
+    print('🔄 [Provider] fetchGroupMessages $groupId page=$pageNo');
+    _isLoadingMessages = true; _messagesError = null;
+    _currentGroupId = groupId; notifyListeners();
 
-        print(
-            '✅ Successfully fetched ${messages.length} messages for group $groupId');
-      } else {
-        _messagesError = result['message'];
-        _groupMessages[groupId] = [];
-        print('❌ Error fetching messages: $_messagesError');
-      }
-    } catch (e) {
-      _messagesError = 'Failed to fetch messages: ${e.toString()}';
-      _groupMessages[groupId] = [];
-      print('💥 Exception in fetchGroupMessages: $e');
-    }
-
-    _isLoadingMessages = false;
-    notifyListeners();
+    final r = await _svc.getGroupMessages(groupId, pageNo: pageNo);
+    _groupMessages[groupId] = r['error']
+        ? []
+        : List<Map<String, dynamic>>.from(r['data'] ?? []);
+    if (r['error']) _messagesError = r['message'];
+    _isLoadingMessages = false; notifyListeners();
   }
 
-  /// Refresh messages for current group
   Future<void> refreshCurrentGroupMessages() async {
-    if (_currentGroupId != null) {
-      await fetchGroupMessages(_currentGroupId!);
-    }
+    if (_currentGroupId != null) await fetchGroupMessages(_currentGroupId!);
   }
 
-  /// Set current group (for navigation)
   void setCurrentGroup(String groupId) {
-    _currentGroupId = groupId;
-    _messagesError = null;
-    notifyListeners();
+    _currentGroupId = groupId; _messagesError = null; notifyListeners();
   }
 
-  /// Clear current group
   void clearCurrentGroup() {
-    _currentGroupId = null;
-    _messagesError = null;
-    notifyListeners();
+    _currentGroupId = null; _messagesError = null; notifyListeners();
   }
 
-  /// Add a new message to the current group (for real-time updates)
   void addMessageToCurrentGroup(Map<String, dynamic> message) {
-    if (_currentGroupId != null) {
-      if (_groupMessages[_currentGroupId] == null) {
-        _groupMessages[_currentGroupId!] = [];
-      }
-      _groupMessages[_currentGroupId!]!.add(message);
-      notifyListeners();
-    }
-  }
-
-  /// Update message read status
-  void markMessageAsRead(String messageId, String userId) {
-    if (_currentGroupId != null && _groupMessages[_currentGroupId] != null) {
-      final messages = _groupMessages[_currentGroupId!]!;
-      final messageIndex =
-          messages.indexWhere((msg) => msg['_id'] == messageId);
-
-      if (messageIndex != -1) {
-        final message = messages[messageIndex];
-        final readers = List<String>.from(message['readers'] ?? []);
-
-        if (!readers.contains(userId)) {
-          readers.add(userId);
-          message['readers'] = readers;
-          notifyListeners();
-        }
-      }
-    }
-  }
-
-  Map<String, dynamic>? getGroupById(String groupId) {
-    try {
-      return _groups.firstWhere((group) => group['_id'] == groupId);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /// Check if user is member of a group
-  bool isGroupMember(String groupId) {
-    final group = getGroupById(groupId);
-    return group?['isMember'] ?? false;
-  }
-
-  /// Check if user is admin of a group
-  bool isGroupAdmin(String groupId) {
-    final group = getGroupById(groupId);
-    return group?['isAdmin'] ?? false;
-  }
-
-  /// Check if user has requested to join a group
-  bool hasRequestedToJoin(String groupId) {
-    final group = getGroupById(groupId);
-    return group?['isRequested'] ?? false;
-  }
-
-  /// Clear messages error
-  void clearMessagesError() {
-    _messagesError = null;
+    if (_currentGroupId == null) return;
+    _groupMessages[_currentGroupId!] ??= [];
+    _groupMessages[_currentGroupId!]!.add(message);
     notifyListeners();
   }
 
-  /// Send a message to a group
+  // ══════════════════════════════════════════════════════════════════════
+  // SEND TEXT MESSAGE
+  // ══════════════════════════════════════════════════════════════════════
   Future<bool> sendGroupMessage({
     required String groupId,
     required String text,
     required Map<String, dynamic> communityInfo,
     String? image,
   }) async {
-    _isSendingMessage = true;
-    _sendMessageError = null;
-    notifyListeners();
+    print('🔄 [Provider] sendGroupMessage to $groupId');
+    _isSendingMessage = true; _sendMessageError = null; notifyListeners();
 
-    try {
-      print('📤 Sending message to group: $groupId');
+    final r = await _svc.sendGroupMessage(
+        groupId: groupId, text: text, communityInfo: communityInfo, image: image);
 
-      final result = await _groupChatService.sendGroupMessage(
-        groupId: groupId,
-        text: text,
-        communityInfo: communityInfo,
-        image: image,
-      );
-
-      print('📋 Send message result: $result');
-
-      if (!result['error']) {
-        print('✅ Message sent successfully');
-
-        // Add the new message to the local messages list if we have the group loaded
-        if (_currentGroupId == groupId && result['data'] != null) {
-          final newMessage = result['data'] as Map<String, dynamic>;
-          if (_groupMessages[groupId] == null) {
-            _groupMessages[groupId] = [];
-          }
-          _groupMessages[groupId]!.add(newMessage);
-        }
-
-        _isSendingMessage = false;
-        notifyListeners();
-        return true;
-      } else {
-        _sendMessageError = result['message'] ?? 'Failed to send message';
-        print('❌ Error sending message: $_sendMessageError');
-
-        _isSendingMessage = false;
-        notifyListeners();
-        return false;
+    if (!r['error']) {
+      if (_currentGroupId == groupId && r['data'] != null) {
+        _groupMessages[groupId] ??= [];
+        _groupMessages[groupId]!.add(r['data'] as Map<String, dynamic>);
       }
-    } catch (e) {
-      _sendMessageError = 'Failed to send message: ${e.toString()}';
-      print('💥 Exception in sendGroupMessage: $e');
-
-      _isSendingMessage = false;
-      notifyListeners();
-      return false;
+      _isSendingMessage = false; notifyListeners();
+      return true;
     }
+    _sendMessageError = r['message'];
+    _isSendingMessage = false; notifyListeners();
+    return false;
   }
 
-  /// Send a file message to a group
+  // ══════════════════════════════════════════════════════════════════════
+  // SEND FILE
+  // ══════════════════════════════════════════════════════════════════════
   Future<bool> sendGroupFileMessage({
     required String groupId,
     required File file,
     Map<String, dynamic>? communityInfo,
   }) async {
-    _isSendingFile = true;
-    _sendFileError = null;
-    _fileUploadProgress = 0.0;
+    print('🔄 [Provider] sendGroupFileMessage to $groupId');
+    _isSendingFile = true; _sendFileError = null; _fileUploadProgress = 0.0;
     notifyListeners();
 
-    try {
-      print('📤 Sending file to group: $groupId');
+    final r = await _svc.sendGroupFileMessage(
+        groupId: groupId, file: file, communityInfo: communityInfo);
 
-      final result = await _groupChatService.sendGroupFileMessage(
-        groupId: groupId,
-        file: file,
-        communityInfo: communityInfo,
-      );
-
-      print('📋 Send file result: $result');
-
-      if (!result['error']) {
-        print('✅ File sent successfully');
-
-        // Add the new file message to the local messages list if we have the group loaded
-        if (_currentGroupId == groupId && result['data'] != null) {
-          final newMessage = result['data'] as Map<String, dynamic>;
-          if (_groupMessages[groupId] == null) {
-            _groupMessages[groupId] = [];
-          }
-          _groupMessages[groupId]!.add(newMessage);
-        }
-
-        _isSendingFile = false;
-        _fileUploadProgress = 1.0;
-        notifyListeners();
-        return true;
-      } else {
-        _sendFileError = result['message'] ?? 'Failed to send file';
-        print('❌ Error sending file: $_sendFileError');
-
-        _isSendingFile = false;
-        _fileUploadProgress = 0.0;
-        notifyListeners();
-        return false;
+    if (!r['error']) {
+      if (_currentGroupId == groupId && r['data'] != null) {
+        _groupMessages[groupId] ??= [];
+        _groupMessages[groupId]!.add(r['data'] as Map<String, dynamic>);
       }
-    } catch (e) {
-      _sendFileError = 'Failed to send file: ${e.toString()}';
-      print('💥 Exception in sendGroupFileMessage: $e');
+      _isSendingFile = false; _fileUploadProgress = 1.0; notifyListeners();
+      return true;
+    }
+    _sendFileError = r['message'];
+    _isSendingFile = false; _fileUploadProgress = 0.0; notifyListeners();
+    return false;
+  }
 
-      _isSendingFile = false;
-      _fileUploadProgress = 0.0;
-      notifyListeners();
+  // ══════════════════════════════════════════════════════════════════════
+  // SEND VOICE MESSAGE  ← NEW
+  // ══════════════════════════════════════════════════════════════════════
+  Future<bool> sendGroupVoiceMessage({
+    required String groupId,
+    required File audioFile,
+    Map<String, dynamic>? communityInfo,
+  }) async {
+    print('🔄 [Provider] sendGroupVoiceMessage to $groupId');
+    _isSendingVoice = true; _sendVoiceError = null; notifyListeners();
+
+    final r = await _svc.sendGroupVoiceMessage(
+        groupId: groupId, audioFile: audioFile, communityInfo: communityInfo);
+
+    if (!r['error']) {
+      if (_currentGroupId == groupId && r['data'] != null) {
+        _groupMessages[groupId] ??= [];
+        _groupMessages[groupId]!.add(r['data'] as Map<String, dynamic>);
+        print('🎤 [Provider] Voice message added to local messages');
+      }
+      _isSendingVoice = false; notifyListeners();
+      return true;
+    }
+    _sendVoiceError = r['message'];
+    _isSendingVoice = false; notifyListeners();
+    return false;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // SEND CAMERA PHOTO  ← NEW
+  // ══════════════════════════════════════════════════════════════════════
+  Future<bool> sendGroupCameraPhoto({
+    required String groupId,
+    Map<String, dynamic>? communityInfo,
+  }) async {
+    print('🔄 [Provider] sendGroupCameraPhoto to $groupId');
+    _isSendingCamera = true; _sendFileError = null; notifyListeners();
+
+    final r = await _svc.sendGroupCameraPhoto(
+        groupId: groupId, communityInfo: communityInfo);
+
+    // User cancelled — not an error, just stop loading
+    if (r['cancelled'] == true) {
+      _isSendingCamera = false; notifyListeners();
       return false;
     }
+
+    if (!r['error']) {
+      if (_currentGroupId == groupId && r['data'] != null) {
+        _groupMessages[groupId] ??= [];
+        _groupMessages[groupId]!.add(r['data'] as Map<String, dynamic>);
+        print('📸 [Provider] Camera photo added to local messages');
+      }
+      _isSendingCamera = false; notifyListeners();
+      return true;
+    }
+    _sendFileError = r['message'];
+    _isSendingCamera = false; notifyListeners();
+    return false;
   }
 
-  /// Update file upload progress
-  void updateFileUploadProgress(double progress) {
-    _fileUploadProgress = progress;
-    notifyListeners();
+  // ══════════════════════════════════════════════════════════════════════
+  // JOIN GROUP REQUEST
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> requestToJoinGroup(String groupId) async {
+    print('🔄 [Provider] requestToJoinGroup $groupId');
+    _isRequestingGroup = true; _groupRequestMessage = ''; notifyListeners();
+
+    final r = await _svc.requestToJoinGroup(groupId: groupId);
+    _groupRequestMessage = r['message'] ?? 'Unknown';
+    _isRequestingGroup = false; notifyListeners();
   }
 
-  /// Clear send message error
-  void clearSendMessageError() {
-    _sendMessageError = null;
-    notifyListeners();
+  // ══════════════════════════════════════════════════════════════════════
+  // CANCEL JOIN REQUEST  ← NEW
+  // ══════════════════════════════════════════════════════════════════════
+  Future<bool> cancelGroupRequest(String groupId) async {
+    print('🔄 [Provider] cancelGroupRequest $groupId');
+    _isCancellingRequest = true; notifyListeners();
+
+    final r = await _svc.cancelGroupRequest(groupId: groupId);
+    _isCancellingRequest = false; notifyListeners();
+
+    if (!r['error']) {
+      // Update local state so button reflects cancellation
+      for (final g in [..._groups, ..._myGroups]) {
+        if (g['_id'] == groupId) g['isRequested'] = false;
+      }
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 
-  /// Clear send file error
-  void clearSendFileError() {
-    _sendFileError = null;
-    notifyListeners();
-  }
-
-  // Helper methods
-  void _setLoading(bool loading) {
-    _isLoading = loading;
-    notifyListeners();
-  }
-
-  void _clearErrors() {
-    _error = null;
-    _createGroupError = null;
-    _joinGroupError = null;
-    _leaveGroupError = null;
-    _messagesError = null;
-    _sendMessageError = null;
-    _sendFileError = null;
-  }
-
-  /// Clear all errors manually
-  void clearErrors() {
-    _clearErrors();
-    notifyListeners();
-  }
-
-  bool _isLoadingRequests = false;
-  String? _requestsError;
-  List<Map<String, dynamic>> _pendingRequests = [];
-
-
-  bool get isLoadingRequests => _isLoadingRequests;
-
-  String? get requestsError => _requestsError;
-
-  List<Map<String, dynamic>> get pendingRequests => _pendingRequests;
-
+  // ══════════════════════════════════════════════════════════════════════
+  // PENDING REQUESTS (admin)
+  // ══════════════════════════════════════════════════════════════════════
   Future<void> fetchPendingRequests() async {
-    _isLoadingRequests = true;
-    _requestsError = null;
-    _pendingRequests = [];
+    print('🔄 [Provider] fetchPendingRequests');
+    _isLoadingRequests = true; _requestsError = null; _pendingRequests = [];
     notifyListeners();
 
     try {
       final adminGroups = _groups.where((g) => g['isAdmin'] == true).toList();
+      print('📋 [Provider] Admin groups: ${adminGroups.length}');
 
       if (adminGroups.isEmpty) {
-        print('📝 No admin groups found');
-        _isLoadingRequests = false;
-        notifyListeners();
-        return;
+        _isLoadingRequests = false; notifyListeners(); return;
       }
 
-      print('🔍 Fetching requests for ${adminGroups.length} admin groups');
-
-      // Use Future.wait to make parallel requests instead of sequential
       final results = await Future.wait(
-        adminGroups.map((group) async {
-          try {
-            final result =
-                await _groupChatService.getGroupRequests(group['_id']);
-
-            if (!result['error']) {
-              final requests =
-                  List<Map<String, dynamic>>.from(result['data'] ?? []);
-
-              // Only process if there are actual requests
-              if (requests.isNotEmpty) {
-                print(
-                    '✅ Found ${requests.length} requests for group: ${group['name']}');
-
-                // Add group info to each request
-                for (var req in requests) {
-                  req['groupName'] = group['name'];
-                  req['groupId'] = group['_id'];
-                  req['groupDescription'] = group['description'];
-                }
-
-                return requests;
-              }
-            } else {
-              print(
-                  '❌ Error fetching requests for group ${group['_id']}: ${result['message']}');
+        adminGroups.map((g) async {
+          final r = await _svc.getGroupRequests(g['_id']);
+          if (!r['error']) {
+            final reqs = List<Map<String, dynamic>>.from(r['data'] ?? []);
+            for (final req in reqs) {
+              req['groupName'] = g['name'];
+              req['groupId']   = g['_id'];
             }
-          } catch (e) {
-            print('💥 Exception for group ${group['_id']}: $e');
+            return reqs;
           }
-
           return <Map<String, dynamic>>[];
         }),
       );
 
-      // Flatten all results and add to pending requests
-      for (var groupRequests in results) {
-        _pendingRequests.addAll(groupRequests);
-      }
-
-      print('📊 Total pending requests found: ${_pendingRequests.length}');
+      for (final list in results) { _pendingRequests.addAll(list); }
+      print('📊 [Provider] Total pending: ${_pendingRequests.length}');
     } catch (e) {
-      _requestsError = 'Failed to fetch requests: $e';
-      print('💥 Exception in fetchPendingRequests: $e');
+      _requestsError = e.toString();
+      print('💥 [Provider] fetchPendingRequests error: $e');
     }
-
-    _isLoadingRequests = false;
-    notifyListeners();
+    _isLoadingRequests = false; notifyListeners();
   }
 
-  // Add these fields to your GroupChatProvider class
-  bool _isLoadingMyGroups = false;
-  String? _myGroupsError;
-  List<Map<String, dynamic>> _myGroups = [];
-  String? _currentCommunityId;
+  // ══════════════════════════════════════════════════════════════════════
+  // APPROVE / REJECT REQUEST  ← NEW
+  // ══════════════════════════════════════════════════════════════════════
+  Future<bool> updateGroupRequest({
+    required String requestId,
+    required String status, // "approved" or "rejected"
+  }) async {
+    print('🔄 [Provider] updateGroupRequest $requestId → $status');
+    _isUpdatingRequest = true; _updateRequestMessage = ''; notifyListeners();
 
-// Add these getters
-  bool get isLoadingMyGroups => _isLoadingMyGroups;
+    final r = await _svc.updateGroupRequest(requestId: requestId, status: status);
+    _updateRequestMessage = r['message'] ?? 'Unknown';
+    _isUpdatingRequest = false;
 
-  String? get myGroupsError => _myGroupsError;
-
-  List<Map<String, dynamic>> get myGroups => _myGroups;
-
-  String? get currentCommunityId => _currentCommunityId;
-
-  Future<void> fetchMyGroups({String? communityId}) async {
-    _isLoadingMyGroups = true;
-    _myGroupsError = null;
-    _currentCommunityId = communityId;
-    notifyListeners();
-
-    try {
-      print(
-          '🔍 Fetching my groups${communityId != null ? ' for community: $communityId' : ''}');
-
-      final result =
-          await _groupChatService.getMyGroups(communityId: communityId);
-
-      if (!result['error']) {
-        _myGroups = List<Map<String, dynamic>>.from(result['data'] ?? []);
-        print('✅ Successfully fetched ${_myGroups.length} user groups');
-      } else {
-        _myGroupsError = result['message'];
-        _myGroups = [];
-        print('❌ Error fetching my groups: $_myGroupsError');
-      }
-    } catch (e) {
-      _myGroupsError = 'Failed to fetch my groups: ${e.toString()}';
-      _myGroups = [];
-      print('💥 Exception in fetchMyGroups: $e');
-    }
-
-    _isLoadingMyGroups = false;
-    notifyListeners();
-  }
-
-  /// Refresh user's groups
-  Future<void> refreshMyGroups() async {
-    await fetchMyGroups(communityId: _currentCommunityId);
-  }
-
-  /// Fetch user's groups for a specific community
-  Future<void> fetchMyGroupsForCommunity(String communityId) async {
-    await fetchMyGroups(communityId: communityId);
-  }
-
-  /// Clear user's groups
-  void clearMyGroups() {
-    _myGroups.clear();
-    _myGroupsError = null;
-    _currentCommunityId = null;
-    notifyListeners();
-  }
-
-  /// Clear my groups error
-  void clearMyGroupsError() {
-    _myGroupsError = null;
-    notifyListeners();
-  }
-
-  /// Check if a group exists in user's groups
-  bool isMyGroup(String groupId) {
-    return _myGroups.any((group) => group['_id'] == groupId);
-  }
-
-  /// Get a specific group from user's groups
-  Map<String, dynamic>? getMyGroupById(String groupId) {
-    try {
-      return _myGroups.firstWhere((group) => group['_id'] == groupId);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  int get myGroupsCount => _myGroups.length;
-
-  bool get hasMyGroups => _myGroups.isNotEmpty;
-
-  List<Map<String, dynamic>> filterMyGroups(String query) {
-    if (query.isEmpty) return _myGroups;
-
-    final searchQuery = query.toLowerCase();
-    return _myGroups.where((group) {
-      final name = group['name']?.toString().toLowerCase() ?? '';
-      final description = group['description']?.toString().toLowerCase() ?? '';
-      return name.contains(searchQuery) || description.contains(searchQuery);
-    }).toList();
-  }
-
-  // Fetch users
-  bool _isFetchingUsers = false;
-  bool get isFetchingUsers => _isFetchingUsers;
-
-  List<dynamic> _allUsers = [];
-  List<dynamic> get allUsers => _allUsers;
-
-  Future<void> fetchAllUsers({int page = 1}) async {
-    _isFetchingUsers = true;
-    notifyListeners();
-
-    final result = await _groupChatService.fetchAllUsers(page: page);
-
-    _isFetchingUsers = false;
-    if (!result['error']) {
-      _allUsers = result['data']['allUsers'] ?? [];
+    if (!r['error']) {
+      // Remove from local pending list
+      _pendingRequests.removeWhere((req) => req['_id'] == requestId);
     }
     notifyListeners();
+    return !r['error'];
   }
 
-// Add members
-  bool _isAddingMembers = false;
-  bool get isAddingMembers => _isAddingMembers;
-
-  String _addMemberMessage = '';
-  String get addMemberMessage => _addMemberMessage;
-
+  // ══════════════════════════════════════════════════════════════════════
+  // ADD MEMBERS
+  // ══════════════════════════════════════════════════════════════════════
   Future<void> addMembersToGroup({
     required String groupId,
     required List<String> memberIds,
   }) async {
-    _isAddingMembers = true;
-    _addMemberMessage = '';
-    notifyListeners();
+    print('🔄 [Provider] addMembersToGroup $groupId — ${memberIds.length} members');
+    _isAddingMembers = true; _addMemberMessage = ''; notifyListeners();
 
-    final result = await _groupChatService.addMembersToGroup(
-      groupId: groupId,
-      memberIds: memberIds,
-    );
+    final r = await _svc.addMembersToGroup(groupId: groupId, memberIds: memberIds);
+    _addMemberMessage = r['message'] ?? 'Unknown';
+    _isAddingMembers = false; notifyListeners();
+  }
 
-    _isAddingMembers = false;
-    _addMemberMessage = result['message'] ?? 'Unknown response';
+  // ══════════════════════════════════════════════════════════════════════
+  // REMOVE MEMBER  ← NEW
+  // ══════════════════════════════════════════════════════════════════════
+  Future<bool> removeMemberFromGroup({
+    required String groupId,
+    required String userId,
+  }) async {
+    print('🔄 [Provider] removeMemberFromGroup $userId from $groupId');
+    _isRemovingMember = true; _removeMessage = ''; notifyListeners();
+
+    final r = await _svc.removeMemberFromGroup(groupId: groupId, userId: userId);
+    _removeMessage = r['message'] ?? 'Unknown';
+    _isRemovingMember = false; notifyListeners();
+    return !r['error'];
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // FETCH ALL USERS
+  // ══════════════════════════════════════════════════════════════════════
+  Future<void> fetchAllUsers({int page = 1, String? search}) async {
+    print('🔄 [Provider] fetchAllUsers page=$page search=$search');
+    _isFetchingUsers = true; notifyListeners();
+
+    final r = await _svc.fetchAllUsers(page: page, search: search);
+    _isFetchingUsers = false;
+    if (!r['error']) {
+      _allUsers = r['data']?['allUsers'] ?? [];
+      _allUsersTotalPages  = r['totalPage']  ?? 1;
+      _allUsersCurrentPage = r['currentPage'] ?? 1;
+    }
     notifyListeners();
   }
 
-  bool _isRequestingGroup = false;
-  bool get isRequestingGroup => _isRequestingGroup;
-
-  String _groupRequestMessage = '';
-  String get groupRequestMessage => _groupRequestMessage;
-
-  Future<void> requestToJoinGroup(String groupId) async {
-    _isRequestingGroup = true;
-    _groupRequestMessage = '';
-    notifyListeners();
-
-    final result = await _groupChatService.requestToJoinGroup(groupId: groupId);
-
-    _isRequestingGroup = false;
-    _groupRequestMessage = result['message'] ?? 'Unknown response';
-    notifyListeners();
+  // ══════════════════════════════════════════════════════════════════════
+  // HELPERS — group lookups
+  // ══════════════════════════════════════════════════════════════════════
+  Map<String, dynamic>? getGroupById(String id) {
+    try { return _groups.firstWhere((g) => g['_id'] == id); }
+    catch (_) { return null; }
   }
 
+  Map<String, dynamic>? getMyGroupById(String id) {
+    try { return _myGroups.firstWhere((g) => g['_id'] == id); }
+    catch (_) { return null; }
+  }
+
+  bool isGroupMember(String id)  => getGroupById(id)?['isMember']    ?? false;
+  bool isGroupAdmin(String id)   => getGroupById(id)?['isAdmin']      ?? false;
+  bool hasRequestedToJoin(String id) => getGroupById(id)?['isRequested'] ?? false;
+
+  void markMessageAsRead(String messageId, String userId) {
+    if (_currentGroupId == null) return;
+    final msgs = _groupMessages[_currentGroupId!];
+    if (msgs == null) return;
+    final idx = msgs.indexWhere((m) => m['_id'] == messageId);
+    if (idx != -1) {
+      final readers = List<String>.from(msgs[idx]['readers'] ?? []);
+      if (!readers.contains(userId)) {
+        readers.add(userId);
+        msgs[idx]['readers'] = readers;
+        notifyListeners();
+      }
+    }
+  }
+
+  void updateFileUploadProgress(double p) {
+    _fileUploadProgress = p; notifyListeners();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CLEAR ERRORS
+  // ══════════════════════════════════════════════════════════════════════
+  void _clearAllErrors() {
+    _error = null; _createGroupError = null; _messagesError = null;
+    _sendMessageError = null; _sendFileError = null; _sendVoiceError = null;
+    _myGroupsError = null; _requestsError = null;
+  }
+
+  void clearErrors()           { _clearAllErrors(); notifyListeners(); }
+  void clearCreateGroupError() { _createGroupError = null; notifyListeners(); }
+  void clearMessagesError()    { _messagesError    = null; notifyListeners(); }
+  void clearSendMessageError() { _sendMessageError = null; notifyListeners(); }
+  void clearSendFileError()    { _sendFileError    = null; notifyListeners(); }
+  void clearSendVoiceError()   { _sendVoiceError   = null; notifyListeners(); }
+  void clearMyGroupsError()    { _myGroupsError    = null; notifyListeners(); }
 }

@@ -1,873 +1,556 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:io';
-import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/apiConstants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GroupChatService — ALL endpoints from API documentation
+// Base: https://api.ixes.ai/api/chat
+// ═══════════════════════════════════════════════════════════════════════════
 class GroupChatService {
 
-
-  Future<Map<String, dynamic>> getAllGroups({String? searchQuery}) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      String endpoint = '${apiBaseUrl}api/chat/getallgroups?search=';
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        endpoint += '?search=${Uri.encodeQueryComponent(searchQuery)}';
-      }
-
-      final uri = Uri.parse(endpoint);
-      print('🔍 Fetching groups from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Groups fetched successfully',
-          'data': decoded['data'] ?? []
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch groups',
-          'data': []
-        };
-      }
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching groups: ${e.toString()}',
-        'data': []
-      };
+  // ── Log helpers ────────────────────────────────────────────────────────
+  void _logRequest(String method, String endpoint, {Map<String, dynamic>? body}) {
+    print('┌──────────────────────────────────────────────');
+    print('│ 🚀 [$method] $endpoint');
+    if (body != null) {
+      final s = jsonEncode(body);
+      print('│ 📦 ${s.length > 300 ? s.substring(0, 300) + '...' : s}');
     }
+    print('└──────────────────────────────────────────────');
   }
 
+  void _logResponse(int code, String body, {String? label}) {
+    final ok = code >= 200 && code < 300;
+    final preview = body.length > 500 ? '${body.substring(0, 500)}…' : body;
+    print('┌──────────────────────────────────────────────');
+    print('│ ${ok ? '✅' : '❌'} [$label] $code');
+    print('│ 📩 $preview');
+    print('└──────────────────────────────────────────────');
+  }
+
+  void _logError(String label, dynamic e) {
+    print('┌──────────────────────────────────────────────');
+    print('│ 💥 EXCEPTION [$label]: $e');
+    print('└──────────────────────────────────────────────');
+  }
+
+  Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final t = prefs.getString('auth_token');
+    if (t == null || t.isEmpty) { print('❗ [AUTH] Token missing!'); return null; }
+    print('🔑 [AUTH] ${t.substring(0, 12)}...');
+    return t;
+  }
+
+  Map<String, String> _jsonHeaders(String token) =>
+      {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'};
+
+  Map<String, dynamic> _noToken() =>
+      {'error': true, 'message': 'Auth token missing', 'data': null};
+  Map<String, dynamic> _noInternet(String l) {
+    print('🌐 [$l] No internet'); return {'error': true, 'message': 'No internet.', 'data': null};
+  }
+  Map<String, dynamic> _timeout(String l) {
+    print('⏰ [$l] Timeout'); return {'error': true, 'message': 'Timeout. Try again.', 'data': null};
+  }
+  Map<String, dynamic> _exception(dynamic e) =>
+      {'error': true, 'message': 'Error: ${e.toString()}', 'data': null};
+  Map<String, dynamic> _apiError(http.Response r, String l) {
+    try {
+      final d = jsonDecode(r.body);
+      print('❌ [$l] HTTP ${r.statusCode}: ${d['message']}');
+      return {'error': true, 'message': d['message'] ?? 'Failed (${r.statusCode})', 'data': null};
+    } catch (_) { return {'error': true, 'message': 'HTTP ${r.statusCode}', 'data': null}; }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 1. GET ALL GROUPS — GET /getallgroups?search=&pageNo=&limit=
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> getAllGroups({
+    String? searchQuery,
+    int pageNo = 1,
+    int limit = 20,
+  }) async {
+    const l = 'getAllGroups';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
+
+      final params = {'pageNo': '$pageNo', 'limit': '$limit'};
+      if (searchQuery != null && searchQuery.isNotEmpty) params['search'] = searchQuery;
+      final uri = Uri.parse('${apiBaseUrl}api/chat/getallgroups').replace(queryParameters: params);
+      _logRequest('GET', uri.toString());
+
+      final res = await http.get(uri, headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final groups = d['data'] ?? [];
+        print('📊 [$l] ${(groups as List).length} groups');
+        return {'error': false, 'message': 'OK', 'data': groups};
+      }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 2. GET MY GROUPS — GET /mygroups?communityId=&pageNo=&limit=
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> getMyGroups({
+    String? communityId,
+    int pageNo = 1,
+    int limit = 20,
+  }) async {
+    const l = 'getMyGroups';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
+
+      final params = {'pageNo': '$pageNo', 'limit': '$limit'};
+      if (communityId != null && communityId.isNotEmpty) params['communityId'] = communityId;
+      final uri = Uri.parse('${apiBaseUrl}api/chat/mygroups').replace(queryParameters: params);
+      _logRequest('GET', uri.toString());
+
+      final res = await http.get(uri, headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final groups = d['data'] ?? [];
+        print('📊 [$l] ${(groups as List).length} my groups');
+        return {'error': false, 'message': 'OK', 'data': groups};
+      }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 3. CREATE GROUP — POST /creategroup
+  // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> createGroup({
     required String name,
     required String description,
     String? profileImage,
+    List<String> members = const [],
   }) async {
+    const l = 'createGroup';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/creategroup');
-      print('🔍 Creating group at: $uri');
-
-      // Build request body
-      Map<String, dynamic> requestBody = {
+      final body = {
         'name': name,
         'description': description,
+        'members': members,
+        if (profileImage != null && profileImage.isNotEmpty) 'profileImage': profileImage,
       };
+      _logRequest('POST', '${apiBaseUrl}api/chat/creategroup',
+          body: {'name': name, 'description': description});
 
-      // Add profile image if provided
-      if (profileImage != null && profileImage.isNotEmpty) {
-        requestBody['profileImage'] = profileImage;
-      }
+      final res = await http.post(Uri.parse('${apiBaseUrl}api/chat/creategroup'),
+          headers: _jsonHeaders(token), body: jsonEncode(body));
+      _logResponse(res.statusCode, res.body, label: l);
 
-      // Add empty members array as per API spec
-      requestBody['members'] = [];
-
-      print('📦 Request Body: ${jsonEncode(requestBody)}');
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final decoded = jsonDecode(response.body);
-
-        // Handle successful response
-        if (decoded['error'] == false || decoded['error'] == null) {
-          return {
-            'error': false,
-            'message': decoded['message'] ?? 'Group created successfully',
-            'data': decoded['data']
-          };
-        } else {
-          // API returned error = true
-          return {
-            'error': true,
-            'message': decoded['message'] ?? 'Failed to create group',
-            'data': null
-          };
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final d = jsonDecode(res.body);
+        if (d['error'] == false || d['error'] == null) {
+          print('✅ [$l] Created group "${name}" id: ${d['data']?['_id']}');
+          return {'error': false, 'message': d['message'] ?? 'Group created', 'data': d['data']};
         }
-      } else if (response.statusCode == 400) {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Bad Request: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Invalid request. Please check your input.',
-          'data': null
-        };
-      } else if (response.statusCode == 401) {
-        print('🔐 Unauthorized request');
-        return {
-          'error': true,
-          'message': 'Authentication failed. Please login again.',
-          'data': null
-        };
-      } else if (response.statusCode == 403) {
-        print('🚫 Forbidden request');
-        return {
-          'error': true,
-          'message': 'You don\'t have permission to create groups.',
-          'data': null
-        };
-      } else if (response.statusCode >= 500) {
-        print('🔥 Server error: ${response.statusCode}');
-        return {
-          'error': true,
-          'message': 'Server error. Please try again later.',
-          'data': null
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to create group',
-          'data': null
-        };
+        return {'error': true, 'message': d['message'] ?? 'Failed', 'data': null};
       }
-    } on SocketException {
-      print('🌐 No internet connection');
-      return {
-        'error': true,
-        'message': 'No internet connection. Please check your network.',
-        'data': null
-      };
-    } on TimeoutException {
-      print('⏰ Request timeout');
-      return {
-        'error': true,
-        'message': 'Request timeout. Please try again.',
-        'data': null
-      };
-    } on FormatException catch (e) {
-      print('📋 Invalid response format: $e');
-      return {
-        'error': true,
-        'message': 'Invalid response from server.',
-        'data': null
-      };
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'An unexpected error occurred: ${e.toString()}',
-        'data': null
-      };
-    }
+      return _apiError(res, l);
+    } on SocketException { return _noInternet(l); }
+    on TimeoutException { return _timeout(l); }
+    catch (e) { _logError(l, e); return _exception(e); }
   }
 
-  /// Get messages for a specific group
-  Future<Map<String, dynamic>> getGroupMessages(String groupId) async {
+  // ════════════════════════════════════════════════════════════════════════
+  // 4. GET GROUP MESSAGES — GET /groupmessages/:id?pageNo=&limit=
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> getGroupMessages(String groupId,
+      {int pageNo = 1, int limit = 30}) async {
+    const l = 'getGroupMessages';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
+      final uri = Uri.parse('${apiBaseUrl}api/chat/groupmessages/$groupId')
+          .replace(queryParameters: {'pageNo': '$pageNo', 'limit': '$limit'});
+      _logRequest('GET', uri.toString());
+
+      final res = await http.get(uri, headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final msgs = d['data'] ?? [];
+        print('📨 [$l] ${(msgs as List).length} messages for $groupId');
+        return {'error': false, 'message': 'OK', 'data': msgs};
       }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/groupmessages/$groupId');
-      print('🔍 Fetching messages for group $groupId from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Messages fetched successfully',
-          'data': decoded['data'] ?? []
-        };
-      } else if (response.statusCode == 401) {
-        print('🔐 Unauthorized request');
-        return {
-          'error': true,
-          'message': 'Authentication failed. Please login again.',
-          'data': []
-        };
-      } else if (response.statusCode == 403) {
-        print('🚫 Forbidden request');
-        return {
-          'error': true,
-          'message': 'You don\'t have permission to view this group\'s messages.',
-          'data': []
-        };
-      } else if (response.statusCode == 404) {
-        print('❓ Group not found');
-        return {
-          'error': true,
-          'message': 'Group not found.',
-          'data': []
-        };
-      } else if (response.statusCode >= 500) {
-        print('🔥 Server error: ${response.statusCode}');
-        return {
-          'error': true,
-          'message': 'Server error. Please try again later.',
-          'data': []
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch messages',
-          'data': []
-        };
-      }
-    } on SocketException {
-      print('🌐 No internet connection');
-      return {
-        'error': true,
-        'message': 'No internet connection. Please check your network.',
-        'data': []
-      };
-    } on TimeoutException {
-      print('⏰ Request timeout');
-      return {
-        'error': true,
-        'message': 'Request timeout. Please try again.',
-        'data': []
-      };
-    } on FormatException catch (e) {
-      print('📋 Invalid response format: $e');
-      return {
-        'error': true,
-        'message': 'Invalid response from server.',
-        'data': []
-      };
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching messages: ${e.toString()}',
-        'data': []
-      };
-    }
+      return _apiError(res, l);
+    } on SocketException { return _noInternet(l); }
+    catch (e) { _logError(l, e); return _exception(e); }
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  // 5. SEND TEXT MESSAGE — POST /groupmessage
+  //    Socket event out: groupMessage { groupId, message }
+  // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupMessage({
     required String groupId,
     required String text,
     required Map<String, dynamic> communityInfo,
     String? image,
   }) async {
+    const l = 'sendGroupMessage';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/groupmessage');
-      print('📤 Sending message to group $groupId at: $uri');
-
-      // Prepare request body
-      Map<String, dynamic> requestBody = {
+      final body = {
         'groupId': groupId,
         'text': text,
         'communityInfo': communityInfo,
+        if (image != null && image.isNotEmpty) 'image': image,
       };
+      _logRequest('POST', '${apiBaseUrl}api/chat/groupmessage',
+          body: {'groupId': groupId, 'text': text.length > 60 ? text.substring(0, 60) + '...' : text});
 
-      // Add image if provided
-      if (image != null && image.isNotEmpty) {
-        requestBody['image'] = image;
+      final res = await http.post(Uri.parse('${apiBaseUrl}api/chat/groupmessage'),
+          headers: _jsonHeaders(token), body: jsonEncode(body))
+          .timeout(const Duration(seconds: 30));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] msgId: ${d['message']?['_id']}');
+        return {'error': d['error'] ?? false, 'message': d['message'], 'groupId': d['groupId'], 'data': d['message']};
       }
-
-      print('📦 Request Body: ${jsonEncode(requestBody)}');
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      ).timeout(const Duration(seconds: 30));
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'],
-          'groupId': decoded['groupId'],
-          'data': decoded['message'] // The message object from response
-        };
-      } else if (response.statusCode == 401) {
-        print('🔐 Unauthorized request');
-        return {
-          'error': true,
-          'message': 'Authentication failed. Please login again.',
-          'data': null
-        };
-      } else if (response.statusCode == 403) {
-        print('🚫 Forbidden request');
-        return {
-          'error': true,
-          'message': 'You don\'t have permission to send messages to this group.',
-          'data': null
-        };
-      } else if (response.statusCode == 404) {
-        print('❓ Group not found');
-        return {
-          'error': true,
-          'message': 'Group not found.',
-          'data': null
-        };
-      } else if (response.statusCode == 400) {
-        final decoded = jsonDecode(response.body);
-        print('📋 Bad request: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Invalid request data.',
-          'data': null
-        };
-      } else if (response.statusCode >= 500) {
-        print('🔥 Server error: ${response.statusCode}');
-        return {
-          'error': true,
-          'message': 'Server error. Please try again later.',
-          'data': null
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to send message',
-          'data': null
-        };
-      }
-    } on SocketException {
-      print('🌐 No internet connection');
-      return {
-        'error': true,
-        'message': 'No internet connection. Please check your network.',
-        'data': null
-      };
-    } on TimeoutException {
-      print('⏰ Request timeout');
-      return {
-        'error': true,
-        'message': 'Request timeout. Please try again.',
-        'data': null
-      };
-    } on FormatException catch (e) {
-      print('📋 Invalid response format: $e');
-      return {
-        'error': true,
-        'message': 'Invalid response from server.',
-        'data': null
-      };
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error sending message: ${e.toString()}',
-        'data': null
-      };
-    }
+      return _apiError(res, l);
+    } on SocketException { return _noInternet(l); }
+    on TimeoutException { return _timeout(l); }
+    catch (e) { _logError(l, e); return _exception(e); }
   }
 
-  /// Send file message to a group
+  // ════════════════════════════════════════════════════════════════════════
+  // 6. SEND FILE MESSAGE — POST /groupfilemessage  (multipart)
+  //    Socket event out: groupFileMessage { groupId, message }
+  // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupFileMessage({
     required String groupId,
     required File file,
     Map<String, dynamic>? communityInfo,
   }) async {
+    const l = 'sendGroupFileMessage';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
+      final fileName = file.path.split('/').last;
+      final fileSize = await file.length();
+      print('📤 [$l] $fileName — ${(fileSize / 1024).toStringAsFixed(1)} KB');
+      _logRequest('POST multipart', '${apiBaseUrl}api/chat/groupfilemessage',
+          body: {'groupId': groupId, 'file': fileName});
+
+      final req = http.MultipartRequest('POST', Uri.parse('${apiBaseUrl}api/chat/groupfilemessage'));
+      req.headers['Authorization'] = 'Bearer $token';
+      req.files.add(await http.MultipartFile.fromPath('file', file.path));
+      req.fields['groupId'] = groupId;
+      if (communityInfo != null) req.fields['communityInfo'] = jsonEncode(communityInfo);
+
+      final streamed = await req.send().timeout(const Duration(minutes: 2));
+      final res = await http.Response.fromStream(streamed);
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] File sent — fileUrl: ${d['message']?['fileUrl']}');
+        return {'error': d['error'] ?? false, 'message': d['message'], 'groupId': d['groupId'], 'data': d['message']};
       }
+      return _apiError(res, l);
+    } on SocketException { return _noInternet(l); }
+    on TimeoutException { return _timeout(l); }
+    catch (e) { _logError(l, e); return _exception(e); }
+  }
 
-      final uri = Uri.parse('${apiBaseUrl}api/chat/groupfilemessage');
-      print('📤 Sending file to group $groupId at: $uri');
-      print('📄 File path: ${file.path}');
-      print('📊 File size: ${await file.length()} bytes');
+  // ════════════════════════════════════════════════════════════════════════
+  // 7. SEND VOICE MESSAGE — POST /groupvoicemessage  (multipart)
+  //    Fields: audio (file), groupId, communityInfo (optional)
+  //    Socket event out: groupVoiceMessage { groupId, message }
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> sendGroupVoiceMessage({
+    required String groupId,
+    required File audioFile,
+    Map<String, dynamic>? communityInfo,
+  }) async {
+    const l = 'sendGroupVoiceMessage';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      // Create multipart request
-      var request = http.MultipartRequest('POST', uri);
+      final fileSize = await audioFile.length();
+      print('🎤 [$l] Audio: ${audioFile.path.split('/').last} — ${(fileSize / 1024).toStringAsFixed(1)} KB');
+      _logRequest('POST multipart', '${apiBaseUrl}api/chat/groupvoicemessage',
+          body: {'groupId': groupId});
 
-      // Add headers
-      request.headers['Authorization'] = 'Bearer $token';
-
-      // Add file
-      var multipartFile = await http.MultipartFile.fromPath(
-        'file',
-        file.path,
-      );
-      request.files.add(multipartFile);
-
-      // Add form fields
-      request.fields['groupId'] = groupId;
-
-      // Add community info if provided
+      final req = http.MultipartRequest(
+          'POST', Uri.parse('${apiBaseUrl}api/chat/groupvoicemessage'));
+      req.headers['Authorization'] = 'Bearer $token';
+      req.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
+      req.fields['groupId'] = groupId;
       if (communityInfo != null) {
-        request.fields['communityInfo'] = jsonEncode(communityInfo);
+        req.fields['communityInfo'] = jsonEncode(communityInfo);
+        print('📦 [$l] communityInfo attached');
       }
 
-      print('📦 Request fields: ${request.fields}');
-      print('📎 File: ${multipartFile.filename} (${multipartFile.length} bytes)');
+      print('📡 [$l] Uploading voice...');
+      final streamed = await req.send().timeout(const Duration(minutes: 2));
+      final res = await http.Response.fromStream(streamed);
+      _logResponse(res.statusCode, res.body, label: l);
 
-      // Send request with timeout
-      final streamedResponse = await request.send().timeout(
-        const Duration(minutes: 2), // Longer timeout for file uploads
+      if (res.statusCode == 200 || res.statusCode == 201) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] audioUrl: ${d['message']?['audioUrl']}');
+        return {'error': d['error'] ?? false, 'message': d['message'], 'groupId': d['groupId'], 'data': d['message']};
+      }
+      return _apiError(res, l);
+    } on SocketException { return _noInternet(l); }
+    on TimeoutException { return _timeout(l); }
+    catch (e) { _logError(l, e); return _exception(e); }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 8. SEND CAMERA PHOTO — captures image then reuses /groupfilemessage
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> sendGroupCameraPhoto({
+    required String groupId,
+    Map<String, dynamic>? communityInfo,
+  }) async {
+    const l = 'sendGroupCameraPhoto';
+    try {
+      print('📸 [$l] Opening camera...');
+      final XFile? photo = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
       );
 
-      final response = await http.Response.fromStream(streamedResponse);
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'],
-          'groupId': decoded['groupId'],
-          'data': decoded['message'] // The file message object from response
-        };
-      } else if (response.statusCode == 401) {
-        print('🔐 Unauthorized request');
-        return {
-          'error': true,
-          'message': 'Authentication failed. Please login again.',
-          'data': null
-        };
-      } else if (response.statusCode == 403) {
-        print('🚫 Forbidden request');
-        return {
-          'error': true,
-          'message': 'You don\'t have permission to send files to this group.',
-          'data': null
-        };
-      } else if (response.statusCode == 404) {
-        print('❓ Group not found');
-        return {
-          'error': true,
-          'message': 'Group not found.',
-          'data': null
-        };
-      } else if (response.statusCode == 400) {
-        final decoded = jsonDecode(response.body);
-        print('📋 Bad request: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Invalid file or request data.',
-          'data': null
-        };
-      } else if (response.statusCode == 413) {
-        print('📏 File too large');
-        return {
-          'error': true,
-          'message': 'File is too large. Please choose a smaller file.',
-          'data': null
-        };
-      } else if (response.statusCode >= 500) {
-        print('🔥 Server error: ${response.statusCode}');
-        return {
-          'error': true,
-          'message': 'Server error. Please try again later.',
-          'data': null
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to send file',
-          'data': null
-        };
+      if (photo == null) {
+        print('⚠️ [$l] User cancelled camera');
+        return {'error': true, 'message': 'No photo taken', 'data': null, 'cancelled': true};
       }
-    } on SocketException {
-      print('🌐 No internet connection');
-      return {
-        'error': true,
-        'message': 'No internet connection. Please check your network.',
-        'data': null
-      };
-    } on TimeoutException {
-      print('⏰ Request timeout');
-      return {
-        'error': true,
-        'message': 'File upload timeout. Please try again with a smaller file.',
-        'data': null
-      };
-    } on FormatException catch (e) {
-      print('📋 Invalid response format: $e');
-      return {
-        'error': true,
-        'message': 'Invalid response from server.',
-        'data': null
-      };
+
+      final file = File(photo.path);
+      final size = await file.length();
+      print('📸 [$l] Captured: ${photo.path.split('/').last} — ${(size / 1024).toStringAsFixed(1)} KB');
+
+      // Reuse file message endpoint
+      return await sendGroupFileMessage(
+          groupId: groupId, file: file, communityInfo: communityInfo);
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error sending file: ${e.toString()}',
-        'data': null
-      };
+      _logError(l, e);
+      return {'error': true, 'message': 'Camera error: ${e.toString()}', 'data': null};
     }
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 9. REQUEST TO JOIN — POST /grouprequest
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> requestToJoinGroup({required String groupId}) async {
+    const l = 'requestToJoinGroup';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
+
+      _logRequest('POST', '${apiBaseUrl}api/chat/grouprequest', body: {'groupId': groupId});
+      final res = await http.post(
+        Uri.parse('${apiBaseUrl}api/chat/grouprequest'),
+        headers: _jsonHeaders(token),
+        body: jsonEncode({'groupId': groupId}),
+      );
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] ${d['message']}');
+        return {'error': d['error'] ?? false, 'message': d['message'] ?? 'Successfully Requested', 'data': d['data']};
+      }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 10. CANCEL JOIN REQUEST — DELETE /grouprequest/:id
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> cancelGroupRequest({required String groupId}) async {
+    const l = 'cancelGroupRequest';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
+
+      final endpoint = '${apiBaseUrl}api/chat/grouprequest/$groupId';
+      _logRequest('DELETE', endpoint);
+      final res = await http.delete(Uri.parse(endpoint), headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] Cancelled for $groupId');
+        return {'error': false, 'message': d['message'] ?? 'Request Deleted Successfully'};
+      }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 11. GET GROUP REQUESTS — GET /grouprequest/:id  (admin only)
+  // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getGroupRequests(String groupId) async {
+    const l = 'getGroupRequests';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
+      final endpoint = '${apiBaseUrl}api/chat/grouprequest/$groupId';
+      _logRequest('GET', endpoint);
+      final res = await http.get(Uri.parse(endpoint), headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final reqs = d['data'] ?? [];
+        print('📋 [$l] ${(reqs as List).length} requests for $groupId');
+        return {'error': false, 'message': 'OK', 'data': reqs};
       }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/grouprequest/$groupId');
-      print('🔍 Fetching group requests for $groupId from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Requests fetched successfully',
-          'data': decoded['data'] ?? []
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch requests',
-          'data': []
-        };
-      }
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching requests: ${e.toString()}',
-        'data': []
-      };
-    }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
   }
-  Future<Map<String, dynamic>> getMyGroups({String? communityId}) async {
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 12. UPDATE GROUP REQUEST — PUT /grouprequest/  (admin approve/reject)
+  //     Body: { status: "approved"|"rejected", requestId }
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> updateGroupRequest({
+    required String requestId,
+    required String status,
+  }) async {
+    const l = 'updateGroupRequest';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      // Construct the URI with optional communityId query parameter
-      final uri = Uri.parse(
-        communityId != null
-            ? '${apiBaseUrl}api/chat/mygroups?communityId=$communityId'
-            : '${apiBaseUrl}api/chat/mygroups',
+      _logRequest('PUT', '${apiBaseUrl}api/chat/grouprequest/',
+          body: {'requestId': requestId, 'status': status});
+      final res = await http.put(
+        Uri.parse('${apiBaseUrl}api/chat/grouprequest/'),
+        headers: _jsonHeaders(token),
+        body: jsonEncode({'requestId': requestId, 'status': status}),
       );
-      print('🔍 Fetching user groups from: $uri');
+      _logResponse(res.statusCode, res.body, label: l);
 
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Groups fetched successfully',
-          'data': decoded['data'] ?? []
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch groups',
-          'data': []
-        };
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] $requestId → $status');
+        return {'error': false, 'message': d['message'] ?? 'Updated', 'data': d['data']};
       }
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching groups: ${e.toString()}',
-        'data': []
-      };
-    }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // 13. ADD MEMBERS — POST /addmember
+  // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> addMembersToGroup({
     required String groupId,
     required List<String> memberIds,
   }) async {
+    const l = 'addMembersToGroup';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/addmember');
-      print('👥 Adding members to group: $groupId');
-
-      final body = jsonEncode({
-        'groupId': groupId,
-        'members': memberIds,
-      });
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: body,
+      _logRequest('POST', '${apiBaseUrl}api/chat/addmember',
+          body: {'groupId': groupId, 'members': memberIds});
+      final res = await http.post(
+        Uri.parse('${apiBaseUrl}api/chat/addmember'),
+        headers: _jsonHeaders(token),
+        body: jsonEncode({'groupId': groupId, 'members': memberIds}),
       );
+      _logResponse(res.statusCode, res.body, label: l);
 
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Member(s) added successfully',
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to add members',
-        };
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] ${memberIds.length} member(s) added');
+        return {'error': false, 'message': d['message'] ?? 'Members added'};
       }
-    } catch (e) {
-      print('💥 Exception: $e');
-      return {
-        'error': true,
-        'message': 'Error adding members: ${e.toString()}',
-      };
-    }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
   }
 
-  Future<Map<String, dynamic>> fetchAllUsers({required int page }) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/mobile/all-users?page=$page');
-      print('📥 Fetching users from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Users fetched successfully',
-          'data': decoded['data'] ?? {},
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch users',
-          'data': {}
-        };
-      }
-    } catch (e) {
-      print('💥 Exception: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching users: ${e.toString()}',
-        'data': {}
-      };
-    }
-  }
-
-  Future<Map<String, dynamic>> requestToJoinGroup({
+  // ════════════════════════════════════════════════════════════════════════
+  // 14. REMOVE MEMBER — DELETE /removemember/:groupId/:userId
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> removeMemberFromGroup({
     required String groupId,
+    required String userId,
   }) async {
+    const l = 'removeMemberFromGroup';
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-        };
+      final endpoint = '${apiBaseUrl}api/chat/removemember/$groupId/$userId';
+      _logRequest('DELETE', endpoint);
+      final res = await http.delete(Uri.parse(endpoint), headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        print('✅ [$l] User $userId removed from $groupId');
+        return {'error': false, 'message': d['message'] ?? 'Member removed'};
       }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/grouprequest');
-      print('📩 Sending join group request for groupId: $groupId');
-
-      final body = jsonEncode({
-        'groupId': groupId,
-      });
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: body,
-      );
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Request sent successfully',
-          'data': decoded['data'] ?? false,
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to request group',
-        };
-      }
-    } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error requesting group: ${e.toString()}',
-      };
-    }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  // 15. FETCH ALL USERS — GET /api/mobile/all-users?pageNo=&limit=&search=
+  // ════════════════════════════════════════════════════════════════════════
+  Future<Map<String, dynamic>> fetchAllUsers({
+    int page = 1,
+    int limit = 20,
+    String? search,
+  }) async {
+    const l = 'fetchAllUsers';
+    try {
+      final token = await _getToken();
+      if (token == null) return _noToken();
 
+      final params = {'pageNo': '$page', 'limit': '$limit'};
+      if (search != null && search.isNotEmpty) params['search'] = search;
+      final uri = Uri.parse('${apiBaseUrl}api/mobile/all-users').replace(queryParameters: params);
+      _logRequest('GET', uri.toString());
+
+      final res = await http.get(uri, headers: _jsonHeaders(token));
+      _logResponse(res.statusCode, res.body, label: l);
+
+      if (res.statusCode == 200) {
+        final d = jsonDecode(res.body);
+        final users = d['data']?['allUsers'] ?? [];
+        print('👥 [$l] Page $page — ${(users as List).length} users | totalPages: ${d['data']?['totalPage']}');
+        return {
+          'error': false, 'message': 'OK',
+          'data': d['data'] ?? {},
+          'totalPage': d['data']?['totalPage'] ?? 1,
+          'currentPage': d['data']?['currentPage'] ?? 1,
+        };
+      }
+      return _apiError(res, l);
+    } catch (e) { _logError(l, e); return _exception(e); }
+  }
 }
