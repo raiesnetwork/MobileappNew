@@ -478,16 +478,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════
-  // ✅ RETRY LOOP — polls every 300ms until all 3 conditions met:
-  //   1. _providersReady == true
-  //   2. navigatorKey.currentContext != null
-  //   3. navigatorKey.currentState != null
-  //
-  // This handles BOTH:
-  //   A) activeCalls() found a call on startup (killed app)
-  //   B) actionCallAccept fires while app is still initializing
-  // ════════════════════════════════════════════════════════════════════
   void _startRetryLoop() {
     _retryTimer?.cancel();
     int attempts = 0;
@@ -700,13 +690,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
             );
 
             await _saveFcmToken();
+            ctx.read<CommentProvider>().setCurrentUserId(user.id ?? '');
 
             _providersReady = true;
             debugPrint('✅ [PROVIDER INIT] Done | pending=${_pendingCallData != null} | room=${_pendingCallData?['roomName']}');
 
-            // Fast path: if retry loop already started and navigator is ready,
-            // _consumePending will finish it immediately.
-            // If navigator isn't ready yet, the retry loop continues ticking.
             if (mounted) _consumePending();
 
           } catch (e) {

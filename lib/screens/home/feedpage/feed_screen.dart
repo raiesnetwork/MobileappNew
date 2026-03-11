@@ -988,24 +988,14 @@ class _FeedScreenState extends State<FeedScreen> {
       // Toggle like/unlike
       await provider.toggleLike(post.id);
 
-      // Fetch updated like count
-      await provider.fetchCount(post.id);
+
 
       processingLikes.remove(post.id);
     }
   }
 
   void _handleComment(Post post) async {
-    final provider = context.read<CommentProvider>();
-
-    // Optional: preload post data
-    await provider.fetchSinglePost(post.id);
-
-
     await _showCommentsBottomSheet(post.id);
-
-    // ⏫ Fetch updated comment count AFTER bottom sheet closes
-    await provider.fetchCount(post.id);
   }
 
   Future<void> _showCommentsBottomSheet(String postId) async {
@@ -1077,39 +1067,21 @@ class _FeedScreenState extends State<FeedScreen> {
                                         : '';
 
                                     return Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                          vertical: 12),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
                                       child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          // Updated comment profile image with base64 support
-                                          _buildProfileImage(
-                                              comment.profileImage, userName,
-                                              radius: 20),
+                                          _buildProfileImage(comment.profileImage, userName, radius: 20),
                                           const SizedBox(width: 12),
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
+                                              crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 Row(
                                                   children: [
-                                                    Text(
-                                                      userName,
-                                                      style: const TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold,
-                                                      ),
-                                                    ),
+                                                    Text(userName, style: const TextStyle(fontWeight: FontWeight.bold)),
                                                     const SizedBox(width: 8),
-                                                    Text(
-                                                      timeAgo,
-                                                      style: const TextStyle(
-                                                        fontSize: 12,
-                                                        color: Colors.grey,
-                                                      ),
-                                                    ),
+                                                    Text(timeAgo, style: const TextStyle(fontSize: 12, color: Colors.grey)),
                                                   ],
                                                 ),
                                                 const SizedBox(height: 4),
@@ -1118,6 +1090,79 @@ class _FeedScreenState extends State<FeedScreen> {
                                               ],
                                             ),
                                           ),
+                                          // ADD THIS: 3-dot menu for edit/delete
+                                          if (comment.userId.isNotEmpty && comment.userId == provider.currentUserId)
+                                            PopupMenuButton<String>(
+                                              icon: Icon(Icons.more_vert, size: 18, color: Colors.grey[500]),
+                                              onSelected: (value) async {
+                                                if (value == 'edit') {
+                                                  final editController = TextEditingController(text: comment.content);
+                                                  showDialog(
+                                                    context: context,
+                                                    builder: (ctx) => AlertDialog(
+                                                      title: const Text('Edit Comment'),
+                                                      content: TextField(
+                                                        controller: editController,
+                                                        maxLines: 3,
+                                                        decoration: InputDecoration(
+                                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                                        ),
+                                                      ),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                                                        ElevatedButton(
+                                                          onPressed: () async {
+                                                            Navigator.pop(ctx);
+                                                            final provider = context.read<CommentProvider>();
+                                                            await provider.editComment(
+                                                              context: context,
+                                                              commentId: comment.id,
+                                                              commentContent: editController.text.trim(),
+                                                              postId: postId,
+                                                              offset: 0,
+                                                              limit: 10,
+                                                              communityId: widget.communityId,
+                                                            );
+                                                          },
+                                                          child: const Text('Save'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                } else if (value == 'delete') {
+                                                  showDialog(
+                                                    context: context,
+                                                    builder: (ctx) => AlertDialog(
+                                                      title: const Text('Delete Comment'),
+                                                      content: const Text('Are you sure?'),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                                                        ElevatedButton(
+                                                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                                          onPressed: () async {
+                                                            Navigator.pop(ctx);
+                                                            final provider = context.read<CommentProvider>();
+                                                            await provider.deleteComment(
+                                                              context: context,
+                                                              commentId: comment.id,
+                                                              postId: postId,
+                                                              offset: 0,
+                                                              limit: 10,
+                                                              communityId: widget.communityId,
+                                                            );
+                                                          },
+                                                          child: const Text('Delete'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                }
+                                              },
+                                              itemBuilder: (_) => [
+                                                const PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, size: 16), SizedBox(width: 8), Text('Edit')])),
+                                                const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 16, color: Colors.red), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
+                                              ],
+                                            ),
                                         ],
                                       ),
                                     );

@@ -1,10 +1,23 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:ixes.app/screens/chats_page/group_chat/send_file_message.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:flutter_sound/flutter_sound.dart';
+import 'package:image_picker/image_picker.dart';
+
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 
 import '../../../providers/group_provider.dart';
+
+import 'group_add_remove_member_screen.dart';
+import 'group_message_bubble_screen.dart' as bubble;
 
 class GroupChatDetailPage extends StatefulWidget {
   final String groupId;
@@ -25,66 +38,544 @@ class GroupChatDetailPage extends StatefulWidget {
 class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ImagePicker _imagePicker = ImagePicker();
+
   String? _currentUserId;
   bool _isSending = false;
-  bool _isRecording = false;
+  File? _selectedFile;
 
+  // ── Voice recording ─────────────────────────────────────────────────────
+  FlutterSoundRecorder? _recorder;
+  bool _isRecording = false;
+  bool _isRecorderInitialized = false;
+  String? _recordingPath;
+  Duration _recordingDuration = Duration.zero;
+  Timer? _recordingTimer;
+
+  // ── Reply ────────────────────────────────────────────────────────────────
+  Map<String, dynamic>? _replyingToMessage;
+
+  // ── Compression constants ────────────────────────────────────────────────
+  static const int _maxImageBytes = 800 * 1024;
+  static const int _maxAudioBytes = 4 * 1024 * 1024;
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  LIFECYCLE
+  // ════════════════════════════════════════════════════════════════════════
   @override
   void initState() {
     super.initState();
-    _getCurrentUserId();
+    _loadCurrentUser();
+    _initializeRecorder();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initializeChat());
   }
 
-  Future<void> _getCurrentUserId() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _currentUserId = prefs.getString('user_id');
-      setState(() {});
-    } catch (e) {
-      print('Error getting current user ID: $e');
-    }
+  Future<void> _loadCurrentUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _currentUserId = prefs.getString('user_id'));
   }
 
   void _initializeChat() {
-    final provider = Provider.of<GroupChatProvider>(context, listen: false);
+    final provider = context.read<GroupChatProvider>();
     provider.setCurrentGroup(widget.groupId);
     provider.fetchGroupMessages(widget.groupId);
   }
 
   @override
   void dispose() {
+    _recordingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
+    _recorder?.closeRecorder();
+    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+      try {
+        File(_recordingPath!).deleteSync();
+      } catch (_) {}
+    }
     super.dispose();
   }
 
-  Future<void> _capturePhoto() async {
+  // ════════════════════════════════════════════════════════════════════════
+  //  COMPRESSION
+  // ════════════════════════════════════════════════════════════════════════
+  String _readableSize(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)}MB';
+  }
+
+  bool _isImageFile(String path) {
+    final ext = p.extension(path).toLowerCase();
+    return ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.heic']
+        .contains(ext);
+  }
+
+  Future<File> _compressImage(File imageFile) async {
+    final ext = p.extension(imageFile.path).toLowerCase();
+    final format = ext == '.png' ? CompressFormat.png : CompressFormat.jpeg;
+    final tmpDir = await getTemporaryDirectory();
+    final outExt = ext == '.png' ? 'png' : 'jpg';
+
+    for (final quality in [80, 60, 40, 25]) {
+      final result = await FlutterImageCompress.compressWithFile(
+        imageFile.absolute.path,
+        quality: quality,
+        format: format,
+        keepExif: false,
+      );
+      if (result == null) break;
+
+      final outPath = p.join(
+          tmpDir.path, 'img_${DateTime.now().millisecondsSinceEpoch}.$outExt');
+      final outFile = File(outPath)..writeAsBytesSync(result);
+
+      if (result.length <= _maxImageBytes || quality == 25) return outFile;
+    }
+    return imageFile;
+  }
+
+  Future<File> _compressAudio(File audioFile) async {
+    final size = await audioFile.length();
+    if (size <= _maxAudioBytes) return audioFile;
+    print('⚠️ Audio ${_readableSize(size)} exceeds limit — sending as-is');
+    return audioFile;
+  }
+
+  Future<File> _compressFile(File file) async {
+    if (_isImageFile(file.path)) return await _compressImage(file);
+    return await _compressAudio(file);
+  }
+
+  Future<File> _compressAndWarnUser(File rawFile) async {
+    final origSize = await rawFile.length();
+    final compressed = await _compressFile(rawFile);
+    final newSize = await compressed.length();
+    if (newSize < origSize && mounted) {
+      final saved =
+      ((origSize - newSize) / origSize * 100).toStringAsFixed(0);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            '📦 Compressed: ${_readableSize(origSize)} → ${_readableSize(newSize)} ($saved% smaller)'),
+        backgroundColor: Colors.green[700],
+        duration: const Duration(seconds: 2),
+      ));
+    }
+    return compressed;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RECORDER
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _initializeRecorder() async {
     try {
-      final provider = context.read<GroupChatProvider>();
-      final g = provider.getGroupById(widget.groupId);
-      final communityInfo = g != null
-          ? {
-              "_id": g['_id'] ?? widget.groupId,
-              "name": g['name'] ?? widget.groupName
-            }
-          : {"_id": widget.groupId, "name": widget.groupName};
-      Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => GroupFileMessageScreen(
-                groupId: widget.groupId,
-                groupName: widget.groupName,
-                communityInfo: communityInfo),
-          ));
+      _recorder = FlutterSoundRecorder();
+      final status = await Permission.microphone.request();
+      if (status == PermissionStatus.granted) {
+        await _recorder!.openRecorder();
+        setState(() => _isRecorderInitialized = true);
+      } else {
+        _showMicPermissionDialog();
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      print('💥 Recorder init error: $e');
     }
   }
 
-  Future<void> _startRecording() async => setState(() => _isRecording = true);
-  Future<void> _stopRecording() async => setState(() => _isRecording = false);
+  void _showMicPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Microphone Permission Required'),
+        content: const Text(
+            'To send voice messages, allow microphone access in settings.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _startRecording() async {
+    if (!_isRecorderInitialized || _recorder == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Voice recorder not available'),
+          backgroundColor: Colors.red));
+      return;
+    }
+    try {
+      final dir = await getTemporaryDirectory();
+      _recordingPath =
+      '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _recorder!.startRecorder(
+          toFile: _recordingPath, codec: Codec.aacMP4);
+      setState(() {
+        _isRecording = true;
+        _recordingDuration = Duration.zero;
+      });
+      _recordingTimer?.cancel();
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (_isRecording && mounted) {
+          setState(() => _recordingDuration = Duration(seconds: t.tick));
+        } else {
+          t.cancel();
+        }
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to start recording: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    if (!_isRecording || _recorder == null) return;
+    try {
+      _recordingTimer?.cancel();
+      _recordingTimer = null;
+      await _recorder!.stopRecorder();
+      setState(() => _isRecording = false);
+      if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+        _showVoicePreview();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to stop recording: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  void _showVoicePreview() {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mic, size: 25, color: Colors.blue),
+              const SizedBox(height: 16),
+              Text('Voice message recorded',
+                  style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text('Duration: ${_formatDuration(_recordingDuration)}'),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _deleteRecording();
+                    },
+                    icon: const Icon(Icons.delete, color: Colors.red),
+                    label: const Text('Delete'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey[200],
+                        foregroundColor: Colors.red),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _sendVoiceMessage();
+                    },
+                    icon: const Icon(Icons.send, color: Colors.white),
+                    label: const Text('Send'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF6C5CE7),
+                        foregroundColor: Colors.white),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sendVoiceMessage() async {
+    if (_recordingPath == null || !File(_recordingPath!).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No voice recording found'),
+          backgroundColor: Colors.red));
+      return;
+    }
+
+    final provider = context.read<GroupChatProvider>();
+    final communityInfo = _buildCommunityInfo(provider);
+    final durationMs = _recordingDuration.inMilliseconds;
+
+    try {
+      final audioFile = File(_recordingPath!);
+      final uploadFile = await _compressFile(audioFile);
+
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+      provider.addMessageToCurrentGroup({
+        '_id': tempId,
+        'isAudio': true,
+        'audioUrl': uploadFile.path,
+        'localFilePath': uploadFile.path,
+        'audioDurationMs': durationMs,
+        'senderId': _buildMyFakeSenderMap(),
+        'createdAt': DateTime.now().toIso8601String(),
+        'status': 'sending',
+        'isOptimistic': true,
+      });
+      _scrollToBottom();
+      _clearReply();
+
+      final ok = await provider.sendGroupVoiceMessage(
+        groupId: widget.groupId,
+        audioFile: uploadFile,
+        communityInfo: communityInfo,
+        audioDurationMs: durationMs,
+      );
+
+      if (ok) {
+        provider.removeOptimisticMessage(widget.groupId, tempId);
+        _scrollToBottom();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+                'Voice message sent! (${_formatDuration(_recordingDuration)})'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ));
+        }
+      } else {
+        provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content:
+            Text('Failed: ${provider.sendVoiceError ?? "Unknown error"}'),
+            backgroundColor: Colors.red,
+          ));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      _deleteRecording();
+    }
+  }
+
+  void _deleteRecording() {
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+      try {
+        File(_recordingPath!).deleteSync();
+      } catch (_) {}
+      _recordingPath = null;
+    }
+    if (mounted) setState(() => _recordingDuration = Duration.zero);
+  }
+
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  CAMERA & FILE PICKER
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _capturePhoto() async {
+    try {
+      final XFile? photo = await _imagePicker.pickImage(
+          source: ImageSource.camera, imageQuality: 85);
+      if (photo != null) {
+        setState(() {
+          _selectedFile = File(photo.path);
+          _messageController.text = _selectedFile!.path.split('/').last;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error capturing photo: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles();
+      if (result != null && result.files.single.path != null) {
+        setState(() {
+          _selectedFile = File(result.files.single.path!);
+          _messageController.text = _selectedFile!.path.split('/').last;
+        });
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error selecting file: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  SEND TEXT / FILE
+  // ════════════════════════════════════════════════════════════════════════
+  void _sendMessage() async {
+    if (_isSending) return;
+
+    final provider = context.read<GroupChatProvider>();
+    final communityInfo = _buildCommunityInfo(provider);
+
+    if (_selectedFile != null) {
+      setState(() => _isSending = true);
+      final rawFile = _selectedFile!;
+      setState(() {
+        _selectedFile = null;
+        _messageController.clear();
+      });
+
+      try {
+        final fileToSend = await _compressAndWarnUser(rawFile);
+
+        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        provider.addMessageToCurrentGroup({
+          '_id': tempId,
+          'isFile': true,
+          'fileName': p.basename(fileToSend.path),
+          'fileUrl': fileToSend.path,
+          'localFilePath': fileToSend.path,
+          'senderId': _buildMyFakeSenderMap(),
+          'createdAt': DateTime.now().toIso8601String(),
+          'status': 'sending',
+          'isOptimistic': true,
+        });
+        _scrollToBottom();
+        _clearReply();
+
+        final ok = await provider.sendGroupFileMessage(
+          groupId: widget.groupId,
+          file: fileToSend,
+          communityInfo: communityInfo,
+        );
+
+        if (ok) {
+          provider.removeOptimisticMessage(widget.groupId, tempId);
+          _scrollToBottom();
+        } else {
+          provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                  'Failed to send file: ${provider.sendFileError ?? "Unknown error"}'),
+              backgroundColor: Colors.red,
+            ));
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isSending = false);
+      }
+    } else {
+      final text = _messageController.text.trim();
+      if (text.isEmpty) return;
+
+      setState(() => _isSending = true);
+      _messageController.clear();
+      _scrollToBottom();
+
+      final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+      provider.addMessageToCurrentGroup({
+        '_id': tempId,
+        'text': text,
+        'senderId': _buildMyFakeSenderMap(),
+        'createdAt': DateTime.now().toIso8601String(),
+        'status': 'sending',
+        'isOptimistic': true,
+        if (_replyingToMessage != null) 'replyToMessage': _replyingToMessage,
+      });
+      _clearReply();
+
+      try {
+        final ok = await provider.sendGroupMessage(
+          groupId: widget.groupId,
+          text: text,
+          communityInfo: communityInfo,
+        );
+
+        if (ok) {
+          provider.removeOptimisticMessage(widget.groupId, tempId);
+          Future.delayed(const Duration(milliseconds: 200), () {
+            if (mounted) _scrollToBottom();
+          });
+        } else {
+          provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(provider.sendMessageError ?? 'Failed to send'),
+              backgroundColor: Colors.red,
+              action: SnackBarAction(
+                  label: 'Retry',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    provider.removeOptimisticMessage(widget.groupId, tempId);
+                    _messageController.text = text;
+                  }),
+            ));
+          }
+        }
+      } catch (e) {
+        provider.removeOptimisticMessage(widget.groupId, tempId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Failed: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _isSending = false);
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  HELPERS
+  // ════════════════════════════════════════════════════════════════════════
+  Map<String, dynamic> _buildCommunityInfo(GroupChatProvider provider) {
+    final g = provider.getGroupById(widget.groupId);
+    return {
+      '_id': g?['_id'] ?? widget.groupId,
+      'name': g?['name'] ?? widget.groupName,
+    };
+  }
+
+  Map<String, dynamic> _buildMyFakeSenderMap() {
+    return {
+      '_id': _currentUserId ?? '',
+      'profile': {'name': 'You'},
+    };
+  }
+
+  void _setReplyMessage(Map<String, dynamic> message) =>
+      setState(() => _replyingToMessage = message);
+
+  void _clearReply() => setState(() => _replyingToMessage = null);
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -98,17 +589,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     });
   }
 
-  String _formatTime(String timestamp) {
-    try {
-      final dt = DateTime.parse(timestamp).toLocal();
-      final h = dt.hour.toString().padLeft(2, '0');
-      final m = dt.minute.toString().padLeft(2, '0');
-      return '$h:$m';
-    } catch (_) {
-      return '';
-    }
-  }
-
   bool _sameDay(String a, String b) {
     try {
       final da = DateTime.parse(a);
@@ -119,34 +599,20 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     }
   }
 
-  // ── Consistent color per sender name (WhatsApp style) ──────────────────
-  static const _nameColors = [
-    Color(0xFF6C5CE7),
-    Color(0xFF00B894),
-    Color(0xFF0984E3),
-    Color(0xFFE17055),
-    Color(0xFF74B9FF),
-    Color(0xFFFD79A8),
-    Color(0xFF55EFC4),
-    Color(0xFFA29BFE),
-    Color(0xFFFF7675),
-    Color(0xFF00CEC9),
-  ];
-
-  Color _colorForName(String name) {
-    final seed = name.codeUnits.fold(0, (a, b) => a + b);
-    return _nameColors[seed % _nameColors.length];
+  String _senderId(Map<String, dynamic> msg) {
+    final s = msg['senderId'];
+    if (s is Map<String, dynamic>) return s['_id']?.toString() ?? '';
+    return s?.toString() ?? '';
   }
 
-  // ── Image provider (base64 or URL) ─────────────────────────────────────
   ImageProvider? _imageProvider(String? src) {
     if (src == null || src.isEmpty || src == 'null') return null;
     try {
       if (src.startsWith('data:image') ||
           src.startsWith('/9j/') ||
           src.startsWith('iVBORw0KGgo')) {
-        final b64 = src.startsWith('data:image') ? src.split(',')[1] : src;
-        return MemoryImage(base64Decode(b64));
+        return MemoryImage(base64Decode(
+            src.startsWith('data:image') ? src.split(',')[1] : src));
       }
       return NetworkImage(src);
     } catch (_) {
@@ -154,418 +620,155 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     }
   }
 
-  // ── AppBar group avatar ─────────────────────────────────────────────────
-  Widget _buildGroupAvatarSmall(Map<String, dynamic>? group) {
-    final name = group?['name'] ?? widget.groupName;
-    final img = group?['profileImage']?.toString();
-    final hasImg = img != null && img.isNotEmpty && img != 'null';
-    final letter = name.isNotEmpty ? name[0].toUpperCase() : 'G';
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: !hasImg
-            ? const LinearGradient(
-                colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight)
-            : null,
-      ),
-      child: CircleAvatar(
-        radius: 18,
-        backgroundColor: Colors.transparent,
-        backgroundImage: hasImg ? _imageProvider(img) : null,
-        child: !hasImg
-            ? Text(letter,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16))
-            : null,
+  void _openMemberManagement({bool adminMode = true}) {
+    final provider = context.read<GroupChatProvider>();
+    final group = provider.getGroupById(widget.groupId) ??
+        provider.getMyGroupById(widget.groupId);
+    final members = (group?['members'] as List<dynamic>?) ?? [];
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GroupMemberManagementScreen(
+          groupId: widget.groupId,
+          groupName: widget.groupName,
+          currentMembers: members,
+          // admins start on "Add Members" tab (0), non-admins on "Current" (1)
+          initialTabIndex: adminMode ? 0 : 1,
+        ),
       ),
     );
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  SENDER AVATAR  — shown on left of messages from other users
-  // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildSenderAvatar(Map<String, dynamic> senderMap) {
-    final profile = senderMap['profile'];
-    final name = profile?['name']?.toString() ?? '?';
-    final imgSrc = profile?['profileImage']?.toString();
-    final hasImg = imgSrc != null && imgSrc.isNotEmpty && imgSrc != 'null';
-    final letter = name.isNotEmpty ? name[0].toUpperCase() : '?';
-    final color = _colorForName(name);
-    final imgProv = hasImg ? _imageProvider(imgSrc) : null;
-
-    return CircleAvatar(
-      radius: 16,
-      backgroundColor: color,
-      backgroundImage: imgProv,
-      child: imgProv == null
-          ? Text(letter,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12))
-          : null,
-    );
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  //  MESSAGE BUBBLE
-  // ══════════════════════════════════════════════════════════════════════════
-  Widget _buildMessageBubble(
-    Map<String, dynamic> message, {
-    bool showAvatar = true, // false when consecutive messages from same sender
-  }) {
-    final rawSender = message['senderId'];
-    Map<String, dynamic>? senderMap;
-    String senderName = 'Unknown';
-    String senderId = '';
-
-    if (rawSender is Map<String, dynamic>) {
-      senderMap = rawSender;
-      senderName = rawSender['profile']?['name'] ?? 'Unknown';
-      senderId = rawSender['_id'] ?? '';
-    } else if (rawSender is String) {
-      senderId = rawSender;
-    }
-
-    final isMe = _currentUserId != null && _currentUserId == senderId;
-    final text = message['text'] ?? '';
-    final timestamp = message['createdAt'] ?? '';
-    final readers = List<String>.from(message['readers'] ?? []);
-    final fileUrl = message['fileUrl']?.toString();
-    final fileType = message['fileType']?.toString();
-    final fileName = message['fileName']?.toString();
-    final audioUrl = message['audioUrl']?.toString();
-    final isAudio = message['isAudio'] == true;
-
-    final nameColor = _colorForName(senderName);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment:
-            isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: _buildAppBar(),
+      body: Column(
         children: [
-          // ── Left: avatar placeholder or real avatar ────────────────
-          if (!isMe) ...[
-            SizedBox(
-              width: 36,
-              child: showAvatar
-                  ? (senderMap != null
-                      ? _buildSenderAvatar(senderMap)
-                      : CircleAvatar(
-                          radius: 16,
-                          backgroundColor: Colors.grey[300],
-                          child: Icon(Icons.person,
-                              size: 16, color: Colors.grey[600]),
-                        ))
-                  : const SizedBox(), // keeps alignment consistent
-            ),
-            const SizedBox(width: 6),
-          ],
-
-          // ── Bubble ────────────────────────────────────────────────
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(
-                  maxWidth: MediaQuery.of(context).size.width * 0.72),
-              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 13),
-              decoration: BoxDecoration(
-                color: isMe ? const Color(0xFF6C5CE7) : Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(isMe ? 18 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 18),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 5,
-                      offset: const Offset(0, 2)),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Sender name — only on first bubble in a group
-                  if (!isMe && showAvatar) ...[
-                    Text(
-                      senderName,
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          color: nameColor),
-                    ),
-                    const SizedBox(height: 3),
-                  ],
-
-                  // Audio
-                  if (isAudio && audioUrl != null) ...[
-                    _buildAudioBubble(isMe),
-                    const SizedBox(height: 4),
-                  ],
-
-                  // File / Image
-                  if (fileUrl != null && fileType != null && !isAudio) ...[
-                    _buildFileBubble(fileUrl, fileType, fileName, isMe),
-                    const SizedBox(height: 4),
-                  ],
-
-                  // Text
-                  if (text.isNotEmpty) ...[
-                    Text(
-                      text,
-                      style: TextStyle(
-                        fontSize: 15,
-                        height: 1.35,
-                        color: isMe ? Colors.white : Colors.grey[850],
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                  ],
-
-                  // Time + read ticks
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _formatTime(timestamp),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isMe ? Colors.white60 : Colors.grey[500],
-                        ),
-                      ),
-                      if (isMe && readers.isNotEmpty) ...[
-                        const SizedBox(width: 5),
-                        const Icon(Icons.done_all,
-                            size: 13, color: Colors.white60),
-                        const SizedBox(width: 2),
-                        Text('${readers.length}',
-                            style: const TextStyle(
-                                fontSize: 11, color: Colors.white60)),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          if (isMe) const SizedBox(width: 8),
+          Expanded(child: _buildMessagesList()),
+          if (_isRecording) _buildRecordingIndicator(),
+          _buildInputBar(),
         ],
       ),
     );
   }
+  AppBar _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.white,
+      foregroundColor: Colors.grey[800],
+      elevation: 0,
+      shadowColor: Colors.grey[200],
+      surfaceTintColor: Colors.transparent,
+      title: Consumer<GroupChatProvider>(
+        builder: (_, provider, __) {
+          final group = provider.getGroupById(widget.groupId);
+          final count = group?['memberCount'] ?? 0;
+          final name = group?['name'] ?? widget.groupName;
+          final img = group?['profileImage']?.toString();
+          final hasImg = img != null && img.isNotEmpty && img != 'null';
 
-  // ── Audio bubble ─────────────────────────────────────────────────────────
-  Widget _buildAudioBubble(bool isMe) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: isMe
-                ? Colors.white.withOpacity(0.25)
-                : const Color(0xFF6C5CE7).withOpacity(0.12),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(Icons.play_arrow_rounded,
-              size: 22, color: isMe ? Colors.white : const Color(0xFF6C5CE7)),
-        ),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          return Row(children: [
             Container(
-              width: 120,
-              height: 3,
               decoration: BoxDecoration(
-                color: isMe ? Colors.white.withOpacity(0.5) : Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
+                shape: BoxShape.circle,
+                gradient: !hasImg
+                    ? const LinearGradient(
+                    colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight)
+                    : null,
+              ),
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: Colors.transparent,
+                backgroundImage: hasImg ? _imageProvider(img) : null,
+                child: !hasImg
+                    ? Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : 'G',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16))
+                    : null,
               ),
             ),
-            const SizedBox(height: 4),
-            Text('Voice message',
-                style: TextStyle(
-                    fontSize: 12,
-                    color: isMe ? Colors.white70 : Colors.grey[600])),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                    if (count > 0)
+                      Text('$count members',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w400)),
+                  ]),
+            ),
+          ]);
+        },
+      ),
+      actions: [
+        PopupMenuButton<String>(
+          onSelected: (v) {
+            switch (v) {
+              case 'manage_members':
+                _openMemberManagement(adminMode: true);
+                break;
+
+              case 'group_info':
+                _showGroupInfo();
+                break;
+            }
+          },
+          icon: const Icon(Icons.more_vert, color: Color(0xFF6C5CE7)),
+          itemBuilder: (_) => [
+            if (widget.isAdmin)
+              const PopupMenuItem(
+                value: 'manage_members',
+                child: Row(children: [
+                  Icon(Icons.manage_accounts_rounded,
+                      color: Color(0xFF6C5CE7)),
+                  SizedBox(width: 12),
+                  Text('Manage Members'),
+                ]),
+              ),
+            const PopupMenuItem(
+              value: 'group_info',
+              child: Row(children: [
+                Icon(Icons.info_outline),
+                SizedBox(width: 12),
+                Text('Group Info'),
+              ]),
+            ),
           ],
         ),
+        const SizedBox(width: 8),
       ],
     );
   }
-
-  // ── File / Image bubble ───────────────────────────────────────────────────
-  Widget _buildFileBubble(String url, String type, String? name, bool isMe) {
-    final ext = name != null ? name.split('.').last.toLowerCase() : '';
-    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].contains(ext);
-
-    if (isImage) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Image.network(url,
-            width: 200,
-            height: 180,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _genericFile(ext, name, isMe)),
-      );
-    }
-    return _genericFile(ext, name, isMe);
-  }
-
-  Widget _genericFile(String ext, String? name, bool isMe) {
-    return GestureDetector(
-      onTap: () => ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Opening ${name ?? 'file'}'))),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: isMe ? Colors.white.withOpacity(0.2) : Colors.grey[100],
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_fileIcon(ext),
-                size: 26,
-                color: isMe ? Colors.white70 : const Color(0xFF6C5CE7)),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(name ?? 'File',
-                      style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: isMe ? Colors.white : Colors.grey[800]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis),
-                  Text(ext.toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: isMe ? Colors.white60 : Colors.grey[500])),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _fileIcon(String ext) {
-    switch (ext) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'doc':
-      case 'docx':
-        return Icons.description;
-      case 'xls':
-      case 'xlsx':
-        return Icons.table_chart;
-      case 'ppt':
-      case 'pptx':
-        return Icons.slideshow;
-      case 'txt':
-        return Icons.text_fields;
-      case 'zip':
-      case 'rar':
-      case '7z':
-        return Icons.archive;
-      case 'jpg':
-      case 'jpeg':
-      case 'png':
-      case 'gif':
-      case 'bmp':
-        return Icons.image;
-      case 'mp4':
-      case 'avi':
-      case 'mov':
-      case 'mkv':
-        return Icons.video_file;
-      case 'mp3':
-      case 'wav':
-      case 'flac':
-      case 'aac':
-        return Icons.audio_file;
-      default:
-        return Icons.insert_drive_file;
-    }
-  }
-
-  // ── Date divider ─────────────────────────────────────────────────────────
-  Widget _buildDateDivider(String timestamp) {
-    String label = '';
-    try {
-      final dt = DateTime.parse(timestamp).toLocal();
-      final now = DateTime.now();
-      final diff = DateTime(now.year, now.month, now.day)
-          .difference(DateTime(dt.year, dt.month, dt.day))
-          .inDays;
-      if (diff == 0)
-        label = 'Today';
-      else if (diff == 1)
-        label = 'Yesterday';
-      else
-        label = '${dt.day}/${dt.month}/${dt.year}';
-    } catch (_) {
-      return const SizedBox.shrink();
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Expanded(child: Divider(color: Colors.grey[300])),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-              decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(12)),
-              child: Text(label,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600])),
-            ),
-          ),
-          Expanded(child: Divider(color: Colors.grey[300])),
-        ],
-      ),
-    );
-  }
-
-  // ── Get sender id string from message ─────────────────────────────────────
-  String _senderId(Map<String, dynamic> msg) {
-    final s = msg['senderId'];
-    if (s is Map<String, dynamic>) return s['_id'] ?? '';
-    if (s is String) return s;
-    return '';
-  }
-
-  // ── Messages list ─────────────────────────────────────────────────────────
   Widget _buildMessagesList() {
     return Consumer<GroupChatProvider>(
-      builder: (context, provider, _) {
+      builder: (_, provider, __) {
         if (provider.isLoadingMessages) {
           return Center(
-            child:
-                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation(
-                      Theme.of(context).colorScheme.primary)),
-              const SizedBox(height: 20),
-              Text('Loading messages...',
-                  style: TextStyle(color: Colors.grey[600])),
-            ]),
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    strokeWidth: 3,
+                    valueColor: AlwaysStoppedAnimation(
+                        Theme.of(context).colorScheme.primary),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('Loading messages...',
+                      style: TextStyle(color: Colors.grey[600])),
+                ]),
           );
         }
 
@@ -575,13 +778,13 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
               margin: const EdgeInsets.all(24),
               padding: const EdgeInsets.all(28),
               decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.06), blurRadius: 10)
-                ],
-              ),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.06),
+                        blurRadius: 10)
+                  ]),
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 Container(
                     padding: const EdgeInsets.all(16),
@@ -598,12 +801,15 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 const SizedBox(height: 8),
                 Text(provider.messagesError!,
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 14)),
+                    style:
+                    TextStyle(color: Colors.grey[600], fontSize: 14)),
                 const SizedBox(height: 20),
                 ElevatedButton(
-                  onPressed: () => provider.fetchGroupMessages(widget.groupId),
+                  onPressed: () =>
+                      provider.fetchGroupMessages(widget.groupId),
                   style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      backgroundColor:
+                      Theme.of(context).colorScheme.primary,
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8))),
@@ -614,59 +820,76 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           );
         }
 
-        final messages = provider.currentGroupMessages;
+        final messages = provider.currentGroupMessages
+            .where((m) => m['isDelete'] != true)
+            .toList();
 
         if (messages.isEmpty) {
           return Center(
-            child:
-                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                      color: Colors.grey[100], shape: BoxShape.circle),
-                  child: Icon(Icons.chat_bubble_outline,
-                      size: 60, color: Colors.grey[400])),
-              const SizedBox(height: 20),
-              Text('No messages yet',
-                  style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.grey[700])),
-              const SizedBox(height: 6),
-              Text('Be the first to send a message!',
-                  style: TextStyle(fontSize: 15, color: Colors.grey[500])),
-            ]),
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                          color: Colors.grey[100], shape: BoxShape.circle),
+                      child: Icon(Icons.chat_bubble_outline,
+                          size: 60, color: Colors.grey[400])),
+                  const SizedBox(height: 20),
+                  Text('No messages yet',
+                      style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700])),
+                  const SizedBox(height: 6),
+                  Text('Be the first to say something!',
+                      style: TextStyle(
+                          fontSize: 15, color: Colors.grey[500])),
+                ]),
           );
         }
 
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _scrollToBottom());
 
         return RefreshIndicator(
-          onRefresh: () async => provider.fetchGroupMessages(widget.groupId),
-          color: Theme.of(context).colorScheme.primary,
+          onRefresh: () async =>
+              provider.fetchGroupMessages(widget.groupId),
+          color: const Color(0xFF6C5CE7),
           child: ListView.builder(
             controller: _scrollController,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             physics: const AlwaysScrollableScrollPhysics(),
             itemCount: messages.length,
             itemBuilder: (context, i) {
               final msg = messages[i];
               final prev = i > 0 ? messages[i - 1] : null;
-              final next = i < messages.length - 1 ? messages[i + 1] : null;
+              final next =
+              i < messages.length - 1 ? messages[i + 1] : null;
 
               final showDateDiv = prev == null ||
-                  !_sameDay(msg['createdAt'] ?? '', prev['createdAt'] ?? '');
+                  !_sameDay(
+                      msg['createdAt'] ?? '', prev['createdAt'] ?? '');
 
-              // Show avatar only on the LAST consecutive bubble from same sender
-              // (WhatsApp-style: avatar appears at the bottom of a group of msgs)
               final isSameSenderAsNext = next != null &&
                   _senderId(next) == _senderId(msg) &&
                   _senderId(msg) != (_currentUserId ?? '');
 
               return Column(
                 children: [
-                  if (showDateDiv) _buildDateDivider(msg['createdAt'] ?? ''),
-                  _buildMessageBubble(msg, showAvatar: !isSameSenderAsNext),
+                  if (showDateDiv)
+                    _buildDateDivider(msg['createdAt'] ?? ''),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: bubble.GroupMessageBubble(
+                      message: msg,
+                      currentUserId: _currentUserId,
+                      groupId: widget.groupId,
+                      showAvatar: !isSameSenderAsNext,
+                      onReply: _setReplyMessage,
+                    ),
+                  ),
                 ],
               );
             },
@@ -676,23 +899,78 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     );
   }
 
-  // ── Input bar ─────────────────────────────────────────────────────────────
-  Widget _buildMessageInput() {
-    final provider = context.read<GroupChatProvider>();
-    final g = provider.getGroupById(widget.groupId);
-    final communityInfo = g != null
-        ? {
-            "_id": g['_id'] ?? widget.groupId,
-            "name": g['name'] ?? widget.groupName
-          }
-        : {"_id": widget.groupId, "name": widget.groupName};
+  Widget _buildDateDivider(String timestamp) {
+    String label = '';
+    try {
+      final dt = DateTime.parse(timestamp).toLocal();
+      final now = DateTime.now();
+      final diff = DateTime(now.year, now.month, now.day)
+          .difference(DateTime(dt.year, dt.month, dt.day))
+          .inDays;
+      if (diff == 0) {
+        label = 'Today';
+      } else if (diff == 1) {
+        label = 'Yesterday';
+      } else {
+        label = '${dt.day}/${dt.month}/${dt.year}';
+      }
+    } catch (_) {
+      return const SizedBox.shrink();
+    }
 
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(children: [
+        Expanded(child: Divider(color: Colors.grey[300])),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Container(
+            padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(12)),
+            child: Text(label,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          ),
+        ),
+        Expanded(child: Divider(color: Colors.grey[300])),
+      ]),
+    );
+  }
+
+  // ── Recording indicator ───────────────────────────────────────────────────
+  Widget _buildRecordingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+          color: Colors.red[50],
+          border: Border(top: BorderSide(color: Colors.red[200]!))),
+      child: Row(children: [
+        Container(
+            width: 10,
+            height: 10,
+            decoration: const BoxDecoration(
+                color: Colors.red, shape: BoxShape.circle)),
+        const SizedBox(width: 10),
+        Text('Recording... ${_formatDuration(_recordingDuration)}',
+            style: TextStyle(
+                color: Colors.red[700], fontWeight: FontWeight.w500)),
+        const Spacer(),
+        TextButton(
+            onPressed: _stopRecording, child: const Text('Stop')),
+      ]),
+    );
+  }
+
+  // ── Input bar ─────────────────────────────────────────────────────────────
+  Widget _buildInputBar() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.grey.withOpacity(0.1),
               blurRadius: 8,
               offset: const Offset(0, -2))
         ],
@@ -700,118 +978,149 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: Container(
-                  decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(25)),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _messageController,
-                          decoration: InputDecoration(
-                            hintText: 'Type a message...',
-                            hintStyle: TextStyle(color: Colors.grey[500]),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20, vertical: 12),
-                          ),
-                          maxLines: null,
-                          textCapitalization: TextCapitalization.sentences,
-                          style:
-                              TextStyle(fontSize: 16, color: Colors.grey[800]),
-                          cursorColor: const Color(0xFF6C5CE7),
-                          enabled: !_isSending,
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                                minWidth: 36, minHeight: 36),
-                            icon: Icon(Icons.camera_alt,
-                                size: 20,
-                                color: _isSending
-                                    ? Colors.grey[400]
-                                    : const Color(0xFF6C5CE7)),
-                            onPressed: _isSending ? null : _capturePhoto,
-                          ),
-                          IconButton(
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                                minWidth: 36, minHeight: 36),
-                            icon: Icon(Icons.attach_file,
-                                size: 20,
-                                color: _isSending
-                                    ? Colors.grey[400]
-                                    : const Color(0xFF6C5CE7)),
-                            onPressed: _isSending
-                                ? null
-                                : () => Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                        builder: (_) => GroupFileMessageScreen(
-                                            groupId: widget.groupId,
-                                            groupName: widget.groupName,
-                                            communityInfo: communityInfo))),
-                          ),
-                          const SizedBox(width: 4),
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: _isSending
-                                  ? Colors.grey[400]
-                                  : const Color(0xFF6C5CE7),
-                              shape: BoxShape.circle,
+              if (_replyingToMessage != null) _buildReplyPreviewBar(),
+              if (_selectedFile != null) _buildFilePreviewChip(),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Container(
+                      decoration: BoxDecoration(
+                          color: Colors.grey[100],
+                          borderRadius: BorderRadius.circular(25)),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _messageController,
+                              decoration: InputDecoration(
+                                hintText: _selectedFile != null
+                                    ? 'Add a caption...'
+                                    : 'Type a message...',
+                                hintStyle:
+                                TextStyle(color: Colors.grey[500]),
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding:
+                                const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 12),
+                              ),
+                              maxLines: null,
+                              textCapitalization:
+                              TextCapitalization.sentences,
+                              style: TextStyle(
+                                  fontSize: 16, color: Colors.grey[800]),
+                              cursorColor: const Color(0xFF6C5CE7),
+                              enabled: !_isSending,
+                              onSubmitted: (_) {
+                                if (!_isSending) _sendMessage();
+                              },
                             ),
-                            child: _isSending
-                                ? const Center(
-                                    child: SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation(
-                                                Colors.white))))
-                                : IconButton(
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
                                     padding: EdgeInsets.zero,
                                     constraints: const BoxConstraints(
                                         minWidth: 36, minHeight: 36),
-                                    icon: const Icon(Icons.send,
-                                        size: 18, color: Colors.white),
-                                    onPressed: _isSending ? null : _sendMessage,
+                                    icon: Icon(Icons.camera_alt,
+                                        size: 20,
+                                        color: (_selectedFile == null &&
+                                            !_isSending)
+                                            ? const Color(0xFF6C5CE7)
+                                            : Colors.grey[400]),
+                                    onPressed: (_selectedFile == null &&
+                                        !_isSending)
+                                        ? _capturePhoto
+                                        : null,
                                   ),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                        minWidth: 36, minHeight: 36),
+                                    icon: Icon(Icons.attach_file,
+                                        size: 20,
+                                        color: (_selectedFile == null &&
+                                            !_isSending)
+                                            ? const Color(0xFF6C5CE7)
+                                            : Colors.grey[400]),
+                                    onPressed: (_selectedFile == null &&
+                                        !_isSending)
+                                        ? _pickFile
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: _isSending
+                                          ? Colors.grey[400]
+                                          : const Color(0xFF6C5CE7),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: _isSending
+                                        ? const Center(
+                                        child: SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child:
+                                            CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                valueColor:
+                                                AlwaysStoppedAnimation(
+                                                    Colors
+                                                        .white))))
+                                        : IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints:
+                                      const BoxConstraints(
+                                          minWidth: 36,
+                                          minHeight: 36),
+                                      icon: const Icon(Icons.send,
+                                          size: 18,
+                                          color: Colors.white),
+                                      onPressed: _isSending
+                                          ? null
+                                          : _sendMessage,
+                                    ),
+                                  ),
+                                ]),
                           ),
-                        ]),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
-              Container(
-                margin: const EdgeInsets.only(left: 8),
-                decoration: BoxDecoration(
-                    color: _isRecording ? Colors.red : const Color(0xFF6C5CE7),
-                    shape: BoxShape.circle),
-                child: IconButton(
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 44, minHeight: 44),
-                  icon: Icon(_isRecording ? Icons.stop : Icons.mic,
-                      size: 22, color: Colors.white),
-                  onPressed: _isSending
-                      ? null
-                      : (_isRecording ? _stopRecording : _startRecording),
-                ),
+                  Container(
+                    margin: const EdgeInsets.only(left: 8),
+                    decoration: BoxDecoration(
+                        color: _isRecording
+                            ? Colors.red
+                            : const Color(0xFF6C5CE7),
+                        shape: BoxShape.circle),
+                    child: IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                          minWidth: 44, minHeight: 44),
+                      icon: Icon(
+                          _isRecording ? Icons.stop : Icons.mic,
+                          size: 22,
+                          color: Colors.white),
+                      onPressed: _isSending
+                          ? null
+                          : (_isRecording
+                          ? _stopRecording
+                          : _startRecording),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -820,230 +1129,127 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     );
   }
 
-  void _sendMessage() async {
-    if (_isSending) return;
-    final text = _messageController.text.trim();
-    if (text.isEmpty) return;
-
-    final provider = context.read<GroupChatProvider>();
-    final g = provider.getGroupById(widget.groupId);
-    final communityInfo = {
-      "_id": g?['_id'] ?? widget.groupId,
-      "name": g?['name'] ?? widget.groupName
-    };
-
-    setState(() => _isSending = true);
-    _messageController.clear();
-    _scrollToBottom();
-
-    try {
-      final ok = await provider.sendGroupMessage(
-          groupId: widget.groupId, text: text, communityInfo: communityInfo);
-      if (ok) {
-        Future.delayed(const Duration(milliseconds: 200), () {
-          if (mounted) _scrollToBottom();
-        });
-      } else {
-        _messageController.text = text;
-        if (provider.sendMessageError != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(provider.sendMessageError!),
-              backgroundColor: Colors.red,
-              action: SnackBarAction(
-                  label: 'Retry',
-                  textColor: Colors.white,
-                  onPressed: _sendMessage)));
-        }
-      }
-    } catch (e) {
-      _messageController.text = text;
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red));
-    } finally {
-      if (mounted) setState(() => _isSending = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.grey[800],
-        elevation: 0,
-        shadowColor: Colors.grey[200],
-        surfaceTintColor: Colors.transparent,
-        title: Consumer<GroupChatProvider>(
-          builder: (context, provider, _) {
-            final group = provider.getGroupById(widget.groupId);
-            final count = group?['memberCount'] ?? 0;
-            return Row(children: [
-              _buildGroupAvatarSmall(group),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(widget.groupName,
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.w600),
-                          overflow: TextOverflow.ellipsis),
-                      if (count > 0)
-                        Text('$count members',
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w400)),
-                    ]),
-              ),
-            ]);
-          },
-        ),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              if (v == 'add_member') {
-                widget.isAdmin
-                    ? _showAddMembersDialog()
-                    : ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Only admins can add members')));
-              } else if (v == 'group_info') {
-                _showGroupInfo();
-              }
-            },
-            icon: const Icon(Icons.more_vert, color: Color(0xFF6C5CE7)),
-            itemBuilder: (_) => [
-              if (widget.isAdmin)
-                const PopupMenuItem(
-                    value: 'add_member',
-                    child: Row(children: [
-                      Icon(Icons.person_add),
-                      SizedBox(width: 12),
-                      Text('Add Member')
-                    ])),
-              const PopupMenuItem(
-                  value: 'group_info',
-                  child: Row(children: [
-                    Icon(Icons.info_outline),
-                    SizedBox(width: 12),
-                    Text('Group Info')
-                  ])),
-            ],
-          ),
-          const SizedBox(width: 8),
-        ],
+  Widget _buildReplyPreviewBar() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+        border: Border(
+            left: BorderSide(color: const Color(0xFF6C5CE7), width: 3)),
       ),
-      body: Column(
-        children: [
-          Expanded(child: _buildMessagesList()),
-          if (_isRecording)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                  color: Colors.red[50],
-                  border: Border(top: BorderSide(color: Colors.red[200]!))),
-              child: Row(children: [
-                Container(
-                    width: 10,
-                    height: 10,
-                    decoration: const BoxDecoration(
-                        color: Colors.red, shape: BoxShape.circle)),
-                const SizedBox(width: 10),
-                Text('Recording...',
-                    style: TextStyle(
-                        color: Colors.red[700], fontWeight: FontWeight.w500)),
-                const Spacer(),
-                TextButton(
-                    onPressed: _stopRecording, child: const Text('Stop')),
+      child: Row(children: [
+        Expanded(
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to ${_replyingToMessage!['senderName'] ?? 'message'}',
+                  style: const TextStyle(
+                      color: Color(0xFF6C5CE7),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _replyingToMessage!['text'] ??
+                      (_replyingToMessage!['isFile'] == true
+                          ? '📎 ${_replyingToMessage!['fileName']}'
+                          : (_replyingToMessage!['isAudio'] == true
+                          ? '🎤 Voice message'
+                          : '')),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                ),
               ]),
-            ),
-          _buildMessageInput(),
-        ],
-      ),
+        ),
+        IconButton(
+          icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
+          onPressed: _clearReply,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+        ),
+      ]),
     );
   }
 
-  // ─── Dialogs ───────────────────────────────────────────────────────────────
-  void _showAddMembersDialog() {
-    final provider = context.read<GroupChatProvider>();
-    provider.fetchAllUsers();
-    showDialog(
-      context: context,
-      builder: (_) {
-        String? selectedId;
-        return Consumer<GroupChatProvider>(
-          builder: (context, p, __) => AlertDialog(
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Text('Select Member'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 200,
-              child: p.isFetchingUsers
-                  ? const Center(child: CircularProgressIndicator())
-                  : p.allUsers.isEmpty
-                      ? Center(
-                          child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                              const Icon(Icons.error_outline,
-                                  size: 48, color: Colors.red),
-                              const SizedBox(height: 12),
-                              const Text('No users available'),
-                              const SizedBox(height: 12),
-                              ElevatedButton(
-                                  onPressed: () => p.fetchAllUsers(),
-                                  child: const Text('Retry')),
-                            ]))
-                      : StatefulBuilder(
-                          builder: (ctx, setS) => DropdownButton<String>(
-                            isExpanded: true,
-                            hint: const Text('Select a user'),
-                            value: selectedId,
-                            items: p.allUsers.map((u) {
-                              final id = u['_id'] as String?;
-                              final name = u['profile']?['name'] as String? ??
-                                  u['mobile'] as String? ??
-                                  'Unknown';
-                              return DropdownMenuItem<String>(
-                                  value: id, child: Text(name));
-                            }).toList(),
-                            onChanged: (v) => setS(() => selectedId = v),
-                          ),
-                        ),
-            ),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel')),
-              ElevatedButton(
-                onPressed: p.isAddingMembers || selectedId == null
-                    ? null
-                    : () async {
-                        await p.addMembersToGroup(
-                            groupId: widget.groupId, memberIds: [selectedId!]);
-                        if (mounted) Navigator.pop(context);
-                      },
-                child: p.isAddingMembers
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Add'),
-              ),
-            ],
+  Widget _buildFilePreviewChip() {
+    return FutureBuilder<int>(
+      future: _selectedFile!.length(),
+      builder: (context, snap) {
+        final sizeStr = snap.hasData ? _readableSize(snap.data!) : '...';
+        final name = _selectedFile!.path.split('/').last;
+        final isImg = _isImageFile(_selectedFile!.path);
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[300]!),
           ),
+          child: Row(children: [
+            Icon(isImg ? Icons.image : Icons.attach_file,
+                size: 18, color: const Color(0xFF6C5CE7)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[800],
+                            fontWeight: FontWeight.w500)),
+                    Text(sizeStr,
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey[500])),
+                  ]),
+            ),
+            if (isImg && snap.hasData && snap.data! > _maxImageBytes)
+              Container(
+                margin: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(4)),
+                child: Text('Will compress',
+                    style: TextStyle(
+                        fontSize: 10, color: Colors.orange[800])),
+              ),
+            IconButton(
+              icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
+              padding: EdgeInsets.zero,
+              constraints:
+              const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: () => setState(() {
+                _selectedFile = null;
+                _messageController.clear();
+              }),
+            ),
+          ]),
         );
       },
     );
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  //  GROUP INFO BOTTOM SHEET
+  // ════════════════════════════════════════════════════════════════════════
   void _showGroupInfo() {
     final provider = context.read<GroupChatProvider>();
-    final group = provider.getGroupById(widget.groupId);
+    final group = provider.getGroupById(widget.groupId) ??
+        provider.getMyGroupById(widget.groupId);
     if (group == null) return;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1051,10 +1257,10 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
         decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(20), topRight: Radius.circular(20)),
-        ),
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20))),
         child: Column(children: [
           Container(
               width: 40,
@@ -1065,70 +1271,120 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                   borderRadius: BorderRadius.circular(2))),
           Expanded(
               child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Center(
-                  child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                    color: Colors.grey[300], shape: BoxShape.circle),
-                child: group['profileImage'] != null
-                    ? ClipOval(
-                        child: Image.network(group['profileImage'],
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                const Icon(Icons.group, size: 50)))
-                    : const Icon(Icons.group, size: 50),
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                          child: Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                                color: Colors.grey[300], shape: BoxShape.circle),
+                            child: group['profileImage'] != null &&
+                                (group['profileImage'] as String).isNotEmpty
+                                ? ClipOval(
+                                child: Image.network(group['profileImage'],
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                    const Icon(Icons.group, size: 50)))
+                                : const Icon(Icons.group, size: 50),
+                          )),
+                      const SizedBox(height: 16),
+                      Center(
+                          child: Text(group['name'] ?? 'Unknown Group',
+                              style: const TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold))),
+                      if (group['description'] != null &&
+                          (group['description'] as String).isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Center(
+                            child: Text(group['description'],
+                                style: TextStyle(
+                                    fontSize: 15, color: Colors.grey[600]),
+                                textAlign: TextAlign.center)),
+                      ],
+                      const SizedBox(height: 20),
+                      Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12)),
+                          child: Column(children: [
+                            _infoRow('Members',
+                                '${group['memberCount'] ?? 0}', Icons.people),
+                            const Divider(),
+                            _infoRow(
+                                'Role',
+                                group['isAdmin'] == true
+                                    ? 'Admin'
+                                    : (group['isMember'] == true
+                                    ? 'Member'
+                                    : 'Not a member'),
+                                group['isAdmin'] == true
+                                    ? Icons.admin_panel_settings
+                                    : Icons.person),
+                          ])),
+                      const SizedBox(height: 20),
+
+                      // ── Manage Members (admin only) ──────────────────────
+                      if (group['isAdmin'] == true) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _openMemberManagement(adminMode: true);
+                            },
+                            icon:
+                            const Icon(Icons.manage_accounts_rounded),
+                            label: const Text('Manage Members'),
+                            style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF6C5CE7),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 12)),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+
+                      // ── Leave / Join / Pending ───────────────────────────
+                      if (group['isMember'] == true)
+                        _actionButton('Leave Group', Icons.exit_to_app,
+                            Colors.red, () async {
+                              Navigator.pop(context);
+                              final ok = await provider
+                                  .cancelGroupRequest(widget.groupId);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content: Text(
+                                      ok ? 'Left group' : 'Failed to leave'),
+                                  backgroundColor:
+                                  ok ? Colors.green : Colors.red,
+                                ));
+                              }
+                            })
+                      else if (group['isRequested'] == true)
+                        _actionButton('Request Pending',
+                            Icons.hourglass_empty, Colors.grey, null)
+                      else
+                        _actionButton('Join Group', Icons.add, Colors.blue,
+                                () async {
+                              Navigator.pop(context);
+                              await provider.requestToJoinGroup(widget.groupId);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content:
+                                  Text(provider.groupRequestMessage),
+                                ));
+                              }
+                            }),
+                    ]),
               )),
-              const SizedBox(height: 16),
-              Center(
-                  child: Text(group['name'] ?? 'Unknown Group',
-                      style: const TextStyle(
-                          fontSize: 22, fontWeight: FontWeight.bold))),
-              if (group['description'] != null &&
-                  group['description'].isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Center(
-                    child: Text(group['description'],
-                        style: TextStyle(fontSize: 15, color: Colors.grey[600]),
-                        textAlign: TextAlign.center)),
-              ],
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12)),
-                child: Column(children: [
-                  _infoRow(
-                      'Members', '${group['memberCount'] ?? 0}', Icons.people),
-                  const Divider(),
-                  _infoRow(
-                      'Role',
-                      group['isAdmin'] == true
-                          ? 'Admin'
-                          : (group['isMember'] == true
-                              ? 'Member'
-                              : 'Not a member'),
-                      group['isAdmin'] == true
-                          ? Icons.admin_panel_settings
-                          : Icons.person),
-                ]),
-              ),
-              const SizedBox(height: 20),
-              if (group['isMember'] == true)
-                _actionButton('Leave Group', Icons.exit_to_app, Colors.red,
-                    () => Navigator.pop(context))
-              else if (group['isRequested'] == true)
-                _actionButton(
-                    'Request Pending', Icons.hourglass_empty, Colors.grey, null)
-              else
-                _actionButton('Join Group', Icons.add, Colors.blue,
-                    () => Navigator.pop(context)),
-            ]),
-          )),
         ]),
       ),
     );
@@ -1156,12 +1412,13 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       child: Row(children: [
         Icon(icon, size: 20, color: Colors.grey[600]),
         const SizedBox(width: 12),
-        Text(label, style: TextStyle(fontSize: 15, color: Colors.grey[600])),
+        Text(label,
+            style: TextStyle(fontSize: 15, color: Colors.grey[600])),
         const Spacer(),
         Text(value,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500)),
+            style: const TextStyle(
+                fontSize: 15, fontWeight: FontWeight.w500)),
       ]),
     );
-
   }
 }

@@ -477,46 +477,6 @@ class CommentService {
   }
 
   // ✅ FIXED: Better error handling
-  static Future<Map<String, dynamic>?> getCount(String postId) async {
-    try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for getCount");
-        return null;
-      }
-
-      final url = Uri.parse('$apiBaseUrl/api/post/interactions/$postId');
-
-      print('📤 GET COUNT URL: $url');
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      print('📥 GET COUNT STATUS: ${response.statusCode}');
-      print('📥 GET COUNT RESPONSE: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> body = jsonDecode(response.body);
-        if (body['error'] == false && body['data'] != null) {
-          print('✅ Interaction count fetched successfully');
-          return body['data'];
-        }
-      }
-
-      print('⚠️ Failed to fetch interaction count');
-      return null;
-    } catch (e) {
-      print("❌ Error fetching post interaction: $e");
-      return null;
-    }
-  }
 
   /// ✅ Like a Post
   static Future<Map<String, dynamic>> likePost(String postId) async {
@@ -594,6 +554,73 @@ class CommentService {
     } catch (e) {
       print("❌ Unlike Error: $e");
       return {"success": false, "message": "Unlike error: $e"};
+    }
+  }
+  static Future<Map<String, dynamic>> editComment({
+    required String commentId,
+    required String commentContent,
+  }) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        return {"success": false, "message": "Authentication token is missing"};
+      }
+
+      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment/$commentId");
+
+      final response = await http.put(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({"commentContent": commentContent}),
+      );
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {"success": true, "message": decoded['message'] ?? "Comment updated"};
+      } else {
+        return {"success": false, "message": decoded['message'] ?? "Failed to edit comment"};
+      }
+    } catch (e) {
+      return {"success": false, "message": "Error editing comment: ${e.toString()}"};
+    }
+  }
+
+  static Future<Map<String, dynamic>> deleteComment({
+    required String commentId,
+  }) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
+
+      if (token == null || token.isEmpty) {
+        return {"success": false, "message": "Authentication token is missing"};
+      }
+
+      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment/$commentId");
+
+      final response = await http.delete(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final decoded = jsonDecode(response.body);
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {"success": true, "message": decoded['message'] ?? "Comment deleted"};
+      } else {
+        return {"success": false, "message": decoded['message'] ?? "Failed to delete comment"};
+      }
+    } catch (e) {
+      return {"success": false, "message": "Error deleting comment: ${e.toString()}"};
     }
   }
 }

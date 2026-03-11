@@ -73,30 +73,36 @@ class Post {
   }
 }
 
-
-
 class Comment {
   final String id;
   final String content;
   final String createdAt;
   final String userName;
-  final String profileImage; // Added profile image field
+  final String profileImage;
+  final bool isAdmin;
+  final String userId; // ADD THIS
 
   Comment({
     required this.id,
     required this.content,
     required this.createdAt,
     required this.userName,
-    required this.profileImage, // Added to constructor
+    required this.profileImage,
+    required this.isAdmin,
+    required this.userId, // ADD THIS
   });
 
+
   factory Comment.fromJson(Map<String, dynamic> json) {
+    print('🔍 COMMENT JSON: $json'); // ADD THIS
     return Comment(
       id: json['_id'] ?? '',
       content: json['commentContent'] ?? '',
       createdAt: json['createdAt'] ?? '',
       userName: json['userId']?['profile']?['name'] ?? 'Unknown',
-      profileImage: json['userId']?['profile']?['profileImage'] ?? '', // Extract profile image
+      profileImage: json['userId']?['profile']?['profileImage'] ?? '',
+      isAdmin: json['isAdmin'] ?? false,
+      userId: json['userId']?['_id'] ?? '',
     );
   }
 }

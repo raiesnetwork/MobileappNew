@@ -8,27 +8,32 @@ import 'create_group.dart';
 import 'getall_groups.dart';
 import 'group_chat_detail.dart';
 
+const Color kPrimary = Color(0xFF8A2BE2);
+const Color kPrimaryLight = Color(0xFFF3EAFD);
+const Color kBg = Color(0xFFF8F6FC);
+const Color kSurface = Colors.white;
+const Color kTextDark = Color(0xFF1A1025);
+const Color kTextMid = Color(0xFF6B6080);
+const Color kTextLight = Color(0xFFB0A8C0);
+const Color kBorder = Color(0xFFEDE8F5);
+
 class MyGroupsScreen extends StatefulWidget {
   final String? communityId;
-
-  const MyGroupsScreen({
-    Key? key,
-    this.communityId,
-  }) : super(key: key);
-
+  const MyGroupsScreen({Key? key, this.communityId}) : super(key: key);
   @override
   State<MyGroupsScreen> createState() => _MyGroupsScreenState();
 }
 
-class _MyGroupsScreenState extends State<MyGroupsScreen> {
+class _MyGroupsScreenState extends State<MyGroupsScreen>
+    with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  // FIX: nullable instead of `late` — prevents LateInitializationError on early dispose
+  AnimationController? _fadeController;
 
   List<Map<String, dynamic>> _filteredGroups = [];
   bool _isSearching = false;
-  bool _hasInitialized = false; // Add this to track initialization
-
-  // Pagination variables
+  bool _hasInitialized = false;
   int _currentPage = 1;
   final int _pageSize = 20;
   bool _hasMoreData = true;
@@ -37,20 +42,22 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
   @override
   void initState() {
     super.initState();
+    _fadeController = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 500));
     _initializeScreen();
     _setupScrollListener();
   }
 
   void _initializeScreen() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final provider = context.read<GroupChatProvider>();
-
-      // Check if we already have groups data to avoid unnecessary API calls
       if (provider.myGroups.isNotEmpty && !_hasInitialized) {
         setState(() {
           _filteredGroups = provider.myGroups;
           _hasInitialized = true;
         });
+        _fadeController?.forward();
       } else if (!_hasInitialized) {
         _fetchMyGroups();
       }
@@ -68,45 +75,34 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
 
   Future<void> _fetchMyGroups({bool reset = true}) async {
     final provider = context.read<GroupChatProvider>();
-
     if (reset) {
       _currentPage = 1;
       _hasMoreData = true;
     }
-
     await provider.fetchMyGroups(communityId: widget.communityId);
-
     if (mounted) {
       setState(() {
         _filteredGroups = provider.myGroups;
         _hasInitialized = true;
-        // Simulate pagination for now - you can modify this based on your API
         _hasMoreData = provider.myGroups.length >= _pageSize;
       });
+      _fadeController?.forward();
     }
   }
 
   Future<void> _loadMoreGroups() async {
     if (_isLoadingMore || !_hasMoreData || _isSearching) return;
-
-    setState(() {
-      _isLoadingMore = true;
-    });
-
-    // Simulate pagination - replace with actual paginated API call
+    setState(() => _isLoadingMore = true);
     await Future.delayed(const Duration(milliseconds: 800));
-
     setState(() {
       _currentPage++;
       _isLoadingMore = false;
-      // For now, we'll just stop loading more after first page
       _hasMoreData = false;
     });
   }
 
   void _onSearchChanged(String query) {
     final provider = context.read<GroupChatProvider>();
-
     setState(() {
       _isSearching = query.isNotEmpty;
       _filteredGroups = provider.filterMyGroups(query);
@@ -116,45 +112,30 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
   void _clearSearch() {
     _searchController.clear();
     final provider = context.read<GroupChatProvider>();
-
     setState(() {
       _isSearching = false;
       _filteredGroups = provider.myGroups;
     });
   }
 
-  Future<void> _refreshGroups() async {
-    await _fetchMyGroups(reset: true);
-  }
+  Future<void> _refreshGroups() async => _fetchMyGroups(reset: true);
 
   void _navigateToGroupChat(Map<String, dynamic> group) {
-    final provider = context.read<GroupChatProvider>();
-    provider.setCurrentGroup(group['_id']);
-
+    context.read<GroupChatProvider>().setCurrentGroup(group['_id']);
     Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => GroupChatDetailPage(
-          groupId: group['_id'] ?? '',
-          groupName: group['name'] ?? 'Unknown Group',
-          isAdmin: group['isAdmin'] == true, // ✅ Pass admin flag
-        ),
-      ),
-    );
+        context,
+        MaterialPageRoute(
+          builder: (_) => GroupChatDetailPage(
+            groupId: group['_id'] ?? '',
+            groupName: group['name'] ?? 'Unknown Group',
+            isAdmin: group['isAdmin'] == true,
+          ),
+        ));
   }
-
 
   void _navigateToCreateGroup() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const CreateGroupScreen(),
-      ),
-    );
-  }
-
-  void _navigateToRequests() {
-    Navigator.pushNamed(context, '/group-requests');
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const CreateGroupScreen()));
   }
 
   void _showGroupOptions(Map<String, dynamic> group) {
@@ -162,303 +143,231 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => _GroupOptionsBottomSheet(group: group),
+      builder: (_) => _GroupOptionsBottomSheet(group: group),
     );
   }
 
+  // ── EMPTY STATE ────────────────────────────────────────────────────────
   Widget _buildEmptyState() {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      child: Container(
+      child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.6,
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _isSearching
-                      ? Icons.search_off_rounded
-                      : Icons.group_outlined,
-                  size: 48,
-                  color: Colors.grey[400],
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                _isSearching ? 'No groups found' : 'No groups yet',
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: const BoxDecoration(
+                  color: kPrimaryLight, shape: BoxShape.circle),
+              child: Icon(
+                  _isSearching ? Icons.search_off_rounded : Icons.group_outlined,
+                  size: 40,
+                  color: kPrimary),
+            ),
+            const SizedBox(height: 20),
+            Text(_isSearching ? 'No groups found' : 'No groups yet',
                 style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
+                    fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 48),
+              child: Text(
                 _isSearching
                     ? 'Try different search terms'
-                    : 'Create or join a group to start chatting',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
+                    : 'Create or join a group to get started',
+                style: const TextStyle(fontSize: 14, color: kTextMid),
                 textAlign: TextAlign.center,
               ),
-              if (!_isSearching) ...[
-                const SizedBox(height: 32),
-                ElevatedButton.icon(
-                  onPressed: _navigateToCreateGroup,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text(
-                    'Create Group',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[600],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 0,
-                  ),
-                ),
-              ],
+            ),
+            if (!_isSearching) ...[
+              const SizedBox(height: 32),
+              _PrimaryButton(
+                  label: 'Create Group',
+                  icon: Icons.add_rounded,
+                  onTap: _navigateToCreateGroup),
             ],
-          ),
+          ]),
         ),
       ),
     );
   }
 
+  // ── ERROR STATE ────────────────────────────────────────────────────────
   Widget _buildErrorState(String error) {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
-      child: Container(
+      child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.6,
         child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Colors.red[50],
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.error_outline_rounded,
-                  size: 48,
-                  color: Colors.red[400],
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Something went wrong',
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: const BoxDecoration(
+                  color: Color(0xFFFFEEEE), shape: BoxShape.circle),
+              child: const Icon(Icons.error_outline_rounded,
+                  size: 40, color: Color(0xFFE53935)),
+            ),
+            const SizedBox(height: 20),
+            const Text('Something went wrong',
                 style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 32),
-                child: Text(
-                  error,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _refreshGroups,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text(
-                  'Try Again',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[600],
-                  foregroundColor: Colors.white,
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  elevation: 0,
-                ),
-              ),
-            ],
-          ),
+                    fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(error,
+                  style: const TextStyle(fontSize: 14, color: kTextMid),
+                  textAlign: TextAlign.center),
+            ),
+            const SizedBox(height: 28),
+            _PrimaryButton(
+                label: 'Try Again',
+                icon: Icons.refresh_rounded,
+                onTap: _refreshGroups),
+          ]),
         ),
       ),
     );
   }
 
-  Widget _buildGroupCard(Map<String, dynamic> group) {
+  // ── GROUP CARD ─────────────────────────────────────────────────────────
+  Widget _buildGroupCard(Map<String, dynamic> group, int index) {
     final members = group['members'] as List<dynamic>? ?? [];
     final memberCount = members.length;
     final lastMessage = group['lastMessage'] as Map<String, dynamic>?;
-    final hasUnreadMessages =
-        group['unreadCount'] != null && group['unreadCount'] > 0;
     final unreadCount = group['unreadCount'] ?? 0;
+    final hasUnread = unreadCount > 0;
+    final isAdmin = group['isAdmin'] == true;
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[100]!),
+    // Safe animation: use AlwaysStoppedAnimation if controller not yet ready
+    final animation = _fadeController != null
+        ? CurvedAnimation(
+      parent: _fadeController!,
+      curve: Interval(
+        (index * 0.05).clamp(0.0, 0.8),
+        ((index * 0.05) + 0.4).clamp(0.0, 1.0),
+        curve: Curves.easeOut,
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _navigateToGroupChat(group),
-          onLongPress: () => _showGroupOptions(group),
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                // Group Avatar - Fixed to always show first letter when no image
+    )
+        : const AlwaysStoppedAnimation<double>(1.0);
+
+    return FadeTransition(
+      opacity: animation,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        child: Material(
+          color: kSurface,
+          borderRadius: BorderRadius.circular(16),
+          child: InkWell(
+            onTap: () => _navigateToGroupChat(group),
+            onLongPress: () => _showGroupOptions(group),
+            borderRadius: BorderRadius.circular(16),
+            splashColor: kPrimaryLight,
+            highlightColor: kPrimaryLight.withOpacity(0.5),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: hasUnread ? kPrimary.withOpacity(0.3) : kBorder,
+                  width: hasUnread ? 1.5 : 1,
+                ),
+              ),
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
                 _buildGroupAvatar(group),
                 const SizedBox(width: 12),
-
-                // Group Info
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Group name and admin badge
-                      Row(
-                        children: [
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
                           Expanded(
                             child: Text(
                               group['name'] ?? 'Unnamed Group',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                                height: 1.2,
+                                fontWeight: hasUnread
+                                    ? FontWeight.w700
+                                    : FontWeight.w600,
+                                color: kTextDark,
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (group['isAdmin'] == true)
+                          if (isAdmin)
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                  horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.orange[50],
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color: Colors.orange[200]!, width: 0.5),
+                                color: kPrimaryLight,
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                              child: Text(
-                                'ADMIN',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.orange[700],
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
+                              child: const Text('ADMIN',
+                                  style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                      color: kPrimary,
+                                      letterSpacing: 0.5)),
                             ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 4),
-
-                      // Last message or description
-                      if (lastMessage != null)
-                        Text(
-                          '${lastMessage['sender']?['profile']?['name'] ?? 'Someone'}: ${lastMessage['text'] ?? 'Sent a file'}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                            fontWeight: hasUnreadMessages
-                                ? FontWeight.w500
-                                : FontWeight.w400,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      else if (group['description'] != null &&
-                          group['description'].toString().isNotEmpty)
-                        Text(
-                          group['description'],
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w400,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-
-                      const SizedBox(height: 6),
-
-                      // Member count
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.people_rounded,
-                            size: 14,
-                            color: Colors.grey[500],
-                          ),
+                        ]),
+                        const SizedBox(height: 4),
+                        if (lastMessage != null)
+                          Text(
+                            '${lastMessage['sender']?['profile']?['name'] ?? 'Someone'}: ${lastMessage['text'] ?? 'Sent a file'}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: hasUnread ? kTextDark : kTextMid,
+                              fontWeight: hasUnread
+                                  ? FontWeight.w500
+                                  : FontWeight.w400,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        else if (group['description'] != null &&
+                            group['description'].toString().isNotEmpty)
+                          Text(group['description'],
+                              style:
+                              const TextStyle(fontSize: 13, color: kTextMid),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 6),
+                        Row(children: [
+                          const Icon(Icons.people_alt_rounded,
+                              size: 13, color: kTextLight),
                           const SizedBox(width: 4),
                           Text(
                             '$memberCount ${memberCount == 1 ? 'member' : 'members'}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.grey[600],
-                            ),
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: kTextLight,
+                                fontWeight: FontWeight.w500),
                           ),
                           const Spacer(),
-                          if (hasUnreadMessages)
+                          if (hasUnread)
                             Container(
-                              constraints: const BoxConstraints(minWidth: 18),
+                              constraints: const BoxConstraints(minWidth: 20),
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
+                                  horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.red[500],
-                                borderRadius: BorderRadius.circular(9),
-                              ),
+                                  color: kPrimary,
+                                  borderRadius: BorderRadius.circular(10)),
                               child: Text(
                                 unreadCount > 99 ? '99+' : '$unreadCount',
                                 style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700),
                                 textAlign: TextAlign.center,
                               ),
                             ),
-                        ],
-                      ),
-                    ],
-                  ),
+                        ]),
+                      ]),
                 ),
-
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 20,
-                  color: Colors.grey[400],
-                ),
-              ],
+                // REMOVED: chevron icon
+              ]),
             ),
           ),
         ),
@@ -466,276 +375,217 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
     );
   }
 
-  // Separate method for building group avatar to ensure proper fallback
+  // ── GROUP AVATAR ───────────────────────────────────────────────────────
+  // Shows profile image when available; otherwise a purple gradient circle
+  // with a group icon (people icon) instead of the first letter.
   Widget _buildGroupAvatar(Map<String, dynamic> group) {
-    final groupName = group['name'] ?? 'G';
-    final firstLetter = groupName.isNotEmpty ? groupName[0].toUpperCase() : 'G';
     final profileImage = group['profileImage'];
-
-    // Check if we have a valid profile image
-    bool hasValidImage = profileImage != null &&
+    final hasValidImage = profileImage != null &&
         profileImage.toString().isNotEmpty &&
         profileImage.toString() != 'null';
 
     return Container(
-      width: 48,
-      height: 48,
+      width: 50,
+      height: 50,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: !hasValidImage
-            ? LinearGradient(
-          colors: [Colors.blue[400]!, Colors.blue[600]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        )
+            ? const LinearGradient(
+            colors: [Color(0xFFB06EF5), kPrimary],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight)
             : null,
       ),
       child: hasValidImage
           ? CircleAvatar(
-        radius: 24,
+        radius: 25,
         backgroundColor: Colors.transparent,
         backgroundImage: _getImageProvider(profileImage),
-        onBackgroundImageError: (exception, stackTrace) {
-          // If image fails to load, rebuild with fallback
-          if (mounted) {
-            setState(() {
-              group['profileImage'] = null;
-            });
-          }
+        onBackgroundImageError: (_, __) {
+          if (mounted) setState(() => group['profileImage'] = null);
         },
-        child: null,
       )
-          : CircleAvatar(
-        radius: 24,
+          : const CircleAvatar(
+        radius: 25,
         backgroundColor: Colors.transparent,
-        child: Text(
-          firstLetter,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: Icon(Icons.group_rounded, color: Colors.white, size: 24),
       ),
     );
   }
 
   Widget _buildLoadingMoreIndicator() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[400]!),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            'Loading more groups...',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
+    return const Padding(
+      padding: EdgeInsets.all(20),
+      child: Center(
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+              strokeWidth: 2.5,
+              valueColor: AlwaysStoppedAnimation(kPrimary)),
+        ),
       ),
     );
   }
 
   ImageProvider? _getImageProvider(String? imageData) {
-    if (imageData == null || imageData.isEmpty || imageData == 'null') {
-      return null;
-    }
-
+    if (imageData == null || imageData.isEmpty || imageData == 'null') return null;
     try {
       if (imageData.startsWith('data:image') ||
           imageData.startsWith('/9j/') ||
           imageData.startsWith('iVBORw0KGgo')) {
-        String base64String = imageData;
-        if (imageData.startsWith('data:image')) {
-          base64String = imageData.split(',')[1];
-        }
-        return MemoryImage(base64Decode(base64String));
-      } else {
-        return NetworkImage(imageData);
+        final b64 = imageData.startsWith('data:image')
+            ? imageData.split(',')[1]
+            : imageData;
+        return MemoryImage(base64Decode(b64));
       }
-    } catch (e) {
-      print('Error creating image provider: $e');
+      return NetworkImage(imageData);
+    } catch (_) {
       return null;
     }
   }
 
+  // ── BUILD ──────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: const Text(
-          'My Groups',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 18,
-            color: Colors.black87,
-          ),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        actions: [
-          // ✅ ADD THIS - Discover button to find groups to join
-          IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const GroupListScreen(), // your existing screen
-                ),
-              );
-            },
-            icon: Icon(Icons.explore_rounded, color: Colors.blue[600]),
-            tooltip: 'Discover Groups',
-          ),
-
-          // your existing Requests button
-          TextButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => GroupRequestScreen(),
-                ),
-              );
-            },
-            child: Text(
-              'Requests',
-              style: TextStyle(
-                color: Colors.blue[600],
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+      backgroundColor: kBg,
+      appBar: _buildAppBar(),
       body: Consumer<GroupChatProvider>(
         builder: (context, provider, child) {
-          // Modified loading condition to prevent flash of empty state
           if (provider.isLoadingMyGroups && !_hasInitialized) {
             return const Center(
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(strokeWidth: 2.5),
-                  SizedBox(height: 16),
-                  Text(
-                    'Loading groups...',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black54,
-                    ),
-                  ),
-                ],
-              ),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation(kPrimary))),
+                    SizedBox(height: 16),
+                    Text('Loading groups...',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: kTextMid)),
+                  ]),
             );
           }
 
-          if (provider.myGroupsError != null) {
+          if (provider.myGroupsError != null)
             return _buildErrorState(provider.myGroupsError!);
-          }
 
-          // Use _filteredGroups which is managed by local state
           final groupsToDisplay = _filteredGroups;
 
-          return Column(
-            children: [
-              // Search Bar
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Container(
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: _onSearchChanged,
-                    decoration: InputDecoration(
-                      hintText: 'Search groups...',
-                      hintStyle: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 14,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search_rounded,
-                        color: Colors.grey[500],
-                        size: 20,
-                      ),
-                      suffixIcon: _searchController.text.isNotEmpty
-                          ? IconButton(
-                        icon: Icon(
-                          Icons.clear_rounded,
-                          color: Colors.grey[500],
-                          size: 18,
-                        ),
-                        onPressed: _clearSearch,
-                      )
-                          : null,
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                    ),
-                    style: const TextStyle(fontSize: 14),
-                  ),
+          return Column(children: [
+            _buildSearchBar(),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _refreshGroups,
+                color: kPrimary,
+                backgroundColor: kSurface,
+                child: groupsToDisplay.isEmpty
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.only(top: 8, bottom: 100),
+                  itemCount:
+                  groupsToDisplay.length + (_isLoadingMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= groupsToDisplay.length)
+                      return _buildLoadingMoreIndicator();
+                    return _buildGroupCard(groupsToDisplay[index], index);
+                  },
                 ),
               ),
-
-              // Groups List
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _refreshGroups,
-                  color: Colors.blue[600],
-                  backgroundColor: Colors.white,
-                  child: groupsToDisplay.isEmpty
-                      ? _buildEmptyState()
-                      : ListView.builder(
-                    controller: _scrollController,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount:
-                    groupsToDisplay.length + (_isLoadingMore ? 1 : 0),
-                    padding: const EdgeInsets.only(top: 4, bottom: 80),
-                    itemBuilder: (context, index) {
-                      if (index >= groupsToDisplay.length) {
-                        return _buildLoadingMoreIndicator();
-                      }
-
-                      final group = groupsToDisplay[index];
-                      return _buildGroupCard(group);
-                    },
-                  ),
-                ),
-              ),
-            ],
-          );
+            ),
+          ]);
         },
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _navigateToCreateGroup,
-        backgroundColor: Colors.blue[600],
+        backgroundColor: kPrimary,
         foregroundColor: Colors.white,
-        elevation: 2,
-        child: const Icon(Icons.add_rounded, size: 24),
+        elevation: 4,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: const Icon(Icons.add_rounded, size: 26),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: kSurface,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      titleSpacing: 20,
+      title: const Text('My Groups',
+          style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 22,
+              color: kTextDark,
+              letterSpacing: -0.3)),
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Container(height: 1, color: kBorder),
+      ),
+      actions: [
+        IconButton(
+          onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const GroupListScreen())),
+          icon: const Icon(Icons.explore_outlined, color: kPrimary, size: 22),
+          tooltip: 'Discover Groups',
+        ),
+        TextButton(
+          onPressed: () => Navigator.push(context,
+              MaterialPageRoute(builder: (_) => GroupRequestScreen())),
+          style: TextButton.styleFrom(
+              foregroundColor: kPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 12)),
+          child: const Text('Requests',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+        ),
+        const SizedBox(width: 4),
+      ],
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      color: kSurface,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: TextField(
+        controller: _searchController,
+        onChanged: _onSearchChanged,
+        style: const TextStyle(fontSize: 15, color: kTextDark),
+        decoration: InputDecoration(
+          hintText: 'Search groups...',
+          hintStyle: const TextStyle(color: kTextLight, fontSize: 14),
+          prefixIcon:
+          const Icon(Icons.search_rounded, color: kPrimary, size: 20),
+          suffixIcon: _searchController.text.isNotEmpty
+              ? IconButton(
+              icon: const Icon(Icons.close_rounded,
+                  color: kTextLight, size: 18),
+              onPressed: _clearSearch)
+              : null,
+          filled: true,
+          fillColor: kBg,
+          contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: kBorder)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: kPrimary, width: 1.5)),
+        ),
       ),
     );
   }
@@ -744,13 +594,48 @@ class _MyGroupsScreenState extends State<MyGroupsScreen> {
   void dispose() {
     _searchController.dispose();
     _scrollController.dispose();
+    // FIX: null-safe dispose
+    _fadeController?.dispose();
     super.dispose();
   }
 }
 
+// ── PRIMARY BUTTON ─────────────────────────────────────────────────────────
+class _PrimaryButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _PrimaryButton(
+      {required this.label, required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: kPrimary,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 18, color: Colors.white),
+            const SizedBox(width: 8),
+            Text(label,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ── GROUP OPTIONS BOTTOM SHEET ─────────────────────────────────────────────
 class _GroupOptionsBottomSheet extends StatelessWidget {
   final Map<String, dynamic> group;
-
   const _GroupOptionsBottomSheet({required this.group});
 
   @override
@@ -761,186 +646,139 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
 
     return Container(
       decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        color: kSurface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Handle bar
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-
-            // Group header
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Row(
-                children: [
-                  _buildBottomSheetAvatar(group),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          group['name'] ?? 'Unnamed Group',
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 36,
+            height: 4,
+            margin: const EdgeInsets.symmetric(vertical: 14),
+            decoration:
+            BoxDecoration(color: kBorder, borderRadius: BorderRadius.circular(2)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            child: Row(children: [
+              _buildAvatar(),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(group['name'] ?? 'Unnamed Group',
                           style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: kTextDark),
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
+                          overflow: TextOverflow.ellipsis),
+                      const SizedBox(height: 2),
+                      Text(
                           '$memberCount ${memberCount == 1 ? 'member' : 'members'}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: kTextMid,
+                              fontWeight: FontWeight.w500)),
+                    ]),
               ),
-            ),
-
-            const SizedBox(height: 8),
-            Divider(height: 1, color: Colors.grey[200]),
-
-            // Options
-            _OptionTile(
+            ]),
+          ),
+          const SizedBox(height: 12),
+          Container(height: 1, color: kBorder),
+          const SizedBox(height: 4),
+          _OptionTile(
               icon: Icons.info_outline_rounded,
               title: 'Group Info',
               onTap: () {
                 Navigator.pop(context);
                 Navigator.pushNamed(context, '/group-info', arguments: group);
-              },
-            ),
-
-            _OptionTile(
+              }),
+          _OptionTile(
               icon: Icons.people_outline_rounded,
               title: 'Members',
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/group-members',
-                    arguments: group);
-              },
-            ),
-
-            if (isAdmin) ...[
-              _OptionTile(
+                Navigator.pushNamed(context, '/group-members', arguments: group);
+              }),
+          if (isAdmin) ...[
+            _OptionTile(
                 icon: Icons.settings_outlined,
                 title: 'Group Settings',
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.pushNamed(context, '/group-settings',
                       arguments: group);
-                },
-              ),
-              _OptionTile(
+                }),
+            _OptionTile(
                 icon: Icons.person_add_outlined,
                 title: 'Manage Requests',
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.pushNamed(context, '/group-requests',
                       arguments: group);
-                },
-              ),
-            ],
-
-            _OptionTile(
-              icon: Icons.exit_to_app_rounded,
-              title: 'Leave Group',
-              textColor: Colors.red[600],
-              onTap: () {
-                Navigator.pop(context);
-                _showLeaveGroupDialog(context, group);
-              },
-            ),
-
-            const SizedBox(height: 12),
+                }),
           ],
-        ),
+          _OptionTile(
+            icon: Icons.exit_to_app_rounded,
+            title: 'Leave Group',
+            textColor: Colors.red[600],
+            onTap: () {
+              Navigator.pop(context);
+              _showLeaveGroupDialog(context, group);
+            },
+          ),
+          const SizedBox(height: 12),
+        ]),
       ),
     );
   }
 
-  // Separate avatar builder for bottom sheet
-  Widget _buildBottomSheetAvatar(Map<String, dynamic> group) {
-    final groupName = group['name'] ?? 'G';
-    final firstLetter = groupName.isNotEmpty ? groupName[0].toUpperCase() : 'G';
+  Widget _buildAvatar() {
     final profileImage = group['profileImage'];
-
-    bool hasValidImage = profileImage != null &&
+    final hasValidImage = profileImage != null &&
         profileImage.toString().isNotEmpty &&
         profileImage.toString() != 'null';
 
     return Container(
-      width: 44,
-      height: 44,
+      width: 46,
+      height: 46,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: !hasValidImage
-            ? LinearGradient(
-          colors: [Colors.blue[400]!, Colors.blue[600]!],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        )
+            ? const LinearGradient(
+            colors: [Color(0xFFB06EF5), kPrimary],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight)
             : null,
       ),
       child: hasValidImage
           ? CircleAvatar(
-        radius: 22,
+          radius: 23,
+          backgroundColor: Colors.transparent,
+          backgroundImage: _getImageProvider(profileImage))
+          : const CircleAvatar(
+        radius: 23,
         backgroundColor: Colors.transparent,
-        backgroundImage: _getImageProvider(profileImage),
-        child: null,
-      )
-          : CircleAvatar(
-        radius: 22,
-        backgroundColor: Colors.transparent,
-        child: Text(
-          firstLetter,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: Icon(Icons.group_rounded, color: Colors.white, size: 22),
       ),
     );
   }
 
   ImageProvider? _getImageProvider(String? imageData) {
-    if (imageData == null || imageData.isEmpty || imageData == 'null') {
-      return null;
-    }
-
+    if (imageData == null || imageData.isEmpty || imageData == 'null') return null;
     try {
       if (imageData.startsWith('data:image') ||
           imageData.startsWith('/9j/') ||
           imageData.startsWith('iVBORw0KGgo')) {
-        String base64String = imageData;
-        if (imageData.startsWith('data:image')) {
-          base64String = imageData.split(',')[1];
-        }
-        return MemoryImage(base64Decode(base64String));
-      } else {
-        return NetworkImage(imageData);
+        final b64 = imageData.startsWith('data:image')
+            ? imageData.split(',')[1]
+            : imageData;
+        return MemoryImage(base64Decode(b64));
       }
-    } catch (e) {
-      print('Error creating image provider: $e');
+      return NetworkImage(imageData);
+    } catch (_) {
       return null;
     }
   }
@@ -948,48 +786,30 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
   void _showLeaveGroupDialog(BuildContext context, Map<String, dynamic> group) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Leave Group',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        title: const Text('Leave Group',
+            style: TextStyle(
+                fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
         content: Text(
-          'Are you sure you want to leave "${group['name']}"? You won\'t be able to see new messages.',
-          style: const TextStyle(fontSize: 14),
-        ),
+            'Are you sure you want to leave "${group['name']}"? You won\'t be able to see new messages.',
+            style: const TextStyle(fontSize: 14, color: kTextMid)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel',
+                  style:
+                  TextStyle(color: kTextMid, fontWeight: FontWeight.w500))),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content:
-                  Text('Leave group functionality not implemented yet'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content: Text('Leave group functionality not implemented yet'),
+                  behavior: SnackBarBehavior.floating));
             },
-            child: Text(
-              'Leave',
-              style: TextStyle(
-                color: Colors.red[600],
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text('Leave',
+                style: TextStyle(
+                    color: Colors.red[600], fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -997,37 +817,40 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
   }
 }
 
+// ── OPTION TILE ────────────────────────────────────────────────────────────
 class _OptionTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final VoidCallback onTap;
   final Color? textColor;
 
-  const _OptionTile({
-    required this.icon,
-    required this.title,
-    required this.onTap,
-    this.textColor,
-  });
+  const _OptionTile(
+      {required this.icon,
+        required this.title,
+        required this.onTap,
+        this.textColor});
 
   @override
   Widget build(BuildContext context) {
+    final color = textColor ?? kTextDark;
     return ListTile(
-      leading: Icon(
-        icon,
-        color: textColor ?? Colors.grey[700],
-        size: 22,
-      ),
-      title: Text(
-        title,
-        style: TextStyle(
-          color: textColor ?? Colors.black87,
-          fontWeight: FontWeight.w500,
-          fontSize: 15,
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: textColor != null
+              ? Colors.red.withOpacity(0.08)
+              : kPrimaryLight,
+          borderRadius: BorderRadius.circular(10),
         ),
+        child: Icon(icon, color: color, size: 19),
       ),
+      title: Text(title,
+          style: TextStyle(
+              color: color, fontWeight: FontWeight.w600, fontSize: 15)),
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
+      contentPadding:
+      const EdgeInsets.symmetric(horizontal: 20, vertical: 2),
       dense: true,
     );
   }

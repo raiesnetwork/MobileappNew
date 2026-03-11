@@ -18,9 +18,17 @@ class CommentProvider with ChangeNotifier {
   bool get isPosting => _isPosting;
   String get error => _error;
   List<Post> get posts => _posts;
+  String _currentUserId = '';
+  String get currentUserId => _currentUserId;
+
+  void setCurrentUserId(String userId) {
+    _currentUserId = userId;
+    notifyListeners();
+  }
 
   // Get current user profile image
   String getCurrentUserProfile() => _currentUserProfile;
+
 
   // Set current user profile (call this when user logs in)
   void setCurrentUserProfile(String profileImageUrl) {
@@ -258,39 +266,6 @@ class CommentProvider with ChangeNotifier {
   }
 
 
-  /// Fetch and update a single post (used after commenting)
-  Future<void> fetchSinglePost(String postId) async {
-    try {
-      print("🔄 Fetching updated post data for $postId...");
-
-      final updatedPost = await CommentService.getPostById(postId);
-
-      if (updatedPost != null) {
-        final index = _posts.indexWhere((post) => post.id == postId);
-
-        if (index != -1) {
-          print(
-              "✅ Updating post at index $index with ${updatedPost.comments?.length ?? 0} comments");
-          _posts[index] = updatedPost;
-
-          // Force UI rebuild
-          notifyListeners();
-
-          print("✅ Post updated and listeners notified");
-        } else {
-          print("⚠️ Post not found in _posts list");
-          // If post not in list, add it
-          _posts.add(updatedPost);
-          notifyListeners();
-        }
-      } else {
-        print("❌ fetchSinglePost returned null for $postId");
-      }
-    } catch (e) {
-      print('❌ Error fetching post: $e');
-    }
-  }
-
   // Optional: Add this helper method for better state management
   void isloading(bool loading) {
     if (_isLoading != loading) {
@@ -303,16 +278,6 @@ class CommentProvider with ChangeNotifier {
 
   Map<String, dynamic>? getPostInteractionData(String postId) {
     return _interactionMap[postId];
-  }
-
-  Future<void> fetchCount(String postId) async {
-    final data = await CommentService.getCount(postId);
-    if (data != null) {
-      _interactionMap[postId] = data;
-      notifyListeners();
-    } else {
-      print("⚠️ Interaction count fetch failed for $postId");
-    }
   }
 
   Future<void> refreshCurrentPage({
@@ -504,6 +469,79 @@ class CommentProvider with ChangeNotifier {
     } catch (e) {
       print('❌ Error fetching users: $e');
       _isLoadingUsers = false;
+      notifyListeners();
+      return false;
+    }
+  }
+  Future<bool> editComment({
+    required BuildContext context,
+    required String commentId,
+    required String commentContent,
+    required String postId,
+    required int offset,
+    required int limit,
+    String? communityId,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    final result = await CommentService.editComment(
+      commentId: commentId,
+      commentContent: commentContent,
+    );
+
+    _isLoading = false;
+
+    if (result['success']) {
+      if (communityId != null) {
+        await fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
+      } else {
+        await fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message']), backgroundColor: Colors.green),
+      );
+      notifyListeners();
+      return true;
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message']), backgroundColor: Colors.red),
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteComment({
+    required BuildContext context,
+    required String commentId,
+    required String postId,
+    required int offset,
+    required int limit,
+    String? communityId,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    final result = await CommentService.deleteComment(commentId: commentId);
+
+    _isLoading = false;
+
+    if (result['success']) {
+      if (communityId != null) {
+        await fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
+      } else {
+        await fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message']), backgroundColor: Colors.green),
+      );
+      notifyListeners();
+      return true;
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result['message']), backgroundColor: Colors.red),
+      );
       notifyListeners();
       return false;
     }

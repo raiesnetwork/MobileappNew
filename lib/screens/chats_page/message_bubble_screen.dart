@@ -1438,18 +1438,17 @@ class _MessageBubbleState extends State<MessageBubble> {
     print('✅ MessageBubble disposed');
   }
 
+  // ✅ AFTER (safe)
   @override
   void deactivate() {
-    // Cancel subscription when deactivated
     _playerSubscription?.cancel();
+    _playerSubscription = null;
 
     if (_isPlaying && _player != null) {
       _player!.pausePlayer().catchError((error) {
         print('⚠️ Error pausing player: $error');
       });
-      setState(() {
-        _isPlaying = false;
-      });
+      _isPlaying = false;  // ✅ Direct assignment — no setState() needed
     }
     super.deactivate();
   }

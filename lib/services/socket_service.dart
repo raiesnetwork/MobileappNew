@@ -12,6 +12,7 @@ class SocketService {
   bool _isConnected = false;
   bool _isConnecting = false;
   Timer? _reconnectTimer;
+  IO.Socket? get socket => _socket;
 
   // Stream controllers for events
   final StreamController<bool> _connectionController = StreamController<bool>.broadcast();
