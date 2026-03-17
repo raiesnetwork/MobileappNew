@@ -7,17 +7,6 @@ import '../services/group_chat_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GroupChatProvider
-//
-// ARCHITECTURE — matches PersonalChatProvider exactly:
-//   • GroupChatService  → HTTP only, zero socket code
-//   • GroupChatProvider → owns the socket, registers/removes listeners,
-//                         manages all state, does optimistic messages
-//
-// HOW TO WIRE SOCKET:
-//   After login / socket connected, call:
-//     context.read<GroupChatProvider>().setSocket(yourSocketInstance);
-//   On logout:
-//     context.read<GroupChatProvider>().clearSocket();
 // ═══════════════════════════════════════════════════════════════════════════
 class GroupChatProvider with ChangeNotifier {
   final GroupChatService _svc = GroupChatService();
@@ -81,6 +70,11 @@ class GroupChatProvider with ChangeNotifier {
   int     _allUsersTotalPages   = 1;
   int     _allUsersCurrentPage  = 1;
 
+  // ── MyGroups pagination ───────────────────────────────────────────────────
+  int  _myGroupsCurrentPage = 1;
+  int  _myGroupsTotalPages  = 1;
+  bool _myGroupsHasMore     = false;
+
   // ════════════════════════════════════════════════════════════════════════
   //  GETTERS
   // ════════════════════════════════════════════════════════════════════════
@@ -137,6 +131,11 @@ class GroupChatProvider with ChangeNotifier {
   int     get myGroupsCount       => _myGroups.length;
   bool    get isSocketConnected   => _socket?.connected ?? false;
 
+  // MyGroups pagination getters
+  int  get myGroupsCurrentPage => _myGroupsCurrentPage;
+  int  get myGroupsTotalPages  => _myGroupsTotalPages;
+  bool get myGroupsHasMore     => _myGroupsHasMore;
+
   List<Map<String, dynamic>> get currentGroupMessages =>
       _groupMessages[_currentGroupId ?? ''] ?? [];
 
@@ -159,12 +158,7 @@ class GroupChatProvider with ChangeNotifier {
 
   // ════════════════════════════════════════════════════════════════════════
   //  SOCKET
-  //  The socket instance is set externally (same socket used everywhere).
-  //  This matches exactly how PersonalChatProvider works.
   // ════════════════════════════════════════════════════════════════════════
-
-  /// Attach socket and register all group chat listeners.
-  /// Call once after socket connects, e.g. in your AuthProvider or main.
   void setSocket(sio.Socket socket) {
     if (_socket == socket) return;
     _removeSocketListeners();
@@ -174,7 +168,6 @@ class GroupChatProvider with ChangeNotifier {
     _notify();
   }
 
-  /// Detach socket and remove all listeners (call on logout).
   void clearSocket() {
     _removeSocketListeners();
     _socket = null;
@@ -186,12 +179,10 @@ class GroupChatProvider with ChangeNotifier {
     final s = _socket;
     if (s == null) return;
 
-    // ── Incoming messages ──────────────────────────────────────────────
-    s.on('receiveGroupMessage',      (d) => _handleIncomingMessage(d));
-    s.on('receiveGroupFileMessage',  (d) => _handleIncomingMessage(d));
-    s.on('receiveGroupVoiceMessage', (d) => _handleIncomingMessage(d));
+    s.on('groupMessage',      (d) => _handleIncomingMessage(d));
+    s.on('groupVoiceMessage', (d) => _handleIncomingMessage(d));
+    s.on('groupFileMessage',  (d) => _handleIncomingMessage(d));
 
-    // ── Edit ───────────────────────────────────────────────────────────
     s.on('groupMessageEdited', (data) {
       if (_isDisposed) return;
       try {
@@ -199,20 +190,17 @@ class GroupChatProvider with ChangeNotifier {
         final messageId = data?['messageId']?.toString();
         final newText   = data?['newText']?.toString();
         if (groupId == null || messageId == null || newText == null) return;
-        print('✏️ [Socket] groupMessageEdited $messageId');
         _updateMessageTextLocally(groupId, messageId, newText);
         _notify();
       } catch (e) { print('💥 [Socket] groupMessageEdited: $e'); }
     });
 
-    // ── Delete ─────────────────────────────────────────────────────────
     s.on('groupMessageDeleted', (data) {
       if (_isDisposed) return;
       try {
         final groupId   = data?['groupId']?.toString();
         final messageId = data?['messageId']?.toString();
         if (groupId == null || messageId == null) return;
-        print('🗑️ [Socket] groupMessageDeleted $messageId');
         _markMessageDeletedLocally(groupId, messageId);
         _notify();
       } catch (e) { print('💥 [Socket] groupMessageDeleted: $e'); }
@@ -224,15 +212,14 @@ class GroupChatProvider with ChangeNotifier {
   void _removeSocketListeners() {
     final s = _socket;
     if (s == null) return;
-    s.off('receiveGroupMessage');
-    s.off('receiveGroupFileMessage');
-    s.off('receiveGroupVoiceMessage');
+    s.off('groupMessage');
+    s.off('groupVoiceMessage');
+    s.off('groupFileMessage');
     s.off('groupMessageEdited');
     s.off('groupMessageDeleted');
     print('🔕 [GroupChatProvider] Socket listeners removed');
   }
 
-  /// Handle any real-time incoming message — deduplicates by _id
   void _handleIncomingMessage(dynamic data) {
     if (_isDisposed) return;
     try {
@@ -240,26 +227,33 @@ class GroupChatProvider with ChangeNotifier {
       final message = (raw['message'] ?? raw['data']) as Map<String, dynamic>?;
       final groupId = (raw['groupId'] ?? message?['groupId'])?.toString();
 
-      if (message == null || groupId == null) {
-        print('⚠️ [Socket] _handleIncomingMessage — missing message or groupId');
-        return;
-      }
+      if (message == null || groupId == null) return;
 
-      final msgId = message['_id']?.toString();
-      final msgs  = _groupMessages[groupId] ??= [];
+      final msgId   = message['_id']?.toString();
+      final msgs    = _groupMessages[groupId] ??= [];
+
+      // Try to find and replace an optimistic (temp_*) message first
+      final optimisticIdx = msgs.indexWhere(
+            (m) => m['isOptimistic'] == true && m['_id'].toString().startsWith('temp_'),
+      );
 
       if (msgId != null) {
-        final idx = msgs.indexWhere((m) => m['_id'] == msgId);
-        if (idx == -1) {
-          msgs.add(Map<String, dynamic>.from(message));
-          print('✅ [Socket] New msg $msgId → group $groupId');
+        final existingIdx = msgs.indexWhere((m) => m['_id'] == msgId);
+        if (existingIdx != -1) {
+          // Already exists — update in place (no blink)
+          msgs[existingIdx] = Map<String, dynamic>.from(message);
+        } else if (optimisticIdx != -1) {
+          // Replace the optimistic bubble with the real message (no blink)
+          msgs[optimisticIdx] = Map<String, dynamic>.from(message);
         } else {
-          // Replace (handles echo of own message from server)
-          msgs[idx] = Map<String, dynamic>.from(message);
-          print('🔄 [Socket] Updated msg $msgId → group $groupId');
+          msgs.add(Map<String, dynamic>.from(message));
         }
       } else {
-        msgs.add(Map<String, dynamic>.from(message));
+        if (optimisticIdx != -1) {
+          msgs[optimisticIdx] = Map<String, dynamic>.from(message);
+        } else {
+          msgs.add(Map<String, dynamic>.from(message));
+        }
       }
       _notify();
     } catch (e) {
@@ -267,14 +261,10 @@ class GroupChatProvider with ChangeNotifier {
     }
   }
 
-  /// Emit with acknowledgement — socket-first pattern for edit/delete
   Future<Map<String, dynamic>?> _emitWithAck(
       String event, Map<String, dynamic> data) async {
     final s = _socket;
-    if (s == null || !s.connected) {
-      print('⚠️ [Socket] Not connected — cannot emit $event');
-      return null;
-    }
+    if (s == null || !s.connected) return null;
     final completer = Completer<Map<String, dynamic>?>();
     try {
       s.emitWithAck(event, data, ack: (response) {
@@ -285,15 +275,11 @@ class GroupChatProvider with ChangeNotifier {
         }
       });
     } catch (e) {
-      print('💥 [Socket] emitWithAck $event error: $e');
       return null;
     }
     return completer.future.timeout(
       const Duration(seconds: 10),
-      onTimeout: () {
-        print('⏰ [Socket] $event ack timed out');
-        return null;
-      },
+      onTimeout: () => null,
     );
   }
 
@@ -332,7 +318,6 @@ class GroupChatProvider with ChangeNotifier {
   Future<void> searchGroups(String query) async {
     _currentSearchQuery = query;
     if (query.isEmpty) { _filteredGroups.clear(); _notify(); return; }
-    print('🔍 [Provider] searchGroups: "$query"');
     _isSearching = true; _error = null; _notify();
 
     final r = await _svc.getAllGroups(searchQuery: query);
@@ -355,23 +340,83 @@ class GroupChatProvider with ChangeNotifier {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  MY GROUPS
+  //  MY GROUPS  (unified: personal + community via same endpoint)
   // ════════════════════════════════════════════════════════════════════════
-  Future<void> fetchMyGroups({String? communityId}) async {
-    print('🔄 [Provider] fetchMyGroups communityId=$communityId');
-    _isLoadingMyGroups = true; _myGroupsError = null;
-    _currentCommunityId = communityId; _notify();
 
-    final r = await _svc.getMyGroups(communityId: communityId);
-    _myGroups = r['error'] ? [] : List<Map<String, dynamic>>.from(r['data'] ?? []);
-    if (r['error']) _myGroupsError = r['message'];
-    _isLoadingMyGroups = false; _notify();
+  /// Fetch page 1 and reset list. Supports optional [search].
+  /// Pass [communityId] to get community-specific groups.
+  Future<void> fetchMyGroups({
+    String? communityId,
+    String? search,
+  }) async {
+    print('🔄 [Provider] fetchMyGroups communityId=$communityId search=$search');
+    _isLoadingMyGroups   = true;
+    _myGroupsError       = null;
+    _currentCommunityId  = communityId;
+    _myGroupsCurrentPage = 1;
+    _notify();
+
+    final r = await _svc.getMyGroups(
+      communityId: communityId,
+      pageNo: 1,
+      search: search,
+    );
+
+    if (!r['error']) {
+      _myGroups = List<Map<String, dynamic>>.from(r['data'] ?? []);
+      final p = r['pagination'] as Map<String, dynamic>?;
+      _myGroupsCurrentPage = (p?['currentPage'] as int?) ?? 1;
+      _myGroupsTotalPages  = (p?['totalPages']  as int?) ?? 1;
+      _myGroupsHasMore     = (p?['hasMore']     as bool?) ?? false;
+    } else {
+      _myGroupsError = r['message'];
+    }
+    _isLoadingMyGroups = false;
+    _notify();
   }
 
-  Future<void> refreshMyGroups() async => fetchMyGroups(communityId: _currentCommunityId);
+  /// Appends next page to _myGroups. Call from scroll listener.
+  Future<void> loadMoreMyGroups({String? search}) async {
+    if (_isLoadingMyGroups || !_myGroupsHasMore) return;
+    final nextPage = _myGroupsCurrentPage + 1;
+    print('🔄 [Provider] loadMoreMyGroups page=$nextPage');
+    _isLoadingMyGroups = true;
+    _notify();
+
+    final r = await _svc.getMyGroups(
+      communityId: _currentCommunityId,
+      pageNo: nextPage,
+      search: search,
+    );
+
+    if (!r['error']) {
+      final newGroups  = List<Map<String, dynamic>>.from(r['data'] ?? []);
+      final existingIds = _myGroups.map((g) => g['_id']).toSet();
+      for (final g in newGroups) {
+        if (!existingIds.contains(g['_id'])) _myGroups.add(g);
+      }
+      final p = r['pagination'] as Map<String, dynamic>?;
+      _myGroupsCurrentPage = (p?['currentPage'] as int?) ?? nextPage;
+      _myGroupsTotalPages  = (p?['totalPages']  as int?) ?? _myGroupsTotalPages;
+      _myGroupsHasMore     = (p?['hasMore']     as bool?) ?? false;
+    } else {
+      _myGroupsError = r['message'];
+    }
+    _isLoadingMyGroups = false;
+    _notify();
+  }
+
+  Future<void> refreshMyGroups({String? search}) async =>
+      fetchMyGroups(communityId: _currentCommunityId, search: search);
 
   void clearMyGroups() {
-    _myGroups.clear(); _myGroupsError = null; _currentCommunityId = null; _notify();
+    _myGroups.clear();
+    _myGroupsError       = null;
+    _currentCommunityId  = null;
+    _myGroupsCurrentPage = 1;
+    _myGroupsTotalPages  = 1;
+    _myGroupsHasMore     = false;
+    _notify();
   }
 
   bool isMyGroup(String groupId) => _myGroups.any((g) => g['_id'] == groupId);
@@ -381,7 +426,8 @@ class GroupChatProvider with ChangeNotifier {
     final lq = q.toLowerCase();
     return _myGroups.where((g) =>
     (g['name']?.toString().toLowerCase().contains(lq) ?? false) ||
-        (g['description']?.toString().toLowerCase().contains(lq) ?? false)).toList();
+        (g['description']?.toString().toLowerCase().contains(lq) ?? false))
+        .toList();
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -472,7 +518,6 @@ class GroupChatProvider with ChangeNotifier {
     required Map<String, dynamic> communityInfo,
     String? image,
   }) async {
-    print('🔄 [Provider] sendGroupMessage to $groupId');
     _isSendingMessage = true; _sendMessageError = null; _notify();
 
     final r = await _svc.sendGroupMessage(
@@ -480,10 +525,6 @@ class GroupChatProvider with ChangeNotifier {
         communityInfo: communityInfo, image: image);
 
     if (!r['error']) {
-      if (_currentGroupId == groupId && r['data'] != null) {
-        _groupMessages[groupId] ??= [];
-        _groupMessages[groupId]!.add(Map<String, dynamic>.from(r['data'] as Map));
-      }
       _isSendingMessage = false; _notify();
       return true;
     }
@@ -500,17 +541,12 @@ class GroupChatProvider with ChangeNotifier {
     required File file,
     Map<String, dynamic>? communityInfo,
   }) async {
-    print('🔄 [Provider] sendGroupFileMessage to $groupId');
     _isSendingFile = true; _sendFileError = null; _fileUploadProgress = 0.0; _notify();
 
     final r = await _svc.sendGroupFileMessage(
         groupId: groupId, file: file, communityInfo: communityInfo);
 
     if (!r['error']) {
-      if (_currentGroupId == groupId && r['data'] != null) {
-        _groupMessages[groupId] ??= [];
-        _groupMessages[groupId]!.add(Map<String, dynamic>.from(r['data'] as Map));
-      }
       _isSendingFile = false; _fileUploadProgress = 1.0; _notify();
       return true;
     }
@@ -528,7 +564,6 @@ class GroupChatProvider with ChangeNotifier {
     Map<String, dynamic>? communityInfo,
     int? audioDurationMs,
   }) async {
-    print('🔄 [Provider] sendGroupVoiceMessage to $groupId');
     _isSendingVoice = true; _sendVoiceError = null; _notify();
 
     final r = await _svc.sendGroupVoiceMessage(
@@ -536,15 +571,6 @@ class GroupChatProvider with ChangeNotifier {
         communityInfo: communityInfo, audioDurationMs: audioDurationMs);
 
     if (!r['error']) {
-      if (_currentGroupId == groupId && r['data'] != null) {
-        _groupMessages[groupId] ??= [];
-        final msg = Map<String, dynamic>.from(r['data'] as Map);
-        if (msg['audioDurationMs'] == null && audioDurationMs != null) {
-          msg['audioDurationMs'] = audioDurationMs;
-        }
-        _groupMessages[groupId]!.add(msg);
-        print('🎤 [Provider] Voice added to group $groupId');
-      }
       _isSendingVoice = false; _notify();
       return true;
     }
@@ -560,7 +586,6 @@ class GroupChatProvider with ChangeNotifier {
     required String groupId,
     Map<String, dynamic>? communityInfo,
   }) async {
-    print('🔄 [Provider] sendGroupCameraPhoto to $groupId');
     _isSendingCamera = true; _sendFileError = null; _notify();
 
     final r = await _svc.sendGroupCameraPhoto(
@@ -582,33 +607,23 @@ class GroupChatProvider with ChangeNotifier {
     return false;
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  //  EDIT / DELETE MESSAGES (socket-only)
+  // ════════════════════════════════════════════════════════════════════════
   Future<bool> editGroupMessage({
     required String messageId,
     required String newText,
     required String groupId,
   }) async {
-    print('✏️ [Provider] editGroupMessage $messageId');
-
     if (!_svc.isSocketConnected) {
       _editMessageError = 'Not connected to server';
       _notify();
       return false;
     }
-
-    _isEditingMessage = true;
-    _editMessageError = null;
-    _notify();
-
-    _svc.editGroupMessage(
-      messageId: messageId,
-      newText: newText,
-      groupId: groupId,
-    );
-
-    // Update locally immediately
+    _isEditingMessage = true; _editMessageError = null; _notify();
+    _svc.editGroupMessage(messageId: messageId, newText: newText, groupId: groupId);
     _updateMessageTextLocally(groupId, messageId, newText);
-    _isEditingMessage = false;
-    _notify();
+    _isEditingMessage = false; _notify();
     return true;
   }
 
@@ -616,27 +631,15 @@ class GroupChatProvider with ChangeNotifier {
     required String messageId,
     required String groupId,
   }) async {
-    print('🗑️ [Provider] deleteGroupMessage $messageId');
-
     if (!_svc.isSocketConnected) {
       _deleteMessageError = 'Not connected to server';
       _notify();
       return false;
     }
-
-    _isDeletingMessage = true;
-    _deleteMessageError = null;
-    _notify();
-
-    _svc.deleteGroupMessage(
-      messageId: messageId,
-      groupId: groupId,
-    );
-
-    // Mark deleted locally immediately
+    _isDeletingMessage = true; _deleteMessageError = null; _notify();
+    _svc.deleteGroupMessage(messageId: messageId, groupId: groupId);
     _markMessageDeletedLocally(groupId, messageId);
-    _isDeletingMessage = false;
-    _notify();
+    _isDeletingMessage = false; _notify();
     return true;
   }
 
@@ -644,7 +647,6 @@ class GroupChatProvider with ChangeNotifier {
   //  JOIN / LEAVE
   // ════════════════════════════════════════════════════════════════════════
   Future<void> requestToJoinGroup(String groupId) async {
-    print('🔄 [Provider] requestToJoinGroup $groupId');
     _isRequestingGroup = true; _groupRequestMessage = ''; _notify();
     final r = await _svc.requestToJoinGroup(groupId: groupId);
     _groupRequestMessage = r['message'] ?? 'Unknown';
@@ -652,7 +654,6 @@ class GroupChatProvider with ChangeNotifier {
   }
 
   Future<bool> cancelGroupRequest(String groupId) async {
-    print('🔄 [Provider] cancelGroupRequest $groupId');
     _isCancellingRequest = true; _notify();
     final r = await _svc.cancelGroupRequest(groupId: groupId);
     _isCancellingRequest = false;
@@ -665,13 +666,26 @@ class GroupChatProvider with ChangeNotifier {
     return !r['error'];
   }
 
+  Future<void> fetchGroupMembers(String groupId) async {
+    final groupResult = await _svc.getAllGroups(searchQuery: groupId);
+    if (!groupResult['error']) {
+      final freshGroups =
+      List<Map<String, dynamic>>.from(groupResult['data'] ?? []);
+      for (final fg in freshGroups) {
+        final idx = _groups.indexWhere((g) => g['_id'] == fg['_id']);
+        if (idx != -1) _groups[idx] = fg;
+        final myIdx = _myGroups.indexWhere((g) => g['_id'] == fg['_id']);
+        if (myIdx != -1) _myGroups[myIdx] = fg;
+      }
+      _notify();
+    }
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   //  PENDING REQUESTS (admin)
   // ════════════════════════════════════════════════════════════════════════
   Future<void> fetchPendingRequests() async {
-    print('🔄 [Provider] fetchPendingRequests');
     _isLoadingRequests = true; _requestsError = null; _pendingRequests = []; _notify();
-
     try {
       final adminGroups = _groups.where((g) => g['isAdmin'] == true).toList();
       if (adminGroups.isEmpty) { _isLoadingRequests = false; _notify(); return; }
@@ -689,10 +703,8 @@ class GroupChatProvider with ChangeNotifier {
       }));
 
       for (final list in results) _pendingRequests.addAll(list);
-      print('📊 [Provider] Pending: ${_pendingRequests.length}');
     } catch (e) {
       _requestsError = e.toString();
-      print('💥 [Provider] fetchPendingRequests: $e');
     }
     _isLoadingRequests = false; _notify();
   }
@@ -700,7 +712,6 @@ class GroupChatProvider with ChangeNotifier {
   Future<bool> updateGroupRequest({
     required String requestId, required String status,
   }) async {
-    print('🔄 [Provider] updateGroupRequest $requestId → $status');
     _isUpdatingRequest = true; _updateRequestMessage = ''; _notify();
     final r = await _svc.updateGroupRequest(requestId: requestId, status: status);
     _updateRequestMessage = r['message'] ?? 'Unknown';
@@ -716,7 +727,6 @@ class GroupChatProvider with ChangeNotifier {
   Future<void> addMembersToGroup({
     required String groupId, required List<String> memberIds,
   }) async {
-    print('🔄 [Provider] addMembersToGroup $groupId');
     _isAddingMembers = true; _addMemberMessage = ''; _notify();
     final r = await _svc.addMembersToGroup(groupId: groupId, memberIds: memberIds);
     _addMemberMessage = r['message'] ?? 'Unknown';
@@ -726,7 +736,6 @@ class GroupChatProvider with ChangeNotifier {
   Future<bool> removeMemberFromGroup({
     required String groupId, required String userId,
   }) async {
-    print('🔄 [Provider] removeMemberFromGroup $userId from $groupId');
     _isRemovingMember = true; _removeMessage = ''; _notify();
     final r = await _svc.removeMemberFromGroup(groupId: groupId, userId: userId);
     _removeMessage = r['message'] ?? 'Unknown';
@@ -738,7 +747,6 @@ class GroupChatProvider with ChangeNotifier {
   //  FETCH ALL USERS
   // ════════════════════════════════════════════════════════════════════════
   Future<void> fetchAllUsers({int page = 1, String? search}) async {
-    print('🔄 [Provider] fetchAllUsers page=$page');
     _isFetchingUsers = true; _notify();
     final r = await _svc.fetchAllUsers(page: page, search: search);
     _isFetchingUsers = false;
@@ -791,7 +799,6 @@ class GroupChatProvider with ChangeNotifier {
     _fileUploadProgress = progress; _notify();
   }
 
-  // ── Public callbacks (called from outside if needed) ──────────────────
   void onGroupMessageEdited(String groupId, String messageId, String newText) {
     _updateMessageTextLocally(groupId, messageId, newText); _notify();
   }

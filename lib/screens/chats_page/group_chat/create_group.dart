@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
@@ -124,8 +125,8 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                                   Icons.camera_alt,
                                   size: 18,
                                   color: _isProcessingImage
-                                      ? Colors.grey[400]
-                                      : Theme.of(context).colorScheme.primary,
+                                      ? Primary.withOpacity(0.2)
+                                      : Primary,
                                 ),
                                 label: Text(
                                   _selectedImageFile != null
@@ -134,7 +135,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                                   style: TextStyle(
                                     color: _isProcessingImage
                                         ? Colors.grey[400]
-                                        : Theme.of(context).colorScheme.primary,
+                                        : Primary,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -323,7 +324,7 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
                             ? null
                             : _createGroup,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          backgroundColor: Primary,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
@@ -480,13 +481,13 @@ class _CreateGroupScreenState extends State<CreateGroupScreen> {
             width: 60,
             height: 60,
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
+              color: Primary.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               icon,
               size: 30,
-              color: Theme.of(context).colorScheme.primary,
+              color: Primary,
             ),
           ),
           const SizedBox(height: 8),

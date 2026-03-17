@@ -32,6 +32,7 @@ import 'package:ixes.app/screens/widgets/video_call.dart';
 import 'package:ixes.app/screens/widgets/voice_call.dart';
 import 'package:ixes.app/services/api_service.dart';
 import 'package:ixes.app/services/meeting_overlay_service.dart';
+import 'package:ixes.app/services/socket_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
@@ -678,6 +679,13 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
           try {
             await ctx.read<PersonalChatProvider>().initialize();
+
+            // ── Wire GroupChatProvider to the same socket ──
+            final _sock = SocketService().socket;
+            if (_sock != null) ctx.read<GroupChatProvider>().setSocket(_sock);
+            SocketService().onSocketReady.listen((s) {
+              if (mounted) ctx.read<GroupChatProvider>().setSocket(s);
+            });
 
             ctx.read<VideoCallProvider>().initialize(
               userId: user.id, userName: name, authToken: widget.initialToken,

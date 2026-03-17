@@ -400,16 +400,19 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
 
   String _formatTime(String timestamp) {
     try {
-      final dt = DateTime.parse(timestamp).toLocal();
-      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+      final local = DateTime.parse(timestamp).toLocal();
+      final hour = local.hour;
+      final minute = local.minute.toString().padLeft(2, '0');
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:$minute $period';
     } catch (_) { return ''; }
   }
 
   static const _nameColors = [
     Color(0xFF6C5CE7), Color(0xFF00B894), Color(0xFF0984E3),
     Color(0xFFE17055), Color(0xFF74B9FF), Color(0xFFFD79A8),
-    Color(0xFF55EFC4), Color(0xFFA29BFE), Color(0xFFFF7675), Color(0xFF00CEC9),
-  ];
+    Color(0xFF55EFC4), Color(0xFFA29BFE), Color(0xFFFF7675), Color(0xFF00CEC9),];
 
   Color _colorForName(String name) {
     final seed = name.codeUnits.fold(0, (a, b) => a + b);

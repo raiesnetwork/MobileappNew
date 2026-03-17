@@ -482,32 +482,54 @@ class CommentProvider with ChangeNotifier {
     required int limit,
     String? communityId,
   }) async {
-    _isLoading = true;
-    notifyListeners();
+    // ✅ Optimistic update — change comment content instantly
+    final postIndex = _posts.indexWhere((p) => p.id == postId);
+    if (postIndex != -1) {
+      final commentIndex = _posts[postIndex].comments.indexWhere((c) => c.id == commentId);
+      if (commentIndex != -1) {
+        _posts[postIndex].comments[commentIndex] = Comment(
+          id: commentId,
+          content: commentContent,
+          createdAt: _posts[postIndex].comments[commentIndex].createdAt,
+          userName: _posts[postIndex].comments[commentIndex].userName,
+          profileImage: _posts[postIndex].comments[commentIndex].profileImage,
+          isAdmin: _posts[postIndex].comments[commentIndex].isAdmin,
+          userId: _posts[postIndex].comments[commentIndex].userId,
+        );
+        notifyListeners();
+      }
+    }
+    // Same for communityPosts
+    final cPostIndex = _communityPosts.indexWhere((p) => p.id == postId);
+    if (cPostIndex != -1) {
+      final commentIndex = _communityPosts[cPostIndex].comments.indexWhere((c) => c.id == commentId);
+      if (commentIndex != -1) {
+        _communityPosts[cPostIndex].comments[commentIndex] = Comment(
+          id: commentId,
+          content: commentContent,
+          createdAt: _communityPosts[cPostIndex].comments[commentIndex].createdAt,
+          userName: _communityPosts[cPostIndex].comments[commentIndex].userName,
+          profileImage: _communityPosts[cPostIndex].comments[commentIndex].profileImage,
+          isAdmin: _communityPosts[cPostIndex].comments[commentIndex].isAdmin,
+          userId: _communityPosts[cPostIndex].comments[commentIndex].userId,
+        );
+        notifyListeners();
+      }
+    }
 
     final result = await CommentService.editComment(
       commentId: commentId,
       commentContent: commentContent,
     );
 
-    _isLoading = false;
-
     if (result['success']) {
       if (communityId != null) {
-        await fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
+        fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
       } else {
-        await fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
+        fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message']), backgroundColor: Colors.green),
-      );
-      notifyListeners();
       return true;
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message']), backgroundColor: Colors.red),
-      );
-      notifyListeners();
       return false;
     }
   }
@@ -520,29 +542,28 @@ class CommentProvider with ChangeNotifier {
     required int limit,
     String? communityId,
   }) async {
-    _isLoading = true;
-    notifyListeners();
+    // ✅ Optimistic update — remove comment instantly
+    final postIndex = _posts.indexWhere((p) => p.id == postId);
+    if (postIndex != -1) {
+      _posts[postIndex].comments.removeWhere((c) => c.id == commentId);
+      notifyListeners();
+    }
+    final cPostIndex = _communityPosts.indexWhere((p) => p.id == postId);
+    if (cPostIndex != -1) {
+      _communityPosts[cPostIndex].comments.removeWhere((c) => c.id == commentId);
+      notifyListeners();
+    }
 
     final result = await CommentService.deleteComment(commentId: commentId);
 
-    _isLoading = false;
-
     if (result['success']) {
       if (communityId != null) {
-        await fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
+        fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
       } else {
-        await fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
+        fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message']), backgroundColor: Colors.green),
-      );
-      notifyListeners();
       return true;
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message']), backgroundColor: Colors.red),
-      );
-      notifyListeners();
       return false;
     }
   }

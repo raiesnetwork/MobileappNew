@@ -37,6 +37,9 @@ class ChatDetailScreen extends StatefulWidget {
   @override
   State<ChatDetailScreen> createState() => _ChatDetailScreenState();
 }
+bool _sameDay(DateTime a, DateTime b) {
+  return a.year == b.year && a.month == b.month && a.day == b.day;
+}
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
@@ -77,6 +80,39 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
       _scrollToBottom();
     });
+  }
+  Widget _buildDateDivider(DateTime dt) {
+    final now = DateTime.now();
+    final diff = DateTime(now.year, now.month, now.day)
+        .difference(DateTime(dt.year, dt.month, dt.day))
+        .inDays;
+    String label;
+    if (diff == 0) {
+      label = 'Today';
+    } else if (diff == 1) {
+      label = 'Yesterday';
+    } else {
+      label = '${dt.day}/${dt.month}/${dt.year}';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(children: [
+        Expanded(child: Divider(color: Colors.grey[300])),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+          ),
+        ),
+        Expanded(child: Divider(color: Colors.grey[300])),
+      ]),
+    );
   }
 
   Future<void> _initializeChatNotifications() async {
@@ -789,52 +825,66 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             provider.fetchConversation(widget.userId),
                         color: Theme.of(context).colorScheme.primary,
                         backgroundColor: Colors.white,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                          itemCount: messages.length,
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          itemBuilder: (context, index) {
-                            final message = messages[index];
-                            if (message['isDelete'] == true)
-                              return const SizedBox.shrink();
+                  child: ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    itemCount: messages.length,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    itemBuilder: (context, index) {
+                      final message = messages[index];
+                      if (message['isDelete'] == true)
+                        return const SizedBox.shrink();
 
-                            final isMe =
-                                message['senderId'] == provider.currentUserId;
-                            Map<String, dynamic>? repliedMessage;
-                            if (message['replyTo'] != null) {
-                              repliedMessage =
-                                  _getMessageById(message['replyTo']);
-                            }
+                      final isMe = message['senderId'] == provider.currentUserId;
+                      final msgTime = DateTime.parse(message['createdAt']).toLocal();
 
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: MessageBubble(
-                                replyTo: message['replyTo'],
-                                replyToMessage: repliedMessage,
-                                onReply: (msg) => _setReplyMessage(msg),
-                                content: message['text'],
-                                isMe: isMe,
-                                timestamp: DateTime.parse(message['createdAt']),
-                                status: message['status'],
-                                isFile: message['isFile'] ?? false,
-                                fileUrl: message['fileUrl'],
-                                fileName: message['fileName'],
-                                fileType: message['fileType'],
-                                localFilePath: message['localFilePath'],
-                                isOptimistic: message['isOptimistic'] ?? false,
-                                readBy: message['readBy'] ?? false,
-                                messageId: message['_id'] ?? '',
-                                receiverId: isMe
-                                    ? message['receiverId']
-                                    : message['senderId'],
-                                isAudio: message['isAudio'] ?? false,
-                                audioUrl: message['audioUrl'],
-                              ),
-                            );
-                          },
-                        ),
+                      DateTime? prevTime;
+                      for (int j = index - 1; j >= 0; j--) {
+                        if (messages[j]['isDelete'] != true) {
+                          prevTime = DateTime.parse(messages[j]['createdAt']).toLocal();
+                          break;
+                        }
+                      }
+                      final showDateDiv = prevTime == null || !_sameDay(msgTime, prevTime);
+
+                      Map<String, dynamic>? repliedMessage;
+                      if (message['replyTo'] != null) {
+                        repliedMessage = _getMessageById(message['replyTo']);
+                      }
+
+                      return Column(
+                        children: [
+                          if (showDateDiv) _buildDateDivider(msgTime),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: MessageBubble(
+                              replyTo: message['replyTo'],
+                              replyToMessage: repliedMessage,
+                              onReply: (msg) => _setReplyMessage(msg),
+                              content: message['text'],
+                              isMe: isMe,
+                              timestamp: DateTime.parse(message['createdAt']),
+                              status: message['status'],
+                              isFile: message['isFile'] ?? false,
+                              fileUrl: message['fileUrl'],
+                              fileName: message['fileName'],
+                              fileType: message['fileType'],
+                              localFilePath: message['localFilePath'],
+                              isOptimistic: message['isOptimistic'] ?? false,
+                              readBy: message['readBy'] ?? false,
+                              messageId: message['_id'] ?? '',
+                              receiverId: isMe
+                                  ? message['receiverId']
+                                  : message['senderId'],
+                              isAudio: message['isAudio'] ?? false,
+                              audioUrl: message['audioUrl'],
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+
                       ),
               ),
 
@@ -845,6 +895,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   decoration: BoxDecoration(
                     color: Colors.red[50],
                     border: Border(top: BorderSide(color: Colors.red[200]!)),
+
                   ),
                   child: Row(
                     children: [

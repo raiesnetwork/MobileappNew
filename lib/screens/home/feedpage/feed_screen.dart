@@ -1012,13 +1012,16 @@ class _FeedScreenState extends State<FeedScreen> {
         maxHeight: MediaQuery.of(context).size.height * 0.9,
       ),
       builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.95,
-          maxChildSize: 1.0,
-          minChildSize: 0.4,
-          expand: false,
-          builder: (context, scrollController) {
-            return Consumer<CommentProvider>(
+        return ScaffoldMessenger(
+            child: Scaffold(
+                backgroundColor: Colors.transparent,
+                body: DraggableScrollableSheet(
+                  initialChildSize: 0.95,
+                  maxChildSize: 1.0,
+                  minChildSize: 0.4,
+                  expand: false,
+                  builder: (context, scrollController) {
+                    return Consumer<CommentProvider>(
               builder: (context, provider, _) {
                 final comments = provider.getCommentsForPost(postId);
 
@@ -1095,38 +1098,116 @@ class _FeedScreenState extends State<FeedScreen> {
                                             PopupMenuButton<String>(
                                               icon: Icon(Icons.more_vert, size: 18, color: Colors.grey[500]),
                                               onSelected: (value) async {
+                                                FocusScope.of(context).unfocus();
+                                                await Future.delayed(const Duration(milliseconds: 100));
                                                 if (value == 'edit') {
                                                   final editController = TextEditingController(text: comment.content);
                                                   showDialog(
                                                     context: context,
-                                                    builder: (ctx) => AlertDialog(
-                                                      title: const Text('Edit Comment'),
-                                                      content: TextField(
-                                                        controller: editController,
-                                                        maxLines: 3,
-                                                        decoration: InputDecoration(
-                                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                                                    builder: (ctx) => Dialog(
+                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                                      child: Padding(
+                                                        padding: const EdgeInsets.all(20),
+                                                        child: Column(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                                          children: [
+                                                            Row(
+                                                              children: [
+                                                                Container(
+                                                                  padding: const EdgeInsets.all(8),
+                                                                  decoration: BoxDecoration(
+                                                                    color: Colors.blue.shade50,
+                                                                    borderRadius: BorderRadius.circular(8),
+                                                                  ),
+                                                                  child: Icon(Icons.edit_outlined, color: Colors.blue.shade600, size: 20),
+                                                                ),
+                                                                const SizedBox(width: 12),
+                                                                const Text(
+                                                                  'Edit Comment',
+                                                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                            const SizedBox(height: 16),
+                                                            TextField(
+                                                              controller: editController,
+                                                              maxLines: 4,
+                                                              minLines: 2,
+                                                              autofocus: false,
+                                                              decoration: InputDecoration(
+                                                                hintText: 'Write your comment...',
+                                                                hintStyle: TextStyle(color: Colors.grey[400]),
+                                                                filled: true,
+                                                                fillColor: Colors.grey[50],
+                                                                border: OutlineInputBorder(
+                                                                  borderRadius: BorderRadius.circular(10),
+                                                                  borderSide: BorderSide(color: Colors.grey.shade300),
+                                                                ),
+                                                                enabledBorder: OutlineInputBorder(
+                                                                  borderRadius: BorderRadius.circular(10),
+                                                                  borderSide: BorderSide(color: Colors.grey.shade300),
+                                                                ),
+                                                                focusedBorder: OutlineInputBorder(
+                                                                  borderRadius: BorderRadius.circular(10),
+                                                                  borderSide: BorderSide(color: Colors.blue.shade400, width: 1.5),
+                                                                ),
+                                                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                                              ),
+                                                            ),
+                                                            const SizedBox(height: 20),
+                                                            Row(
+                                                              children: [
+                                                                Expanded(
+                                                                  child: OutlinedButton(
+                                                                    onPressed: () => Navigator.pop(ctx),
+                                                                    style: OutlinedButton.styleFrom(
+                                                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                                                      side: BorderSide(color: Colors.grey.shade300),
+                                                                    ),
+                                                                    child: Text('Cancel', style: TextStyle(color: Colors.grey[700])),
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(width: 12),
+                                                                Expanded(
+                                                                  child: ElevatedButton(
+                                                                    onPressed: () async {
+                                                                      final trimmed = editController.text.trim();
+                                                                      if (trimmed.isEmpty) return;
+                                                                      Navigator.pop(ctx);
+                                                                      final provider = context.read<CommentProvider>();
+                                                                      final success = await provider.editComment(
+                                                                        context: context,
+                                                                        commentId: comment.id,
+                                                                        commentContent: trimmed,
+                                                                        postId: postId,
+                                                                        offset: 0,
+                                                                        limit: 10,
+                                                                        communityId: widget.communityId,
+                                                                      );
+                                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                                        SnackBar(
+                                                                          content: Text(success ? 'Comment updated successfully' : 'Failed to update comment'),
+                                                                          backgroundColor: success ? Colors.green : Colors.red,
+                                                                        ),
+                                                                      );
+                                                                    },
+                                                                    style: ElevatedButton.styleFrom(
+                                                                      backgroundColor: Colors.blue.shade600,
+                                                                      foregroundColor: Colors.white,
+                                                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                                                      elevation: 0,
+                                                                    ),
+                                                                    child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w600)),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ],
                                                         ),
                                                       ),
-                                                      actions: [
-                                                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                                                        ElevatedButton(
-                                                          onPressed: () async {
-                                                            Navigator.pop(ctx);
-                                                            final provider = context.read<CommentProvider>();
-                                                            await provider.editComment(
-                                                              context: context,
-                                                              commentId: comment.id,
-                                                              commentContent: editController.text.trim(),
-                                                              postId: postId,
-                                                              offset: 0,
-                                                              limit: 10,
-                                                              communityId: widget.communityId,
-                                                            );
-                                                          },
-                                                          child: const Text('Save'),
-                                                        ),
-                                                      ],
                                                     ),
                                                   );
                                                 } else if (value == 'delete') {
@@ -1142,13 +1223,19 @@ class _FeedScreenState extends State<FeedScreen> {
                                                           onPressed: () async {
                                                             Navigator.pop(ctx);
                                                             final provider = context.read<CommentProvider>();
-                                                            await provider.deleteComment(
+                                                            final success = await provider.deleteComment(
                                                               context: context,
                                                               commentId: comment.id,
                                                               postId: postId,
                                                               offset: 0,
                                                               limit: 10,
                                                               communityId: widget.communityId,
+                                                            );
+                                                            ScaffoldMessenger.of(context).showSnackBar(
+                                                              SnackBar(
+                                                                content: Text(success ? 'Comment deleted successfully' : 'Failed to delete comment'),
+                                                                backgroundColor: success ? Colors.green : Colors.red,
+                                                              ),
                                                             );
                                                           },
                                                           child: const Text('Delete'),
@@ -1198,14 +1285,9 @@ class _FeedScreenState extends State<FeedScreen> {
                           const SizedBox(width: 8),
 
                           // Fixed TextField styling (only one container)
-                          Expanded(
-                            child: Focus(
-                              child: Builder(
-                                builder: (context) {
-                                  final isFocused = Focus.of(context).hasFocus;
-
-                                  return TextField(
-                                    controller: controller,
+                Expanded(
+                child: TextField(
+                controller: controller,
                                     decoration: InputDecoration(
                                       hintText: 'Add a comment...',
                                       contentPadding: EdgeInsets.symmetric(
@@ -1230,9 +1312,7 @@ class _FeedScreenState extends State<FeedScreen> {
                                     ),
                                     maxLines: null,
                                     minLines: 1,
-                                  );
-                                },
-                              ),
+
                             ),
                           ),
 
@@ -1289,8 +1369,10 @@ class _FeedScreenState extends State<FeedScreen> {
                   ],
                 );
               },
-            );
-          },
+                    );
+                  },
+                ),
+            ),
         );
       },
     );

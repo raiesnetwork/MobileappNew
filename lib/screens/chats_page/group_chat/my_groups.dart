@@ -1,21 +1,24 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/chats_page/group_chat/group_request.dart';
 import 'package:provider/provider.dart';
-import 'dart:convert';
+
 import '../../../providers/group_provider.dart';
 
 import 'create_group.dart';
 import 'getall_groups.dart';
 import 'group_chat_detail.dart';
 
-const Color kPrimary = Color(0xFF8A2BE2);
+const Color kPrimary      = Color(0xFF8A2BE2);
 const Color kPrimaryLight = Color(0xFFF3EAFD);
-const Color kBg = Color(0xFFF8F6FC);
-const Color kSurface = Colors.white;
-const Color kTextDark = Color(0xFF1A1025);
-const Color kTextMid = Color(0xFF6B6080);
-const Color kTextLight = Color(0xFFB0A8C0);
-const Color kBorder = Color(0xFFEDE8F5);
+const Color kBg           = Color(0xFFF8F6FC);
+const Color kSurface      = Colors.white;
+const Color kTextDark     = Color(0xFF1A1025);
+const Color kTextMid      = Color(0xFF6B6080);
+const Color kTextLight    = Color(0xFFB0A8C0);
+const Color kBorder       = Color(0xFFEDE8F5);
 
 class MyGroupsScreen extends StatefulWidget {
   final String? communityId;
@@ -27,17 +30,18 @@ class MyGroupsScreen extends StatefulWidget {
 class _MyGroupsScreenState extends State<MyGroupsScreen>
     with SingleTickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  // FIX: nullable instead of `late` — prevents LateInitializationError on early dispose
-  AnimationController? _fadeController;
+  final ScrollController      _scrollController = ScrollController();
+  AnimationController?        _fadeController;
 
-  List<Map<String, dynamic>> _filteredGroups = [];
-  bool _isSearching = false;
-  bool _hasInitialized = false;
-  int _currentPage = 1;
-  final int _pageSize = 20;
-  bool _hasMoreData = true;
-  bool _isLoadingMore = false;
+  List<Map<String, dynamic>> _filteredGroups   = [];
+  bool   _isSearching     = false;
+  bool   _hasInitialized  = false;
+  bool   _isLoadingMore   = false;
+  String _activeSearchQuery = '';   // tracks what was last sent to API
+  Timer? _debounce;
+
+  // kept for backward-compat but driven by provider now
+  bool _hasMoreData = false;
 
   @override
   void initState() {
@@ -56,6 +60,7 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
         setState(() {
           _filteredGroups = provider.myGroups;
           _hasInitialized = true;
+          _hasMoreData    = provider.myGroupsHasMore;
         });
         _fadeController?.forward();
       } else if (!_hasInitialized) {
@@ -73,62 +78,89 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
     });
   }
 
+  // ── FETCH (page 1 / reset) ────────────────────────────────────────────
   Future<void> _fetchMyGroups({bool reset = true}) async {
     final provider = context.read<GroupChatProvider>();
-    if (reset) {
-      _currentPage = 1;
-      _hasMoreData = true;
-    }
-    await provider.fetchMyGroups(communityId: widget.communityId);
+    await provider.fetchMyGroups(
+      communityId: widget.communityId,
+      search: _isSearching && _activeSearchQuery.isNotEmpty
+          ? _activeSearchQuery
+          : null,
+    );
     if (mounted) {
       setState(() {
         _filteredGroups = provider.myGroups;
         _hasInitialized = true;
-        _hasMoreData = provider.myGroups.length >= _pageSize;
+        _hasMoreData    = provider.myGroupsHasMore;
       });
       _fadeController?.forward();
     }
   }
 
+  // ── LOAD MORE (infinite scroll) ───────────────────────────────────────
   Future<void> _loadMoreGroups() async {
-    if (_isLoadingMore || !_hasMoreData || _isSearching) return;
+    final provider = context.read<GroupChatProvider>();
+    if (_isLoadingMore || !provider.myGroupsHasMore) return;
+
     setState(() => _isLoadingMore = true);
-    await Future.delayed(const Duration(milliseconds: 800));
-    setState(() {
-      _currentPage++;
-      _isLoadingMore = false;
-      _hasMoreData = false;
-    });
+    await provider.loadMoreMyGroups(
+      search: _isSearching && _activeSearchQuery.isNotEmpty
+          ? _activeSearchQuery
+          : null,
+    );
+    if (mounted) {
+      setState(() {
+        _filteredGroups = provider.myGroups;
+        _isLoadingMore  = false;
+        _hasMoreData    = provider.myGroupsHasMore;
+      });
+    }
   }
 
+  // ── SEARCH ────────────────────────────────────────────────────────────
   void _onSearchChanged(String query) {
+    _activeSearchQuery = query;
     final provider = context.read<GroupChatProvider>();
+
+    if (query.isEmpty) {
+      _debounce?.cancel();
+      setState(() {
+        _isSearching    = false;
+        _filteredGroups = provider.myGroups;
+      });
+      _fetchMyGroups(reset: true);
+      return;
+    }
+
     setState(() {
-      _isSearching = query.isNotEmpty;
+      _isSearching    = true;
+      // Optimistic local filter while API call is in-flight
       _filteredGroups = provider.filterMyGroups(query);
+    });
+
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) _fetchMyGroups(reset: true);
     });
   }
 
   void _clearSearch() {
     _searchController.clear();
-    final provider = context.read<GroupChatProvider>();
-    setState(() {
-      _isSearching = false;
-      _filteredGroups = provider.myGroups;
-    });
+    _onSearchChanged('');
   }
 
   Future<void> _refreshGroups() async => _fetchMyGroups(reset: true);
 
+  // ── NAVIGATION ────────────────────────────────────────────────────────
   void _navigateToGroupChat(Map<String, dynamic> group) {
     context.read<GroupChatProvider>().setCurrentGroup(group['_id']);
     Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => GroupChatDetailPage(
-            groupId: group['_id'] ?? '',
-            groupName: group['name'] ?? 'Unknown Group',
-            isAdmin: group['isAdmin'] == true,
+            groupId:   group['_id']   ?? '',
+            groupName: group['name']  ?? 'Unknown Group',
+            isAdmin:   group['isAdmin'] == true,
           ),
         ));
   }
@@ -154,40 +186,47 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.6,
         child: Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: const BoxDecoration(
-                  color: kPrimaryLight, shape: BoxShape.circle),
-              child: Icon(
-                  _isSearching ? Icons.search_off_rounded : Icons.group_outlined,
-                  size: 40,
-                  color: kPrimary),
-            ),
-            const SizedBox(height: 20),
-            Text(_isSearching ? 'No groups found' : 'No groups yet',
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 48),
-              child: Text(
-                _isSearching
-                    ? 'Try different search terms'
-                    : 'Create or join a group to get started',
-                style: const TextStyle(fontSize: 14, color: kTextMid),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            if (!_isSearching) ...[
-              const SizedBox(height: 32),
-              _PrimaryButton(
-                  label: 'Create Group',
-                  icon: Icons.add_rounded,
-                  onTap: _navigateToCreateGroup),
-            ],
-          ]),
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: const BoxDecoration(
+                      color: kPrimaryLight, shape: BoxShape.circle),
+                  child: Icon(
+                      _isSearching
+                          ? Icons.search_off_rounded
+                          : Icons.group_outlined,
+                      size: 40,
+                      color: kPrimary),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                    _isSearching ? 'No groups found' : 'No groups yet',
+                    style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kTextDark)),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 48),
+                  child: Text(
+                    _isSearching
+                        ? 'Try different search terms'
+                        : 'Create or join a group to get started',
+                    style: const TextStyle(fontSize: 14, color: kTextMid),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                if (!_isSearching) ...[
+                  const SizedBox(height: 32),
+                  _PrimaryButton(
+                      label: 'Create Group',
+                      icon: Icons.add_rounded,
+                      onTap: _navigateToCreateGroup),
+                ],
+              ]),
         ),
       ),
     );
@@ -200,32 +239,36 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.6,
         child: Center(
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Container(
-              width: 88,
-              height: 88,
-              decoration: const BoxDecoration(
-                  color: Color(0xFFFFEEEE), shape: BoxShape.circle),
-              child: const Icon(Icons.error_outline_rounded,
-                  size: 40, color: Color(0xFFE53935)),
-            ),
-            const SizedBox(height: 20),
-            const Text('Something went wrong',
-                style: TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Text(error,
-                  style: const TextStyle(fontSize: 14, color: kTextMid),
-                  textAlign: TextAlign.center),
-            ),
-            const SizedBox(height: 28),
-            _PrimaryButton(
-                label: 'Try Again',
-                icon: Icons.refresh_rounded,
-                onTap: _refreshGroups),
-          ]),
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: const BoxDecoration(
+                      color: Color(0xFFFFEEEE), shape: BoxShape.circle),
+                  child: const Icon(Icons.error_outline_rounded,
+                      size: 40, color: Color(0xFFE53935)),
+                ),
+                const SizedBox(height: 20),
+                const Text('Something went wrong',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kTextDark)),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: Text(error,
+                      style: const TextStyle(fontSize: 14, color: kTextMid),
+                      textAlign: TextAlign.center),
+                ),
+                const SizedBox(height: 28),
+                _PrimaryButton(
+                    label: 'Try Again',
+                    icon: Icons.refresh_rounded,
+                    onTap: _refreshGroups),
+              ]),
         ),
       ),
     );
@@ -233,14 +276,13 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
 
   // ── GROUP CARD ─────────────────────────────────────────────────────────
   Widget _buildGroupCard(Map<String, dynamic> group, int index) {
-    final members = group['members'] as List<dynamic>? ?? [];
+    final members     = group['members'] as List<dynamic>? ?? [];
     final memberCount = members.length;
     final lastMessage = group['lastMessage'] as Map<String, dynamic>?;
     final unreadCount = group['unreadCount'] ?? 0;
-    final hasUnread = unreadCount > 0;
-    final isAdmin = group['isAdmin'] == true;
+    final hasUnread   = unreadCount > 0;
+    final isAdmin     = group['isAdmin'] == true;
 
-    // Safe animation: use AlwaysStoppedAnimation if controller not yet ready
     final animation = _fadeController != null
         ? CurvedAnimation(
       parent: _fadeController!,
@@ -318,7 +360,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                             '${lastMessage['sender']?['profile']?['name'] ?? 'Someone'}: ${lastMessage['text'] ?? 'Sent a file'}',
                             style: TextStyle(
                               fontSize: 13,
-                              color: hasUnread ? kTextDark : kTextMid,
+                              color:
+                              hasUnread ? kTextDark : kTextMid,
                               fontWeight: hasUnread
                                   ? FontWeight.w500
                                   : FontWeight.w400,
@@ -329,8 +372,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                         else if (group['description'] != null &&
                             group['description'].toString().isNotEmpty)
                           Text(group['description'],
-                              style:
-                              const TextStyle(fontSize: 13, color: kTextMid),
+                              style: const TextStyle(
+                                  fontSize: 13, color: kTextMid),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis),
                         const SizedBox(height: 6),
@@ -348,14 +391,18 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                           const Spacer(),
                           if (hasUnread)
                             Container(
-                              constraints: const BoxConstraints(minWidth: 20),
+                              constraints:
+                              const BoxConstraints(minWidth: 20),
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
                                   color: kPrimary,
-                                  borderRadius: BorderRadius.circular(10)),
+                                  borderRadius:
+                                  BorderRadius.circular(10)),
                               child: Text(
-                                unreadCount > 99 ? '99+' : '$unreadCount',
+                                unreadCount > 99
+                                    ? '99+'
+                                    : '$unreadCount',
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 11,
@@ -366,7 +413,6 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                         ]),
                       ]),
                 ),
-                // REMOVED: chevron icon
               ]),
             ),
           ),
@@ -376,10 +422,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
   }
 
   // ── GROUP AVATAR ───────────────────────────────────────────────────────
-  // Shows profile image when available; otherwise a purple gradient circle
-  // with a group icon (people icon) instead of the first letter.
   Widget _buildGroupAvatar(Map<String, dynamic> group) {
-    final profileImage = group['profileImage'];
+    final profileImage  = group['profileImage'];
     final hasValidImage = profileImage != null &&
         profileImage.toString().isNotEmpty &&
         profileImage.toString() != 'null';
@@ -408,7 +452,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
           : const CircleAvatar(
         radius: 25,
         backgroundColor: Colors.transparent,
-        child: Icon(Icons.group_rounded, color: Colors.white, size: 24),
+        child: Icon(Icons.group_rounded,
+            color: Colors.white, size: 24),
       ),
     );
   }
@@ -429,7 +474,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
   }
 
   ImageProvider? _getImageProvider(String? imageData) {
-    if (imageData == null || imageData.isEmpty || imageData == 'null') return null;
+    if (imageData == null || imageData.isEmpty || imageData == 'null')
+      return null;
     try {
       if (imageData.startsWith('data:image') ||
           imageData.startsWith('/9j/') ||
@@ -463,7 +509,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                         height: 32,
                         child: CircularProgressIndicator(
                             strokeWidth: 2.5,
-                            valueColor: AlwaysStoppedAnimation(kPrimary))),
+                            valueColor:
+                            AlwaysStoppedAnimation(kPrimary))),
                     SizedBox(height: 16),
                     Text('Loading groups...',
                         style: TextStyle(
@@ -477,8 +524,6 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
           if (provider.myGroupsError != null)
             return _buildErrorState(provider.myGroupsError!);
 
-          final groupsToDisplay = _filteredGroups;
-
           return Column(children: [
             _buildSearchBar(),
             Expanded(
@@ -486,18 +531,20 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
                 onRefresh: _refreshGroups,
                 color: kPrimary,
                 backgroundColor: kSurface,
-                child: groupsToDisplay.isEmpty
+                child: _filteredGroups.isEmpty
                     ? _buildEmptyState()
                     : ListView.builder(
                   controller: _scrollController,
                   physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(top: 8, bottom: 100),
-                  itemCount:
-                  groupsToDisplay.length + (_isLoadingMore ? 1 : 0),
+                  padding:
+                  const EdgeInsets.only(top: 8, bottom: 100),
+                  itemCount: _filteredGroups.length +
+                      (_isLoadingMore ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= groupsToDisplay.length)
+                    if (index >= _filteredGroups.length)
                       return _buildLoadingMoreIndicator();
-                    return _buildGroupCard(groupsToDisplay[index], index);
+                    return _buildGroupCard(
+                        _filteredGroups[index], index);
                   },
                 ),
               ),
@@ -510,7 +557,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
         backgroundColor: kPrimary,
         foregroundColor: Colors.white,
         elevation: 4,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: const Icon(Icons.add_rounded, size: 26),
       ),
     );
@@ -536,7 +584,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
         IconButton(
           onPressed: () => Navigator.push(context,
               MaterialPageRoute(builder: (_) => const GroupListScreen())),
-          icon: const Icon(Icons.explore_outlined, color: kPrimary, size: 22),
+          icon: const Icon(Icons.explore_outlined,
+              color: kPrimary, size: 22),
           tooltip: 'Discover Groups',
         ),
         TextButton(
@@ -544,9 +593,11 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
               MaterialPageRoute(builder: (_) => GroupRequestScreen())),
           style: TextButton.styleFrom(
               foregroundColor: kPrimary,
-              padding: const EdgeInsets.symmetric(horizontal: 12)),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12)),
           child: const Text('Requests',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              style: TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.w600)),
         ),
         const SizedBox(width: 4),
       ],
@@ -584,7 +635,8 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
               borderSide: const BorderSide(color: kBorder)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: kPrimary, width: 1.5)),
+              borderSide:
+              const BorderSide(color: kPrimary, width: 1.5)),
         ),
       ),
     );
@@ -592,9 +644,9 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
-    // FIX: null-safe dispose
     _fadeController?.dispose();
     super.dispose();
   }
@@ -617,7 +669,8 @@ class _PrimaryButton extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(icon, size: 18, color: Colors.white),
             const SizedBox(width: 8),
@@ -640,14 +693,15 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isAdmin = group['isAdmin'] == true;
-    final members = group['members'] as List<dynamic>? ?? [];
+    final isAdmin     = group['isAdmin'] == true;
+    final members     = group['members'] as List<dynamic>? ?? [];
     final memberCount = members.length;
 
     return Container(
       decoration: const BoxDecoration(
         color: kSurface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius:
+        BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -655,11 +709,13 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
             width: 36,
             height: 4,
             margin: const EdgeInsets.symmetric(vertical: 14),
-            decoration:
-            BoxDecoration(color: kBorder, borderRadius: BorderRadius.circular(2)),
+            decoration: BoxDecoration(
+                color: kBorder,
+                borderRadius: BorderRadius.circular(2)),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
             child: Row(children: [
               _buildAvatar(),
               const SizedBox(width: 14),
@@ -693,14 +749,16 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
               title: 'Group Info',
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/group-info', arguments: group);
+                Navigator.pushNamed(context, '/group-info',
+                    arguments: group);
               }),
           _OptionTile(
               icon: Icons.people_outline_rounded,
               title: 'Members',
               onTap: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/group-members', arguments: group);
+                Navigator.pushNamed(context, '/group-members',
+                    arguments: group);
               }),
           if (isAdmin) ...[
             _OptionTile(
@@ -736,7 +794,7 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
-    final profileImage = group['profileImage'];
+    final profileImage  = group['profileImage'];
     final hasValidImage = profileImage != null &&
         profileImage.toString().isNotEmpty &&
         profileImage.toString() != 'null';
@@ -761,13 +819,15 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
           : const CircleAvatar(
         radius: 23,
         backgroundColor: Colors.transparent,
-        child: Icon(Icons.group_rounded, color: Colors.white, size: 22),
+        child: Icon(Icons.group_rounded,
+            color: Colors.white, size: 22),
       ),
     );
   }
 
   ImageProvider? _getImageProvider(String? imageData) {
-    if (imageData == null || imageData.isEmpty || imageData == 'null') return null;
+    if (imageData == null || imageData.isEmpty || imageData == 'null')
+      return null;
     try {
       if (imageData.startsWith('data:image') ||
           imageData.startsWith('/9j/') ||
@@ -783,14 +843,18 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
     }
   }
 
-  void _showLeaveGroupDialog(BuildContext context, Map<String, dynamic> group) {
+  void _showLeaveGroupDialog(
+      BuildContext context, Map<String, dynamic> group) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
         title: const Text('Leave Group',
             style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700, color: kTextDark)),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: kTextDark)),
         content: Text(
             'Are you sure you want to leave "${group['name']}"? You won\'t be able to see new messages.',
             style: const TextStyle(fontSize: 14, color: kTextMid)),
@@ -798,18 +862,22 @@ class _GroupOptionsBottomSheet extends StatelessWidget {
           TextButton(
               onPressed: () => Navigator.pop(context),
               child: const Text('Cancel',
-                  style:
-                  TextStyle(color: kTextMid, fontWeight: FontWeight.w500))),
+                  style: TextStyle(
+                      color: kTextMid,
+                      fontWeight: FontWeight.w500))),
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Leave group functionality not implemented yet'),
-                  behavior: SnackBarBehavior.floating));
+              ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text(
+                          'Leave group functionality not implemented yet'),
+                      behavior: SnackBarBehavior.floating));
             },
             child: Text('Leave',
                 style: TextStyle(
-                    color: Colors.red[600], fontWeight: FontWeight.w600)),
+                    color: Colors.red[600],
+                    fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -847,7 +915,9 @@ class _OptionTile extends StatelessWidget {
       ),
       title: Text(title,
           style: TextStyle(
-              color: color, fontWeight: FontWeight.w600, fontSize: 15)),
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 15)),
       onTap: onTap,
       contentPadding:
       const EdgeInsets.symmetric(horizontal: 20, vertical: 2),

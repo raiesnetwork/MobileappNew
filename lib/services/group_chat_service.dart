@@ -165,22 +165,32 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 2. GET MY GROUPS — GET /mygroups?communityId=&pageNo=&limit=
+  // 2. GET MY GROUPS — GET /mygroups?communityId=&pageNo=&search=&limit=
+  //    Unified endpoint: returns personal groups OR community groups
+  //    depending on whether communityId is supplied.
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getMyGroups({
     String? communityId,
     int pageNo = 1,
     int limit = 20,
+    String? search,
   }) async {
     const l = 'getMyGroups';
     try {
       final token = await _getToken();
       if (token == null) return _noToken();
 
-      final params = {'pageNo': '$pageNo', 'limit': '$limit'};
+      final params = <String, String>{
+        'pageNo': '$pageNo',
+        'limit':  '$limit',
+      };
       if (communityId != null && communityId.isNotEmpty) {
         params['communityId'] = communityId;
       }
+      if (search != null && search.isNotEmpty) {
+        params['search'] = search;
+      }
+
       final uri = Uri.parse('${apiBaseUrl}api/chat/mygroups')
           .replace(queryParameters: params);
       _logRequest('GET', uri.toString());
@@ -190,10 +200,17 @@ class GroupChatService {
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
-        final d = jsonDecode(res.body);
-        final groups = d['data'] ?? [];
-        print('📊 [$l] ${(groups as List).length} my groups');
-        return {'error': false, 'message': 'OK', 'data': groups};
+        final d          = jsonDecode(res.body);
+        final groups     = d['data']       ?? [];
+        final pagination = d['pagination'] as Map<String, dynamic>?;
+        print('📊 [$l] ${(groups as List).length} my groups '
+            '(page $pageNo / ${pagination?['totalPages'] ?? '?'})');
+        return {
+          'error':      false,
+          'message':    'OK',
+          'data':       groups,
+          'pagination': pagination,
+        };
       }
       return _apiError(res, l);
     } on SocketException { return _noInternet(l); }
@@ -579,7 +596,7 @@ class GroupChatService {
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> updateGroupRequest({
     required String requestId,
-    required String status, // "approved" | "rejected"
+    required String status,
   }) async {
     const l = 'updateGroupRequest';
     try {
@@ -711,9 +728,9 @@ class GroupChatService {
     catch (e) { _logError(l, e); return _exception(e); }
   }
 
-// ════════════════════════════════════════════════════════════════════════
-// 16. EDIT GROUP MESSAGE — socket only (no HTTP route exists)
-// ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════
+  // 16. EDIT GROUP MESSAGE — socket only (no HTTP route exists)
+  // ════════════════════════════════════════════════════════════════════════
   void editGroupMessage({
     required String messageId,
     required String newText,
@@ -727,9 +744,9 @@ class GroupChatService {
     });
   }
 
-// ════════════════════════════════════════════════════════════════════════
-// 17. DELETE GROUP MESSAGE — socket only (no HTTP route exists)
-// ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════
+  // 17. DELETE GROUP MESSAGE — socket only (no HTTP route exists)
+  // ════════════════════════════════════════════════════════════════════════
   void deleteGroupMessage({
     required String messageId,
     required String groupId,

@@ -71,7 +71,6 @@ class _GroupMemberManagementScreenState
 
   // ════════════════════════════════════════════════════════════════════════
   //  SAFE MEMBER FIELD EXTRACTORS
-  // ════════════════════════════════════════════════════════════════════════
   String _extractId(dynamic member) {
     if (member == null) return '';
     if (member is String) return member;
@@ -81,22 +80,40 @@ class _GroupMemberManagementScreenState
           member['id'] ??
           (member['user'] is Map ? member['user']['_id'] : null) ??
           '';
-      return v.toString();
+      final str = v.toString().trim();
+      return str == 'null' ? '' : str;
     }
     return '';
   }
 
   String _extractName(dynamic member) {
     if (member is Map) {
+      // Try nested profile first
       final profile = member['profile'];
       if (profile is Map) {
-        final n = profile['name']?.toString() ?? '';
+        final n = profile['name']?.toString().trim() ?? '';
         if (n.isNotEmpty) return n;
       }
-      return (member['name'] ?? member['mobile'] ?? member['username'] ?? '')
-          .toString();
+      // Flat fields fallback
+      final fallback = (member['name'] ?? member['mobile'] ?? member['username'] ?? '').toString().trim();
+      if (fallback.isNotEmpty) return fallback;
     }
-    return '';
+    return 'Unknown';
+  }
+
+  String? _extractAvatar(dynamic member) {
+    if (member is Map) {
+      // Try nested profile.profileImage
+      final profile = member['profile'];
+      if (profile is Map) {
+        final img = profile['profileImage']?.toString() ?? '';
+        if (img.isNotEmpty && img != 'null') return img;
+      }
+      // Try flat profileImage
+      final flat = member['profileImage']?.toString() ?? '';
+      if (flat.isNotEmpty && flat != 'null') return flat;
+    }
+    return null;
   }
 
   String _extractMobile(dynamic member) {
@@ -109,16 +126,7 @@ class _GroupMemberManagementScreenState
     return '';
   }
 
-  String? _extractAvatar(dynamic member) {
-    if (member is Map) {
-      final profile = member['profile'];
-      if (profile is Map) {
-        final img = profile['profileImage']?.toString();
-        if (img != null && img.isNotEmpty && img != 'null') return img;
-      }
-    }
-    return null;
-  }
+
 
   bool _isAdmin(dynamic member) {
     if (member is Map) {
@@ -138,9 +146,9 @@ class _GroupMemberManagementScreenState
     _liveMembers = List<dynamic>.from(widget.currentMembers);
 
     _usersScrollController.addListener(_onUsersScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _refreshMembersFromServer();
       _loadUsers(reset: true);
-      _refreshMembersFromServer(); // fetch fresh member list immediately
     });
   }
 
@@ -153,24 +161,30 @@ class _GroupMemberManagementScreenState
     super.dispose();
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  FETCH FRESH MEMBER LIST FROM SERVER
-  // ════════════════════════════════════════════════════════════════════════
+
   Future<void> _refreshMembersFromServer() async {
     final provider = context.read<GroupChatProvider>();
-    // Re-use getGroupById / getMyGroupById which already have up-to-date data.
-    // If you have a dedicated "fetch group members" API, call it here instead.
-    final group = provider.getGroupById(widget.groupId) ??
+
+    // Try cached data first
+    var group = provider.getGroupById(widget.groupId) ??
         provider.getMyGroupById(widget.groupId);
+
+    // If no members found in cache, fetch fresh from server
+    if (group == null || (group['members'] as List?)?.isEmpty != false) {
+      await provider.fetchMyGroups();
+      group = provider.getGroupById(widget.groupId) ??
+          provider.getMyGroupById(widget.groupId);
+    }
+
     final fresh = (group?['members'] as List<dynamic>?) ?? [];
+
+    print('🔍 [Members] count=${fresh.length} sample=${fresh.isNotEmpty ? fresh.first : "empty"}');
+
     if (fresh.isNotEmpty && mounted) {
       setState(() => _liveMembers = List<dynamic>.from(fresh));
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  DATA LOADING
-  // ════════════════════════════════════════════════════════════════════════
   Future<void> _loadUsers({bool reset = false}) async {
     if (_isLoadingMore && !reset) return;
 

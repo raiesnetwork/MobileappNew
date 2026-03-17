@@ -17,7 +17,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../providers/group_provider.dart';
 
 import 'group_add_remove_member_screen.dart';
-import 'group_message_bubble_screen.dart' as bubble;
+import 'group_message_bubble_screen.dart' show GroupMessageBubble;
 
 class GroupChatDetailPage extends StatefulWidget {
   final String groupId;
@@ -620,25 +620,36 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     }
   }
 
-  void _openMemberManagement({bool adminMode = true}) {
+  // ════════════════════════════════════════════════════════════════════════
+  //  MEMBER MANAGEMENT — async so we can refresh on return
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _openMemberManagement({bool adminMode = true}) async {
     final provider = context.read<GroupChatProvider>();
     final group = provider.getGroupById(widget.groupId) ??
         provider.getMyGroupById(widget.groupId);
     final members = (group?['members'] as List<dynamic>?) ?? [];
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => GroupMemberManagementScreen(
           groupId: widget.groupId,
           groupName: widget.groupName,
           currentMembers: members,
-          // admins start on "Add Members" tab (0), non-admins on "Current" (1)
           initialTabIndex: adminMode ? 0 : 1,
         ),
       ),
     );
+
+    // Re-fetch from server so member list is always fresh on return
+    if (mounted) {
+      await provider.fetchMyGroups();
+    }
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -653,6 +664,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       ),
     );
   }
+
   AppBar _buildAppBar() {
     return AppBar(
       backgroundColor: Colors.white,
@@ -720,7 +732,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
               case 'manage_members':
                 _openMemberManagement(adminMode: true);
                 break;
-
+              case 'remove_members':
+                _openMemberManagement(adminMode: false);
+                break;
               case 'group_info':
                 _showGroupInfo();
                 break;
@@ -752,6 +766,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       ],
     );
   }
+
   Widget _buildMessagesList() {
     return Consumer<GroupChatProvider>(
       builder: (_, provider, __) {
@@ -872,9 +887,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                   !_sameDay(
                       msg['createdAt'] ?? '', prev['createdAt'] ?? '');
 
-              final isSameSenderAsNext = next != null &&
-                  _senderId(next) == _senderId(msg) &&
-                  _senderId(msg) != (_currentUserId ?? '');
+              final isSameSenderAsNext = false;
 
               return Column(
                 children: [
@@ -882,7 +895,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                     _buildDateDivider(msg['createdAt'] ?? ''),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
-                    child: bubble.GroupMessageBubble(
+                    child: GroupMessageBubble(
                       message: msg,
                       currentUserId: _currentUserId,
                       groupId: widget.groupId,
@@ -939,7 +952,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     );
   }
 
-  // ── Recording indicator ───────────────────────────────────────────────────
   Widget _buildRecordingIndicator() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -963,7 +975,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     );
   }
 
-  // ── Input bar ─────────────────────────────────────────────────────────────
   Widget _buildInputBar() {
     return Container(
       decoration: BoxDecoration(
@@ -1328,7 +1339,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                           ])),
                       const SizedBox(height: 20),
 
-                      // ── Manage Members (admin only) ──────────────────────
                       if (group['isAdmin'] == true) ...[
                         SizedBox(
                           width: double.infinity,
@@ -1337,8 +1347,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                               Navigator.pop(context);
                               _openMemberManagement(adminMode: true);
                             },
-                            icon:
-                            const Icon(Icons.manage_accounts_rounded),
+                            icon: const Icon(Icons.manage_accounts_rounded),
                             label: const Text('Manage Members'),
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF6C5CE7),
@@ -1350,7 +1359,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                         const SizedBox(height: 10),
                       ],
 
-                      // ── Leave / Join / Pending ───────────────────────────
                       if (group['isMember'] == true)
                         _actionButton('Leave Group', Icons.exit_to_app,
                             Colors.red, () async {
