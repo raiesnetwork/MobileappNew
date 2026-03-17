@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../providers/group_provider.dart';
 
+import '../../../services/socket_service.dart';
 import 'group_add_remove_member_screen.dart';
 import 'group_message_bubble_screen.dart' show GroupMessageBubble;
 
@@ -79,25 +80,31 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     final provider = context.read<GroupChatProvider>();
     provider.setCurrentGroup(widget.groupId);
     provider.fetchGroupMessages(widget.groupId);
+    provider.clearUnreadCount(widget.groupId);
+    SocketService().joinGroup(widget.groupId);
+
+    // ✅ Auto scroll when new message arrives via socket
+    provider.onNewMessageReceived = () {
+      if (mounted) _scrollToBottom();
+    };
   }
 
   @override
   void dispose() {
+    // ✅ Clear callback
+    context.read<GroupChatProvider>().onNewMessageReceived = null;
+
     _recordingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _recorder?.closeRecorder();
+    SocketService().leaveGroup(widget.groupId);
     if (_recordingPath != null && File(_recordingPath!).existsSync()) {
-      try {
-        File(_recordingPath!).deleteSync();
-      } catch (_) {}
+      try { File(_recordingPath!).deleteSync(); } catch (_) {}
     }
     super.dispose();
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  COMPRESSION
-  // ════════════════════════════════════════════════════════════════════════
   String _readableSize(int bytes) {
     if (bytes < 1024) return '${bytes}B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
@@ -317,6 +324,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     final provider = context.read<GroupChatProvider>();
     final communityInfo = _buildCommunityInfo(provider);
     final durationMs = _recordingDuration.inMilliseconds;
+    final replyId = _replyingToMessage?['_id']?.toString();
+    final replySnapshot = _replyingToMessage;
 
     try {
       final audioFile = File(_recordingPath!);
@@ -333,19 +342,23 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         'createdAt': DateTime.now().toIso8601String(),
         'status': 'sending',
         'isOptimistic': true,
+        if (replySnapshot != null) 'replyToMessage': replySnapshot,
       });
       _scrollToBottom();
       _clearReply();
 
+      // Replace with:
       final ok = await provider.sendGroupVoiceMessage(
         groupId: widget.groupId,
         audioFile: uploadFile,
         communityInfo: communityInfo,
         audioDurationMs: durationMs,
+        replyTo: replyId,
+        tempId: tempId, // ← ADD THIS
       );
 
       if (ok) {
-        provider.removeOptimisticMessage(widget.groupId, tempId);
+
         _scrollToBottom();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -449,6 +462,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       try {
         final fileToSend = await _compressAndWarnUser(rawFile);
 
+        final replyId = _replyingToMessage?['_id']?.toString();
+        final replySnapshot = _replyingToMessage;
+
         final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
         provider.addMessageToCurrentGroup({
           '_id': tempId,
@@ -460,6 +476,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           'createdAt': DateTime.now().toIso8601String(),
           'status': 'sending',
           'isOptimistic': true,
+          if (replySnapshot != null) 'replyToMessage': replySnapshot,
         });
         _scrollToBottom();
         _clearReply();
@@ -468,10 +485,13 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           groupId: widget.groupId,
           file: fileToSend,
           communityInfo: communityInfo,
+          replyTo: replyId,
+          tempId: tempId, // ← ADD THIS
         );
 
         if (ok) {
-          provider.removeOptimisticMessage(widget.groupId, tempId);
+
+
           _scrollToBottom();
         } else {
           provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
@@ -496,6 +516,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       final text = _messageController.text.trim();
       if (text.isEmpty) return;
 
+      final replyId = _replyingToMessage?['_id']?.toString();
+
       setState(() => _isSending = true);
       _messageController.clear();
       _scrollToBottom();
@@ -517,10 +539,11 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           groupId: widget.groupId,
           text: text,
           communityInfo: communityInfo,
+          replyTo: replyId,
+          tempId: tempId, // ← ADD THIS
         );
 
         if (ok) {
-          provider.removeOptimisticMessage(widget.groupId, tempId);
           Future.delayed(const Duration(milliseconds: 200), () {
             if (mounted) _scrollToBottom();
           });

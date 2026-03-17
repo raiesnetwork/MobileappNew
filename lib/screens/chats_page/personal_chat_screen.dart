@@ -124,6 +124,7 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
       ),
       body: Consumer<PersonalChatProvider>(
         builder: (context, provider, child) {
+
           if (provider.isLoading) {
             return Center(
               child: Container(
@@ -294,8 +295,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: ChatListItem(
                     chat: chat,
-                    onTap: () {
-                      Navigator.push(
+                    onTap: () async {
+                      await Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (context) => ChatDetailScreen(
@@ -306,6 +307,12 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                           ),
                         ),
                       );
+                      // Refresh after returning so badge is gone
+                      if (context.mounted) {
+                        await context
+                            .read<PersonalChatProvider>()
+                            .fetchPersonalChats();
+                      }
                     },
                   ),
                 );

@@ -128,7 +128,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 1. GET ALL GROUPS — GET /getallgroups?search=&pageNo=&limit=
+  // 1. GET ALL GROUPS
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getAllGroups({
     String? searchQuery,
@@ -165,9 +165,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 2. GET MY GROUPS — GET /mygroups?communityId=&pageNo=&search=&limit=
-  //    Unified endpoint: returns personal groups OR community groups
-  //    depending on whether communityId is supplied.
+  // 2. GET MY GROUPS
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getMyGroups({
     String? communityId,
@@ -219,7 +217,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 3. CREATE GROUP — POST /creategroup
+  // 3. CREATE GROUP
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> createGroup({
     required String name,
@@ -268,7 +266,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 4. GET GROUP MESSAGES — GET /groupmessages/:id?pageNo=&limit=
+  // 4. GET GROUP MESSAGES
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getGroupMessages(String groupId,
       {int pageNo = 1, int limit = 30}) async {
@@ -308,6 +306,7 @@ class GroupChatService {
     required String text,
     required Map<String, dynamic> communityInfo,
     String? image,
+    String? replyTo,
   }) async {
     const l = 'sendGroupMessage';
     try {
@@ -319,10 +318,12 @@ class GroupChatService {
         'text': text,
         'communityInfo': communityInfo,
         if (image != null && image.isNotEmpty) 'image': image,
+        if (replyTo != null && replyTo.isNotEmpty) 'replyTo': replyTo,
       };
       _logRequest('POST', '${apiBaseUrl}api/chat/groupmessage', body: {
         'groupId': groupId,
         'text': text.length > 60 ? '${text.substring(0, 60)}...' : text,
+        if (replyTo != null) 'replyTo': replyTo,
       });
 
       final res = await http.post(
@@ -349,12 +350,13 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 6. SEND FILE MESSAGE — POST /groupfilemessage  (multipart)
+  // 6. SEND FILE MESSAGE — POST /groupfilemessage (multipart)
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupFileMessage({
     required String groupId,
     required File file,
     Map<String, dynamic>? communityInfo,
+    String? replyTo,
   }) async {
     const l = 'sendGroupFileMessage';
     try {
@@ -381,6 +383,9 @@ class GroupChatService {
       if (communityInfo != null) {
         req.fields['communityInfo'] = jsonEncode(communityInfo);
       }
+      if (replyTo != null && replyTo.isNotEmpty) {
+        req.fields['replyTo'] = replyTo;
+      }
 
       final streamed = await req.send().timeout(const Duration(minutes: 2));
       final res = await http.Response.fromStream(streamed);
@@ -403,13 +408,14 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 7. SEND VOICE MESSAGE — POST /groupvoicemessage  (multipart)
+  // 7. SEND VOICE MESSAGE — POST /groupvoicemessage (multipart)
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupVoiceMessage({
     required String groupId,
     required File audioFile,
     Map<String, dynamic>? communityInfo,
     int? audioDurationMs,
+    String? replyTo,
   }) async {
     const l = 'sendGroupVoiceMessage';
     try {
@@ -440,6 +446,9 @@ class GroupChatService {
       if (communityInfo != null) {
         req.fields['communityInfo'] = jsonEncode(communityInfo);
       }
+      if (replyTo != null && replyTo.isNotEmpty) {
+        req.fields['replyTo'] = replyTo;
+      }
 
       print('📡 [$l] Uploading voice...');
       final streamed = await req.send().timeout(const Duration(minutes: 2));
@@ -463,7 +472,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 8. SEND CAMERA PHOTO — opens camera then reuses /groupfilemessage
+  // 8. SEND CAMERA PHOTO
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupCameraPhoto({
     required String groupId,
@@ -501,7 +510,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 9. REQUEST TO JOIN — POST /grouprequest
+  // 9. REQUEST TO JOIN
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> requestToJoinGroup(
       {required String groupId}) async {
@@ -534,7 +543,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 10. CANCEL JOIN REQUEST — DELETE /grouprequest/:id
+  // 10. CANCEL JOIN REQUEST
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> cancelGroupRequest(
       {required String groupId}) async {
@@ -564,7 +573,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 11. GET GROUP REQUESTS — GET /grouprequest/:id  (admin only)
+  // 11. GET GROUP REQUESTS
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> getGroupRequests(String groupId) async {
     const l = 'getGroupRequests';
@@ -592,7 +601,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 12. UPDATE GROUP REQUEST — PUT /grouprequest/
+  // 12. UPDATE GROUP REQUEST
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> updateGroupRequest({
     required String requestId,
@@ -627,7 +636,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 13. ADD MEMBERS — POST /addmember
+  // 13. ADD MEMBERS
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> addMembersToGroup({
     required String groupId,
@@ -658,7 +667,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 14. REMOVE MEMBER — DELETE /removemember/:groupId/:userId
+  // 14. REMOVE MEMBER
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> removeMemberFromGroup({
     required String groupId,
@@ -688,7 +697,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 15. FETCH ALL USERS — GET /api/mobile/all-users
+  // 15. FETCH ALL USERS
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> fetchAllUsers({
     int page = 1,
@@ -729,7 +738,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 16. EDIT GROUP MESSAGE — socket only (no HTTP route exists)
+  // 16. EDIT GROUP MESSAGE — socket only
   // ════════════════════════════════════════════════════════════════════════
   void editGroupMessage({
     required String messageId,
@@ -745,7 +754,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 17. DELETE GROUP MESSAGE — socket only (no HTTP route exists)
+  // 17. DELETE GROUP MESSAGE — socket only
   // ════════════════════════════════════════════════════════════════════════
   void deleteGroupMessage({
     required String messageId,

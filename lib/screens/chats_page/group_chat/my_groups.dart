@@ -152,17 +152,26 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
   Future<void> _refreshGroups() async => _fetchMyGroups(reset: true);
 
   // ── NAVIGATION ────────────────────────────────────────────────────────
-  void _navigateToGroupChat(Map<String, dynamic> group) {
+  void _navigateToGroupChat(Map<String, dynamic> group) async {
     context.read<GroupChatProvider>().setCurrentGroup(group['_id']);
-    Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => GroupChatDetailPage(
-            groupId:   group['_id']   ?? '',
-            groupName: group['name']  ?? 'Unknown Group',
-            isAdmin:   group['isAdmin'] == true,
-          ),
-        ));
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GroupChatDetailPage(
+          groupId:   group['_id']  ?? '',
+          groupName: group['name'] ?? 'Unknown Group',
+          isAdmin:   group['isAdmin'] == true,
+        ),
+      ),
+    );
+
+    // Re-sync after returning so badge is visually gone
+    if (mounted) {
+      final provider = context.read<GroupChatProvider>();
+      setState(() => _filteredGroups = provider.myGroups); // instant local clear
+      await provider.fetchMyGroups(communityId: widget.communityId); // server sync
+      if (mounted) setState(() => _filteredGroups = provider.myGroups);
+    }
   }
 
   void _navigateToCreateGroup() {

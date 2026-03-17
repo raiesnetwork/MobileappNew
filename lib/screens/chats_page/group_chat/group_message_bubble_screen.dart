@@ -454,7 +454,28 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
   //   2. Falls back gracefully to "Someone" if neither is available
   //   3. Label format matches personal chat ("Replied to X")
   Widget _buildReplyPreview() {
-    final replyMsg = widget.message['replyToMessage'] as Map<String, dynamic>?;
+// Try replyToMessage first (optimistic/preserved)
+    Map<String, dynamic>? replyMsg =
+    widget.message['replyToMessage'] as Map<String, dynamic>?;
+
+    // If not available, try to find the original message by ID from provider
+    if (replyMsg == null) {
+      final replyId = widget.message['replyTo'];
+      if (replyId == null || replyId is! String || replyId.isEmpty) {
+        return const SizedBox.shrink();
+      }
+      // Look up the message from current group messages
+      final provider = context.read<GroupChatProvider>();
+      final allMsgs = provider.getMessagesForGroup(widget.groupId);
+      try {
+        final found = allMsgs.firstWhere((m) => m['_id'] == replyId);
+        replyMsg = Map<String, dynamic>.from(found);
+      } catch (_) {
+        // Message not found in local cache — show minimal preview
+        replyMsg = {'_id': replyId, 'text': 'Original message'};
+      }
+    }
+
     if (replyMsg == null) return const SizedBox.shrink();
 
     // FIX: Try multiple paths to get the sender name — the reply map may be
@@ -666,7 +687,41 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       default:      return Icons.insert_drive_file;
     }
   }
+  Widget _buildStatusTick() {
+    final status = widget.message['status']?.toString();
+    final isOptimistic = widget.message['isOptimistic'] == true;
+    final readers = List<String>.from(widget.message['readers'] ?? []);
 
+    if (status == 'sending' || isOptimistic) {
+      return SizedBox(
+        width: 12, height: 12,
+        child: CircularProgressIndicator(
+          strokeWidth: 1.5,
+          valueColor: AlwaysStoppedAnimation(Colors.white60),
+        ),
+      );
+    }
+
+    if (status == 'failed') {
+      return const Icon(Icons.error_outline, size: 13, color: Colors.redAccent);
+    }
+
+    final readByOthers = readers.length > 1;
+    if (readByOthers) {
+      return Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.done_all, size: 13, color: Colors.lightBlueAccent),
+        const SizedBox(width: 2),
+        Text('${readers.length - 1}',
+            style: const TextStyle(fontSize: 11, color: Colors.white60)),
+      ]);
+    }
+
+    if (readers.isNotEmpty) {
+      return const Icon(Icons.done_all, size: 13, color: Colors.white60);
+    }
+
+    return const Icon(Icons.done, size: 13, color: Colors.white60);
+  }
   // ════════════════════════════════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════════════════════════════════
@@ -675,7 +730,10 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     final text = widget.message['text']?.toString() ?? '';
     final timestamp = widget.message['createdAt']?.toString() ?? '';
     final readers = List<String>.from(widget.message['readers'] ?? []);
-    final hasReply = widget.message['replyToMessage'] != null;
+    final hasReply = widget.message['replyToMessage'] != null ||
+        (widget.message['replyTo'] != null &&
+            widget.message['replyTo'] is String &&
+            (widget.message['replyTo'] as String).isNotEmpty);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -737,16 +795,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                       const SizedBox(height: 4),
 
                       // Time + read ticks
+                      // NEW
                       Row(mainAxisSize: MainAxisSize.min, children: [
                         Text(_formatTime(timestamp),
                             style: TextStyle(fontSize: 11,
                                 color: _isMe ? Colors.white60 : Colors.grey[500])),
-                        if (_isMe && readers.isNotEmpty) ...[
+                        if (_isMe) ...[
                           const SizedBox(width: 5),
-                          const Icon(Icons.done_all, size: 13, color: Colors.white60),
-                          const SizedBox(width: 2),
-                          Text('${readers.length}',
-                              style: const TextStyle(fontSize: 11, color: Colors.white60)),
+                          _buildStatusTick(),
                         ],
                         if (widget.message['isEdited'] == true) ...[
                           const SizedBox(width: 5),

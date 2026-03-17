@@ -145,26 +145,28 @@ class SocketService {
   void _setupEventListeners() {
     if (_socket == null) return;
 
-    // Clean up before re-registering
+    // Clean up personal chat listeners before re-registering
     _socket!.off("receive");
     _socket!.off("receiveVoiceMessage");
     _socket!.off("receiveFileMessage");
     _socket!.off("messageDeleted");
     _socket!.off("messageEdited");
     _socket!.off("readStatusUpdated");
-    // Group events are managed by GroupChatProvider — no streams needed here,
-    // but we off() them on reconnect so GroupChatProvider's re-registration is clean.
+
+
+    _socket!.off("groupMessageEdited");
+    _socket!.off("groupMessageDeleted");
+
+    // Keep old names too just in case
     _socket!.off("groupMessage");
     _socket!.off("groupVoiceMessage");
     _socket!.off("groupFileMessage");
-    _socket!.off("groupMessageEdited");
-    _socket!.off("groupMessageDeleted");
 
     _socket!.onAny((event, data) {
       print('🔔 [Socket ANY] event=$event | data=$data');
     });
 
-    // ── Personal chat: text ─────────────────────────────────────────────
+    // ── Personal chat: text ──────────────────────────────────────────────
     _socket!.on("receive", (data) {
       try {
         final Map<String, dynamic> raw =
@@ -179,7 +181,7 @@ class SocketService {
       } catch (e) { print("Error parsing receive: $e"); }
     });
 
-    // ── Personal chat: voice ────────────────────────────────────────────
+    // ── Personal chat: voice ─────────────────────────────────────────────
     _socket!.on("receiveVoiceMessage", (data) {
       try {
         final Map<String, dynamic> raw =
@@ -194,7 +196,7 @@ class SocketService {
       } catch (e) { print("Error parsing receiveVoiceMessage: $e"); }
     });
 
-    // ── Personal chat: file ─────────────────────────────────────────────
+    // ── Personal chat: file ──────────────────────────────────────────────
     _socket!.on("receiveFileMessage", (data) {
       try {
         final Map<String, dynamic> raw =
@@ -209,7 +211,7 @@ class SocketService {
       } catch (e) { print("Error parsing receiveFileMessage: $e"); }
     });
 
-    // ── Personal chat: delete ───────────────────────────────────────────
+    // ── Personal chat: delete ────────────────────────────────────────────
     _socket!.on("messageDeleted", (data) {
       try {
         final Map<String, dynamic> deleteData =
@@ -223,7 +225,7 @@ class SocketService {
       } catch (e) { print("Error parsing messageDeleted: $e"); }
     });
 
-    // ── Personal chat: edit ─────────────────────────────────────────────
+    // ── Personal chat: edit ──────────────────────────────────────────────
     _socket!.on("messageEdited", (data) {
       try {
         final Map<String, dynamic> editData =
@@ -237,7 +239,7 @@ class SocketService {
       } catch (e) { print("Error parsing messageEdited: $e"); }
     });
 
-    // ── Personal chat: read status ──────────────────────────────────────
+    // ── Personal chat: read status ───────────────────────────────────────
     _socket!.on("readStatusUpdated", (data) {
       try {
         final Map<String, dynamic> readData =
@@ -254,6 +256,21 @@ class SocketService {
     print('🎯 Socket event listeners setup complete');
   }
 
+  void joinGroup(String groupId) {
+    if (_isConnected && _socket != null) {
+      _socket!.emit('joinGroup', groupId);
+      print('👥 [Socket] Joined group room: $groupId');
+    } else {
+      print('⚠️ [Socket] Cannot join group — socket not connected');
+    }
+  }
+
+  void leaveGroup(String groupId) {
+    if (_isConnected && _socket != null) {
+      _socket!.emit('leaveGroup', groupId);
+      print('👋 [Socket] Left group room: $groupId');
+    }
+  }
   // ════════════════════════════════════════════════════════════════════════
   //  RECONNECT
   // ════════════════════════════════════════════════════════════════════════
@@ -396,11 +413,16 @@ class SocketService {
         _socket!.off("messageDeleted");
         _socket!.off("messageEdited");
         _socket!.off("readStatusUpdated");
+        // New group event names
+        _socket!.off("receiveGroupMessage");
+        _socket!.off("receiveGroupVoiceMessage");
+        _socket!.off("receiveGroupFileMessage");
+        _socket!.off("groupMessageEdited");
+        _socket!.off("groupMessageDeleted");
+        // Old group event names (just in case)
         _socket!.off("groupMessage");
         _socket!.off("groupVoiceMessage");
         _socket!.off("groupFileMessage");
-        _socket!.off("groupMessageEdited");
-        _socket!.off("groupMessageDeleted");
         _socket!.disconnect();
         _socket!.dispose();
         _socket = null;

@@ -546,90 +546,127 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.people_outline,
-              size: 64,
-              color: Colors.white.withOpacity(0.3),
-            ),
+            Icon(Icons.people_outline, size: 64,
+                color: Colors.white.withOpacity(0.3)),
             const SizedBox(height: 16),
-            Text(
-              'Waiting for participants...',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.6),
-                fontSize: 16,
-              ),
-            ),
+            Text('Waiting for participants...',
+                style: TextStyle(
+                    color: Colors.white.withOpacity(0.6), fontSize: 16)),
           ],
         ),
       );
     }
 
     final count = _participantTracks.length;
-    final columns = count == 1 ? 1 : count == 2 ? 2 : count <= 4 ? 2 : 3;
 
-    return Container(
-      color: const Color(0xFF1A1A1A),
-      padding: const EdgeInsets.all(12),
-      child: GridView.builder(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: columns,
-          childAspectRatio: 16 / 9,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-        ),
-        itemCount: _participantTracks.length,
-        itemBuilder: (context, index) {
-          return _buildParticipantTile(_participantTracks[index]);
-        },
+    // 1 participant — full screen
+    if (count == 1) {
+      return _buildParticipantTile(_participantTracks[0], flex: true);
+    }
+
+    // 2 participants — split screen vertically (like WhatsApp 1-on-1)
+    if (count == 2) {
+      return Column(
+        children: [
+          Expanded(child: _buildParticipantTile(_participantTracks[0], flex: true)),
+          const SizedBox(height: 2),
+          Expanded(child: _buildParticipantTile(_participantTracks[1], flex: true)),
+        ],
+      );
+    }
+
+    // 3 participants — one on top full width, two on bottom
+    if (count == 3) {
+      return Column(
+        children: [
+          Expanded(
+            child: _buildParticipantTile(_participantTracks[0], flex: true),
+          ),
+          const SizedBox(height: 2),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _buildParticipantTile(_participantTracks[1], flex: true)),
+                const SizedBox(width: 2),
+                Expanded(child: _buildParticipantTile(_participantTracks[2], flex: true)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 4 participants — 2x2 grid
+    if (count == 4) {
+      return Column(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _buildParticipantTile(_participantTracks[0], flex: true)),
+                const SizedBox(width: 2),
+                Expanded(child: _buildParticipantTile(_participantTracks[1], flex: true)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _buildParticipantTile(_participantTracks[2], flex: true)),
+                const SizedBox(width: 2),
+                Expanded(child: _buildParticipantTile(_participantTracks[3], flex: true)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 5+ participants — scrollable 2-column grid
+    return GridView.builder(
+      padding: EdgeInsets.zero,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 3 / 4,
+        crossAxisSpacing: 2,
+        mainAxisSpacing: 2,
       ),
+      itemCount: count,
+      itemBuilder: (context, index) =>
+          _buildParticipantTile(_participantTracks[index]),
     );
   }
 
-  Widget _buildParticipantTile(ParticipantTrack track) {
+  Widget _buildParticipantTile(ParticipantTrack track, {bool flex = false}) {
     final participant = track.participant;
     final isLocal = participant is LocalParticipant;
     final videoTrack = track.videoTrack;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF2A2A2A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isLocal ? const Color(0xFF2196F3) : Colors.transparent,
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (videoTrack != null && !videoTrack.muted)
-              VideoTrackRenderer(
-                videoTrack,
-                fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              )
-            else
-              _buildVideoPlaceholder(participant),
+    final tile = Stack(
+      fit: StackFit.expand,
+      children: [
+        // Video or placeholder
+        if (videoTrack != null && !videoTrack.muted)
+          VideoTrackRenderer(
+            videoTrack,
+            fit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+          )
+        else
+          _buildVideoPlaceholder(participant),
 
-            Positioned(
-              left: 12,
-              bottom: 12,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
+        // Name + mic badge at bottom
+        Positioned(
+          left: 8,
+          bottom: 8,
+          right: 8,
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                  borderRadius: BorderRadius.circular(8),
+                  color: Colors.black.withOpacity(0.6),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -641,32 +678,56 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                       color: participant.isMicrophoneEnabled()
                           ? Colors.white
                           : Colors.red,
-                      size: 16,
+                      size: 14,
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 4),
                     Text(
-                      isLocal ? 'You' : participant.identity,
+                      isLocal ? 'You' : (participant.name.isNotEmpty ? participant.name : participant.identity),
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 13,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
+
+        // Blue border for local participant
+        if (isLocal)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: const Color(0xFF2196F3),
+                    width: 2,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+
+    // When flex=true the parent already sizes via Expanded/Column
+    // When flex=false (grid) just return the tile directly
+    return Container(
+      color: const Color(0xFF1A1A1A),
+      child: tile,
     );
   }
 
   Widget _buildVideoPlaceholder(Participant participant) {
     final isLocal = participant is LocalParticipant;
-    final initial = (isLocal ? 'You' : participant.identity)
-        .substring(0, 1)
-        .toUpperCase();
+    final displayName = isLocal
+        ? 'You'
+        : (participant.name.isNotEmpty ? participant.name : participant.identity);
+    final initial = displayName.substring(0, 1).toUpperCase();
 
     return Container(
       decoration: BoxDecoration(
@@ -1326,7 +1387,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Widget _buildParticipantListItem(ParticipantTrack track) {
     final participant = track.participant;
     final isLocal = participant is LocalParticipant;
-    final name = isLocal ? 'You' : participant.identity;
+    final name = isLocal
+        ? 'You'
+        : (participant.name.isNotEmpty ? participant.name : participant.identity);
     final provider = context.watch<MeetingProvider>();
 
     return Container(

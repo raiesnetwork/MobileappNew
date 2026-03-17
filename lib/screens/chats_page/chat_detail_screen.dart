@@ -72,7 +72,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _chatProvider = context.read<PersonalChatProvider>();
       _notificationProvider = context.read<NotificationProvider>();
+
+      // ✅ Auto scroll when new message arrives via socket
+      _chatProvider.onNewMessageReceived = () {
+        if (mounted) _scrollToBottom();
+      };
+
       await _initializeChatNotifications();
+      _chatProvider.clearUnreadCount(widget.userId);
       await _chatProvider.fetchConversation(widget.userId);
       await _chatProvider.updateReadStatus(
         senderId: widget.userId,
@@ -1284,6 +1291,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _chatProvider.onNewMessageReceived = null; // ✅ clear callbac
     _recordingTimer?.cancel();
     if (_userId != null) {
       try {
