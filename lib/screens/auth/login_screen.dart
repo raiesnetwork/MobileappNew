@@ -11,7 +11,6 @@ import '../../providers/auth_provider.dart';
 import '../../services/google_auth_service.dart';
 import 'signup_screen.dart';
 import 'otp_screen.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -20,12 +19,19 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _mobileController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _isPasswordLogin = true;
+
+  AnimationController? _fadeController;
+  Animation<double>? _fadeAnimation;
+  Animation<Offset>? _slideAnimation;
+
+  final GoogleAuthService _googleAuthService = GoogleAuthService();
 
   Country _selectedCountry = Country(
     phoneCode: '91',
@@ -41,91 +47,82 @@ class _LoginScreenState extends State<LoginScreen> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _fadeController = controller;
+    _fadeAnimation = CurvedAnimation(
+      parent: controller,
+      curve: Curves.easeOut,
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: controller,
+      curve: Curves.easeOut,
+    ));
+    controller.forward();
+  }
+
+  @override
   void dispose() {
     _mobileController.dispose();
     _passwordController.dispose();
+    _fadeController?.dispose();
     super.dispose();
   }
 
-  // Get the expected phone number length for the selected country
   int _getPhoneNumberLength() {
-    // Common phone number lengths by country code
     final lengthMap = {
-      '1': 10,   // US, Canada
-      '44': 10,  // UK
-      '91': 10,  // India
-      '86': 11,  // China
-      '81': 10,  // Japan
-      '49': 11,  // Germany
-      '33': 9,   // France
-      '39': 10,  // Italy
-      '34': 9,   // Spain
-      '61': 9,   // Australia
-      '7': 10,   // Russia
-      '55': 11,  // Brazil
-      '52': 10,  // Mexico
-      '27': 9,   // South Africa
-      '82': 10,  // South Korea
-      '971': 9,  // UAE
-      '966': 9,  // Saudi Arabia
-      '65': 8,   // Singapore
-      '60': 10,  // Malaysia
-      '62': 11,  // Indonesia
-      '63': 10,  // Philippines
-      '84': 9,   // Vietnam
-      '66': 9,   // Thailand
-      '92': 10,  // Pakistan
-      '880': 10, // Bangladesh
+      '1': 10, '44': 10, '91': 10, '86': 11, '81': 10,
+      '49': 11, '33': 9, '39': 10, '34': 9, '61': 9,
+      '7': 10, '55': 11, '52': 10, '27': 9, '82': 10,
+      '971': 9, '966': 9, '65': 8, '60': 10, '62': 11,
+      '63': 10, '84': 9, '66': 9, '92': 10, '880': 10,
     };
-
-    return lengthMap[_selectedCountry.phoneCode] ?? 10; // Default to 10
+    return lengthMap[_selectedCountry.phoneCode] ?? 10;
   }
 
-  // Get minimum acceptable length (usually 1-2 digits less)
-  int _getMinPhoneNumberLength() {
-    return _getPhoneNumberLength() - 2;
-  }
+  int _getMinPhoneNumberLength() => _getPhoneNumberLength() - 2;
 
   void _handleForgotPassword() {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ForgotPasswordScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => ForgotPasswordScreen()),
     );
   }
 
   Future<void> _sendOTP() async {
     if (!_formKey.currentState!.validate()) return;
-
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final mobile =
         '+${_selectedCountry.phoneCode}${_mobileController.text.trim()}';
-
-    print('LoginScreen: Sending OTP to: $mobile');
-
     final success = await authProvider.sendOTP(mobile);
-
     if (!mounted) return;
-
     if (success) {
-      print('LoginScreen: OTP sent successfully');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('OTP sent successfully to $mobile'),
-          backgroundColor: Colors.green,
+          content: Text('OTP sent to $mobile'),
+          backgroundColor: const Color(0xFF6C3FE8),
+          behavior: SnackBarBehavior.floating,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => OTPScreen(mobile: mobile),
-        ),
+        MaterialPageRoute(builder: (context) => OTPScreen(mobile: mobile)),
       );
     } else {
-      print('LoginScreen: OTP sending failed');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(authProvider.errorMessage),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
@@ -133,34 +130,46 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _handlePasswordLogin() async {
     if (!_formKey.currentState!.validate()) return;
-
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final mobile =
         '+${_selectedCountry.phoneCode}${_mobileController.text.trim()}';
     final password = _passwordController.text.trim();
-
-    print('Logging in with password for: $mobile');
-
-    final result = await authProvider.login(
-      mobile: mobile,
-      password: password,
-    );
-
+    final result = await authProvider.login(mobile: mobile, password: password);
     if (!mounted) return;
-
     if (result['success']) {
-      print('Login successful');
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => const MainScreen(initialIndex: 0),
-        ),
+            builder: (context) => const MainScreen(initialIndex: 0)),
       );
     } else {
-      print('Login failed: ${result['message']}');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result['message']),
-          backgroundColor: Colors.red,
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    final result = await _googleAuthService.signInWithGoogle();
+    if (!mounted) return;
+    if (result.success && result.token != null) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+            builder: (context) => const MainScreen(initialIndex: 0)),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.message ?? 'Google Sign-In failed.'),
+          backgroundColor: Colors.redAccent,
+          behavior: SnackBarBehavior.floating,
+          shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
@@ -169,305 +178,388 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      resizeToAvoidBottomInset: true, // ← IMPORTANT: Allow screen to resize
+      resizeToAvoidBottomInset: true,
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [
-              Color.fromARGB(165, 55, 0, 255),
-              Color.fromARGB(70, 179, 154, 219)
+              Color(0xFF1A0050),
+              Color(0xFF3700BB),
+              Color(0xFF6C3FE8),
             ],
+            stops: [0.0, 0.5, 1.0],
           ),
         ),
-        child: SingleChildScrollView( // ← WRAP EVERYTHING IN SCROLLVIEW
-          physics: const ClampingScrollPhysics(), // Smooth iOS/Android feel
-          child: Padding(
+        child: SafeArea(
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
             padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom, // Push up above keyboard
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Logo Section
-                SizedBox(height: 8.h), // Add some top padding
-                Container(
-                  alignment: Alignment.center,
-                  child: Image.asset(
-                    Images.LogoTrans,
-                    height: 24.h,
-                  ),
-                ),
-                SizedBox(height: 4.h),
+            child: FadeTransition(
+              opacity: _fadeAnimation ?? const AlwaysStoppedAnimation(1.0),
+              child: SlideTransition(
+                position: _slideAnimation ??
+                    const AlwaysStoppedAnimation(Offset.zero),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      SizedBox(height: 3.h),
 
-                // Form Card
-                Container(
-                  width: double.infinity,
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.2),
-                      width: 1,
-                    ),
-                    color: Colors.white.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // === ALL YOUR EXISTING FIELDS (UNCHANGED) ===
-                          CustomTextField(
-                            controller: _mobileController,
-                            labelText: 'Mobile Number',
-                            keyboardType: TextInputType.phone,
-                            inputFormatters: [
-                              FilteringTextInputFormatter.digitsOnly,
-                              LengthLimitingTextInputFormatter(15),
-                            ],
-                            prefix: InkWell(
-                              onTap: () {
-                                showCountryPicker(
-                                  context: context,
-                                  showPhoneCode: true,
-                                  countryListTheme: CountryListThemeData(
-                                    backgroundColor: Colors.black,
-                                    textStyle: const TextStyle(color: Colors.white),
-                                    searchTextStyle: const TextStyle(color: Colors.white),
-                                    bottomSheetHeight: 500,
-                                    inputDecoration: const InputDecoration(
-                                      hintText: 'Search country...',
-                                      hintStyle: TextStyle(color: Colors.white70),
-                                      prefixIcon: Icon(Icons.search, color: Colors.white70),
-                                      border: OutlineInputBorder(
-                                        borderSide: BorderSide(color: Colors.white),
+                      // ── Logo ──────────────────────────────────────
+                      Hero(
+                        tag: 'app_logo',
+                        child: Image.asset(
+                          Images.LogoTrans,
+                          height: 18.h,
+                        ),
+                      ),
+                      SizedBox(height: 1.5.h),
+
+                      // ── Tagline ───────────────────────────────────
+                      Text(
+                        'Welcome back',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22.sp,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Sign in to continue',
+                        style: TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12.sp,
+                        ),
+                      ),
+                      SizedBox(height: 2.5.h),
+
+                      // ── Form Card ─────────────────────────────────
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.13),
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.22),
+                            width: 1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.15),
+                              blurRadius: 30,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+                        child: Form(
+                          key: _formKey,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              // ── Mobile Field ──────────────────────
+                              CustomTextField(
+                                controller: _mobileController,
+                                labelText: 'Mobile Number',
+                                keyboardType: TextInputType.phone,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                  LengthLimitingTextInputFormatter(15),
+                                ],
+                                prefix: InkWell(
+                                  onTap: () {
+                                    showCountryPicker(
+                                      context: context,
+                                      showPhoneCode: true,
+                                      countryListTheme: CountryListThemeData(
+                                        backgroundColor: const Color(0xFF1A0050),
+                                        textStyle: const TextStyle(
+                                            color: Colors.white),
+                                        searchTextStyle: const TextStyle(
+                                            color: Colors.white),
+                                        bottomSheetHeight: 500,
+                                        inputDecoration: const InputDecoration(
+                                          hintText: 'Search country...',
+                                          hintStyle: TextStyle(
+                                              color: Colors.white54),
+                                          prefixIcon: Icon(Icons.search,
+                                              color: Colors.white54),
+                                          border: OutlineInputBorder(
+                                            borderSide: BorderSide(
+                                                color: Colors.white30),
+                                          ),
+                                        ),
                                       ),
+                                      onSelect: (Country country) {
+                                        setState(() {
+                                          _selectedCountry = country;
+                                          _mobileController.clear();
+                                        });
+                                      },
+                                    );
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          _selectedCountry.flagEmoji,
+                                          style: const TextStyle(fontSize: 18),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          '+${_selectedCountry.phoneCode}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const Icon(Icons.arrow_drop_down,
+                                            color: Colors.black45, size: 18),
+                                      ],
                                     ),
                                   ),
-                                  onSelect: (Country country) {
-                                    setState(() {
-                                      _selectedCountry = country;
-                                      _mobileController.clear();
-                                    });
-                                  },
-                                );
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.only(right: 8.0),
+                                ),
+                                validator: (value) {
+                                  if (value == null || value.isEmpty) {
+                                    return 'Please enter your mobile number';
+                                  }
+                                  if (value.length < _getMinPhoneNumberLength()) {
+                                    return 'Number too short for ${_selectedCountry.name}';
+                                  }
+                                  if (value.length >
+                                      _getPhoneNumberLength() + 2) {
+                                    return 'Number too long for ${_selectedCountry.name}';
+                                  }
+                                  return null;
+                                },
+                              ),
+                              const SizedBox(height: 12),
+
+                              // ── Login Method Toggle ───────────────
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                padding: const EdgeInsets.all(4),
                                 child: Row(
-                                  mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Text(
-                                      _selectedCountry.flagEmoji,
-                                      style: const TextStyle(fontSize: 20),
-                                    ),
+                                    _buildToggleTab('Password', true),
                                     const SizedBox(width: 4),
-                                    Text(
-                                      '+${_selectedCountry.phoneCode}',
-                                      style: const TextStyle(
-                                        color: Colors.black,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const Icon(
-                                      Icons.arrow_drop_down,
-                                      color: Colors.black54,
-                                    ),
+                                    _buildToggleTab('OTP', false),
                                   ],
                                 ),
                               ),
-                            ),
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter your mobile number';
-                              }
-                              final minLength = _getMinPhoneNumberLength();
-                              final expectedLength = _getPhoneNumberLength();
+                              const SizedBox(height: 12),
 
-                              if (value.length < minLength) {
-                                return 'Number too short for ${_selectedCountry.name}';
-                              }
-                              if (value.length > expectedLength + 2) {
-                                return 'Number too long for ${_selectedCountry.name}';
-                              }
-                              return null;
-                            },
-                          ),
-                          const SizedBox(height: 11),
-                          // ... rest of your fields (ChoiceChip, password, buttons, etc.)
-                          // KEEP EVERYTHING EXACTLY THE SAME BELOW
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ChoiceChip(
-                                  label: const Text('Password'),
-                                  selected: _isPasswordLogin,
-                                  selectedColor: const Color.fromARGB(187, 119, 0, 255),
-                                  backgroundColor: Colors.white.withOpacity(0.8),
-                                  labelStyle: TextStyle(
-                                    color: _isPasswordLogin ? Colors.white : Colors.black,
+                              // ── Password Field ────────────────────
+                              if (_isPasswordLogin) ...[
+                                CustomTextField(
+                                  controller: _passwordController,
+                                  labelText: 'Password',
+                                  obscureText: _obscurePassword,
+                                  prefixIcon: const Icon(Icons.lock_outline,
+                                      size: 20),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(
+                                      _obscurePassword
+                                          ? Icons.visibility_outlined
+                                          : Icons.visibility_off_outlined,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => setState(
+                                            () => _obscurePassword = !_obscurePassword),
                                   ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    side: BorderSide.none,
-                                  ),
-                                  onSelected: (selected) {
-                                    setState(() {
-                                      _isPasswordLogin = true;
-                                    });
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter your password';
+                                    }
+                                    return null;
                                   },
                                 ),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: TextButton(
+                                    onPressed: _handleForgotPassword,
+                                    style: TextButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4, vertical: 2),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                    child: const Text(
+                                      'Forgot Password?',
+                                      style: TextStyle(
+                                        color: Color(0xFFAA8DFF),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+
+                              SizedBox(height: _isPasswordLogin ? 6 : 4),
+
+                              // ── Primary Login Button ──────────────
+                              Consumer<AuthProvider>(
+                                builder: (context, authProvider, _) {
+                                  return ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF6C3FE8),
+                                      foregroundColor: Colors.white,
+                                      elevation: 0,
+                                      minimumSize: const Size(double.infinity, 52),
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14, horizontal: 24),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                    ),
+                                    onPressed: authProvider.isLoading
+                                        ? null
+                                        : (_isPasswordLogin
+                                        ? _handlePasswordLogin
+                                        : _sendOTP),
+                                    child: authProvider.isLoading
+                                        ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white),
+                                    )
+                                        : Text(
+                                      _isPasswordLogin ? 'Login' : 'Send OTP',
+                                      style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        letterSpacing: 0.3,
+                                        height: 1.0,
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: ChoiceChip(
-                                  label: const Text('OTP'),
-                                  selected: !_isPasswordLogin,
-                                  selectedColor: const Color.fromARGB(187, 119, 0, 255),
-                                  backgroundColor: Colors.white.withOpacity(0.8),
-                                  labelStyle: TextStyle(
-                                    color: !_isPasswordLogin ? Colors.white : Colors.black,
+
+                              const SizedBox(height: 14),
+
+                              // ── Divider ───────────────────────────
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Divider(
+                                      color: Colors.white.withOpacity(0.25),
+                                      thickness: 1,
+                                    ),
                                   ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    side: BorderSide.none,
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12),
+                                    child: Text(
+                                      'or',
+                                      style: TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 12,
+                                      ),
+                                    ),
                                   ),
-                                  onSelected: (selected) {
-                                    setState(() {
-                                      _isPasswordLogin = false;
-                                    });
-                                  },
+                                  Expanded(
+                                    child: Divider(
+                                      color: Colors.white.withOpacity(0.25),
+                                      thickness: 1,
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              const SizedBox(height: 14),
+
+                              // ── Google Sign-In Button ─────────────
+                              SizedBox(
+                                height: 52,
+                                child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    backgroundColor: Colors.white.withOpacity(0.15),
+                                    foregroundColor: Colors.white,
+                                    side: BorderSide(color: Colors.white.withOpacity(0.4), width: 1),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    elevation: 0,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16),
+                                  ),
+                                  onPressed: _handleGoogleSignIn,
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      // Google "G" SVG-style icon via custom paint
+                                      _GoogleIcon(size: 20),
+                                      const SizedBox(width: 10),
+                                      const Text(
+                                        'Continue with Google',
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.white,
+                                          letterSpacing: 0.1,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 14),
-                          if (_isPasswordLogin) ...[
-                            CustomTextField(
-                              controller: _passwordController,
-                              labelText: 'Password',
-                              obscureText: _obscurePassword,
-                              prefixIcon: const Icon(Icons.lock),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword ? Icons.visibility : Icons.visibility_off,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _obscurePassword = !_obscurePassword;
-                                  });
-                                },
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Please enter your password';
-                                }
-                                return null;
-                              },
-                            ),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: _handleForgotPassword,
-                                child: const Text(
-                                  'Forgot Password?',
-                                  style: TextStyle(
-                                    color: Colors.blue,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                          SizedBox(height: 4.h),
-                          Consumer<AuthProvider>(
-                            builder: (context, authProvider, child) {
-                              return Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 50),
-                                child: ElevatedButton(
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Color.fromARGB(187, 119, 0, 255),
-                                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  onPressed: authProvider.isLoading
-                                      ? null
-                                      : (_isPasswordLogin ? _handlePasswordLogin : _sendOTP),
-                                  child: authProvider.isLoading
-                                      ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2, color: Colors.white),
-                                  )
-                                      : Text(
-                                    _isPasswordLogin ? 'Login' : 'Send OTP',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 50),
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.black,
-                                elevation: 2,
-                                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  side: const BorderSide(color: Colors.grey),
-                                ),
-                              ),
-                              icon: const Icon(
-                                Icons.g_mobiledata,
-                                size: 32,
-                                color: Color(0xFF4285F4),
-                              ),
-                              label: const Text(
-                                'Sign in with Google',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              onPressed: () async {
-                                await handleGoogleSignIn();
-                              },
+                        ),
+                      ),
+
+                      SizedBox(height: 2.h),
+
+                      // ── Sign Up Link ──────────────────────────────
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            "Don't have an account? ",
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 13.sp,
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          TextButton(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => SignupScreen(),
-                                ),
-                              );
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => SignupScreen()));
                             },
                             child: Text(
-                              'Don\'t have an account? Sign Up',
-                              style: TextStyle(color: Colors.blue),
+                              'Sign Up',
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 13.sp,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ),
+
+                      SizedBox(height: 2.h),
+                    ],
                   ),
                 ),
-                SizedBox(height: 4.h), // Extra bottom padding
-              ],
+              ),
             ),
           ),
         ),
@@ -475,31 +567,64 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    serverClientId: '71249839379-7seogt3fsiuki5ngl7bplqudb1ib9une.apps.googleusercontent.com',
-    scopes: ['email', 'profile'],
-  );
-
-  Future<void> handleGoogleSignIn() async {
-    try {
-      final account = await _googleSignIn.signIn();
-      if (account != null) {
-        print('✅ Signed in: ${account.displayName} (${account.email})');
-        // Handle successful sign-in here
-        // You can navigate to the main screen or call your backend API
-      } else {
-        print('⚠️ User canceled sign-in.');
-      }
-    } catch (error) {
-      print('❌ Sign-In Error: $error');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Google Sign-In failed: $error'),
-            backgroundColor: Colors.red,
+  Widget _buildToggleTab(String label, bool isPassword) {
+    final bool isSelected =
+        (isPassword && _isPasswordLogin) || (!isPassword && !_isPasswordLogin);
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _isPasswordLogin = isPassword),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? const Color(0xFF6C3FE8)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
           ),
-        );
-      }
-    }
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isSelected ? Colors.white : Colors.white54,
+              fontSize: 13,
+              fontWeight:
+              isSelected ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Google "G" Icon ──────────────────────────────────────────────────────────
+class _GoogleIcon extends StatelessWidget {
+  final double size;
+  const _GoogleIcon({required this.size});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withOpacity(0.25),
+      ),
+      child: Center(
+        child: Text(
+          'G',
+          style: TextStyle(
+            fontSize: size * 0.60,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            height: 1.15,
+            letterSpacing: 0,
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -16,19 +16,29 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
+  bool _hasFetched = false; // ✅ Prevent multiple fetches
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Fetch data when dependencies change (i.e., when the provider is available)
-    final provider = Provider.of<AnnouncementProvider>(context, listen: false);
-    provider.fetchDashboardCounts().then((_) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+  void initState() {
+    super.initState();
+    // ✅ Use post-frame callback to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadData();
     });
+  }
+
+  Future<void> _loadData() async {
+    if (_hasFetched) return;
+    _hasFetched = true;
+
+    final provider = Provider.of<AnnouncementProvider>(context, listen: false);
+    await provider.fetchDashboardCounts();
+
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   // Helper method to build notification badge
@@ -43,22 +53,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         decoration: BoxDecoration(
           color: Colors.red,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white,
-            width: 2,
-          ),
+          border: Border.all(color: Colors.white, width: 2),
           boxShadow: const [
-            BoxShadow(
-              color: Colors.black26,
-              blurRadius: 4,
-              offset: Offset(0, 2),
-            ),
+            BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
           ],
         ),
-        constraints: const BoxConstraints(
-          minWidth: 24,
-          minHeight: 24,
-        ),
+        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
         child: Text(
           count > 99 ? '99+' : count.toString(),
           style: const TextStyle(
@@ -94,20 +94,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 8),
               Text(
                 'Overview of your activities',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
               ),
               const SizedBox(height: 30),
 
-              // Dashboard Cards or Loading Indicator
               _isLoading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              )
                   : Expanded(
                 child: Consumer2<AnnouncementProvider, NotificationProvider>(
                   builder: (context, announcementProvider, notificationProvider, _) {
-                    // Get notification counts for each category
                     final communityCount = notificationProvider.getUnreadCountForTypes([
                       'community',
                       'GroupRequest',
@@ -126,72 +123,75 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'campaign',
                     ]);
 
-                    return Column(
-                      children: [
-                        // Communities Card with Badge
-                        _buildDashboardCard(
-                          title: 'Communities',
-                          subtitle: 'Total: ${announcementProvider.totalCommunities}',
-                          icon: const Icon(Icons.group, color: Colors.white, size: 28),
-                          color: const Color(0xFFFF4081),
-                          iconColor: Colors.white,
-                          notificationCount: communityCount,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const CommunitiesScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Services Card with Asset Image and Badge
-                        _buildDashboardCard(
-                          title: 'Services',
-                          subtitle: 'Total: ${announcementProvider.totalServices}',
-                          icon: Image.asset(
-                            'assets/icons/service.png',
-                            height: 28,
-                            width: 28,
-                            color: Colors.white,
-                          ),
-                          color: const Color(0xFF2196F3),
-                          iconColor: Colors.white,
-                          notificationCount: servicesCount,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const ServicesScreen(),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Campaigns Card with Badge
-                        _buildDashboardCard(
-                          title: 'Campaigns',
-                          subtitle: 'Total: ${announcementProvider.totalCampaigns}',
-                          icon: const Icon(Icons.campaign, color: Colors.white, size: 28),
-                          color: const Color(0xFF4CAF50),
-                          iconColor: Colors.white,
-                          notificationCount: campaignsCount,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => CampaignsScreen(
-                                  buildImageWidget: _buildImageWidget,
-                                  communityId: '',
+                    return RefreshIndicator(
+                      onRefresh: () async {
+                        _hasFetched = false;
+                        await _loadData();
+                      },
+                      child: ListView(
+                        children: [
+                          _buildDashboardCard(
+                            title: 'Communities',
+                            subtitle: 'Total: ${announcementProvider.totalCommunities}',
+                            icon: const Icon(Icons.group, color: Colors.white, size: 28),
+                            color: const Color(0xFFFF4081),
+                            iconColor: Colors.white,
+                            notificationCount: communityCount,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const CommunitiesScreen(),
                                 ),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 20),
+
+                          _buildDashboardCard(
+                            title: 'Services',
+                            subtitle: 'Total: ${announcementProvider.totalServices}',
+                            icon: Image.asset(
+                              'assets/icons/service.png',
+                              height: 28,
+                              width: 28,
+                              color: Colors.white,
+                            ),
+                            color: const Color(0xFF2196F3),
+                            iconColor: Colors.white,
+                            notificationCount: servicesCount,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const ServicesScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 20),
+
+                          _buildDashboardCard(
+                            title: 'Campaigns',
+                            subtitle: 'Total: ${announcementProvider.totalCampaigns}',
+                            icon: const Icon(Icons.campaign, color: Colors.white, size: 28),
+                            color: const Color(0xFF4CAF50),
+                            iconColor: Colors.white,
+                            notificationCount: campaignsCount,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => CampaignsScreen(
+                                    buildImageWidget: _buildImageWidget,
+                                    communityId: '',
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
                     );
                   },
                 ),
@@ -254,7 +254,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required Color color,
     required Color iconColor,
     required VoidCallback onTap,
-    int notificationCount = 0, // ✅ NEW: Notification count parameter
+    int notificationCount = 0,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -278,7 +278,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               padding: const EdgeInsets.all(20.0),
               child: Row(
                 children: [
-                  // Icon box
                   Container(
                     width: 50,
                     height: 50,
@@ -289,8 +288,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Center(child: icon),
                   ),
                   const SizedBox(width: 20),
-
-                  // Texts
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -315,7 +312,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-
                   Icon(
                     Icons.arrow_forward_ios,
                     color: Colors.white.withOpacity(0.7),
@@ -325,8 +321,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ),
           ),
-
-          // ✅ Notification Badge
           _buildNotificationBadge(notificationCount),
         ],
       ),

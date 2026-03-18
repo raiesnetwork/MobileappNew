@@ -31,11 +31,14 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   @override
   void initState() {
     super.initState();
-    final provider = Provider.of<CommunityProvider>(context, listen: false);
-    if (provider.communities['message'] == 'Not loaded') {
-      provider.fetchCommunities(page: _currentPage);
-    }
     _searchController.addListener(_onSearchChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final provider = Provider.of<CommunityProvider>(context, listen: false);
+      if (provider.communities['message'] == 'Not loaded') {
+        provider.fetchCommunities(page: _currentPage);
+      }
+    });
   }
 
   @override
