@@ -279,13 +279,11 @@ class _CreateCampaignScreenState extends State<CreateCampaignScreen> {
 
       if (!mounted) return;
 
-      if (!response['error'] && response['campaign'] != null) {
-        print('CreateCampaignScreen - ${widget.campaign != null ? 'Updated' : 'Created'} campaign: ${response['campaign']}');
-        _showSnackBar(response['message'], Colors.green);
+      if (!response['error']) {
+        _showSnackBar(response['message'] ?? 'Campaign created successfully', Colors.green);
         Navigator.pop(context, true);
       } else {
-        _showSnackBar(response['message'] ?? 'Failed to ${widget.campaign != null ? 'update' : 'create'} campaign', Colors.red);
-        print('CreateCampaignScreen - Failed to ${widget.campaign != null ? 'update' : 'create'} campaign: ${response['message']}');
+        _showSnackBar(response['message'] ?? 'Failed to create campaign', Colors.red);
       }
     } catch (e) {
       if (!mounted) return;

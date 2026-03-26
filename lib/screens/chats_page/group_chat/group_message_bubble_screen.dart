@@ -11,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../providers/group_provider.dart';
+import '../../home/feedpage/feed_screen.dart';
 import '../view_file_screen.dart';
 
 class GroupMessageBubble extends StatefulWidget {
@@ -18,6 +19,7 @@ class GroupMessageBubble extends StatefulWidget {
   final String? currentUserId;
   final String groupId;
   final bool showAvatar;
+
   final Function(Map<String, dynamic>)? onReply;
 
   const GroupMessageBubble({
@@ -38,6 +40,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
 
   late final bool _isMe;
   late final String _senderId;
+  // after _isFile declaration
+  late final bool _isSharedPost;
   late final String _senderName;
   late final Map<String, dynamic>? _senderMap;
   late final bool _isAudio;
@@ -62,6 +66,313 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       if (ms is int && ms > 0) _duration = Duration(milliseconds: ms);
     }
   }
+  Widget _buildSharedPost() {
+    // Try nested sharedPost first (future-proof)
+    Map<String, dynamic>? postData =
+    widget.message['sharedPost'] as Map<String, dynamic>?;
+    if (postData == null &&
+        (widget.message['forwerd'] == true ||
+            widget.message['forwerdMessage'] != null)) {
+      final image = widget.message['image']?.toString() ?? '';
+      final text = widget.message['text']?.toString() ?? '';
+      final forwardLabel =
+          widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
+
+      // ✅ Extract actual postId from forwerdUrl
+      // forwerdUrl format: "https://ixes.ai/feeds/6954b0fcfb282e4eb94cee1a"
+      String actualPostId = '';
+      final forwerdUrl = widget.message['forwerdUrl']?.toString() ?? '';
+      if (forwerdUrl.isNotEmpty) {
+        actualPostId = forwerdUrl.split('/').last;
+      }
+      // Fallback to sharedPostId if forwerdUrl not available
+      if (actualPostId.isEmpty) {
+        actualPostId = widget.message['sharedPostId']?.toString() ?? '';
+      }
+
+      print('✅ Group bubble resolved postId: $actualPostId from forwerdUrl: $forwerdUrl');
+
+      postData = {
+        '_id': actualPostId,   // ← FIXED: now uses actual post ID
+        'text': text,
+        'images': image.isNotEmpty ? [image] : [],
+        'authorName': forwardLabel,
+        'authorProfile': '',
+        'likesCount': 0,
+        'commentsCount': 0,
+      };
+    }
+
+
+    if (postData == null) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.share, size: 18,
+              color: _isMe ? Colors.white70 : Colors.grey[600]),
+
+          const SizedBox(width: 6),
+          Text('Shared a post',
+              style: TextStyle(
+                  fontSize: 14,
+                  fontStyle: FontStyle.italic,
+                  color: _isMe ? Colors.white70 : Colors.grey[600])
+          ),
+
+        ],
+
+      );
+
+    }
+    List<dynamic> _resolvePostImages(Map<String, dynamic> postData) {
+      for (final key in ['images', 'image', 'media', 'attachments', 'photos']) {
+        final v = postData[key];
+        if (v is List && v.isNotEmpty) return v;
+        if (v is String && v.isNotEmpty) return [v];
+      }
+      return [];
+    }
+    print('🖼️ sharedPost data: ${jsonEncode(postData)}');
+    print('🖼️ images field: ${postData['images']}');
+
+    final postContent = postData['text']?.toString() ?? '';
+    final postImages = _resolvePostImages(postData);
+    final authorName = postData['authorName']?.toString() ?? 'Unknown';
+    final authorProfile = postData['authorProfile']?.toString();
+    final likesCount = postData['likesCount'] ?? 0;
+    final commentsCount = postData['commentsCount'] ?? 0;
+
+    final postId = postData?['_id']?.toString() ?? '';
+
+    return GestureDetector(
+      onTap: () {
+        if (postId.isEmpty) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => Scaffold(
+              appBar: AppBar(
+                backgroundColor: Colors.white,
+                elevation: 0,
+                leading: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.black),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                title: const Text(
+                  'Post',
+                  style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              body: FeedScreen(postId: postId),
+            ),
+          ),
+        );
+      },
+        child: Container(
+          constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.65),
+          decoration: BoxDecoration(
+        color: _isMe
+            ? Colors.white.withOpacity(0.15)
+            : Colors.grey[100],
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+            color: _isMe
+                ? Colors.white.withOpacity(0.25)
+                : Colors.grey[300]!),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: _isMe
+                  ? Colors.white.withOpacity(0.1)
+                  : Colors.grey[200],
+              borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(10),
+                  topRight: Radius.circular(10)),
+            ),
+            child: Row(children: [
+              Icon(Icons.share,
+                  size: 14,
+                  color: _isMe ? Colors.white60 : Colors.grey[600]),
+              const SizedBox(width: 5),
+              Text('Shared Post',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _isMe ? Colors.white60 : Colors.grey[600])),
+            ]),
+          ),
+
+          // Author
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+            child: Row(children: [
+              CircleAvatar(
+                radius: 14,
+                backgroundColor: _isMe
+                    ? Colors.white.withOpacity(0.3)
+                    : Colors.grey[300],
+                backgroundImage: authorProfile != null &&
+                    authorProfile.isNotEmpty
+                    ? (authorProfile.startsWith('data:image/')
+                    ? MemoryImage(
+                    base64Decode(authorProfile.split(',')[1]))
+                    : NetworkImage(authorProfile) as ImageProvider)
+                    : null,
+                child: authorProfile == null || authorProfile.isEmpty
+                    ? Text(
+                    authorName.isNotEmpty
+                        ? authorName[0].toUpperCase()
+                        : 'U',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color:
+                        _isMe ? Colors.white : Colors.grey[700]))
+                    : null,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(authorName,
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: _isMe ? Colors.white : Colors.black87),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ]),
+          ),
+
+          // Post text
+          if (postContent.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
+              child: Text(postContent,
+                  style: TextStyle(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: _isMe ? Colors.white : Colors.black87),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis),
+            ),
+
+          // Post image
+          if (postImages.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: _buildPostImage(postImages[0]),
+                ),
+              ),
+            ),
+
+
+          // Stats
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            child: Row(children: [
+              Icon(Icons.favorite,
+                  size: 13,
+                  color: _isMe ? Colors.white60 : Colors.grey[500]),
+              const SizedBox(width: 3),
+              Text('$likesCount',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: _isMe ? Colors.white70 : Colors.grey[600])),
+              const SizedBox(width: 12),
+              Icon(Icons.comment,
+                  size: 13,
+                  color: _isMe ? Colors.white60 : Colors.grey[500]),
+              const SizedBox(width: 3),
+              Text('$commentsCount',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: _isMe ? Colors.white70 : Colors.grey[600])),
+              const Spacer(),
+              Text('Tap to view',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color:
+                      _isMe ? Colors.white60 : Colors.blue[600])),
+            ]),
+          ),
+        ],
+      ),
+        ),  // closes Container
+    );   // closes GestureDetector
+  }
+
+  Widget _buildPostImage(dynamic imageData) {
+    String? imageUrl;
+
+    if (imageData is String) {
+      imageUrl = imageData.isNotEmpty ? imageData : null;
+    } else if (imageData is Map) {
+      imageUrl = (imageData['url'] ??
+          imageData['image'] ??
+          imageData['imageUrl'] ??
+          imageData['src'] ??
+          imageData['path'])
+          ?.toString();
+    }
+
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return Container(
+        color: Colors.grey[200],
+        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+      );
+    }
+
+    if (imageUrl.startsWith('data:image/')) {
+      try {
+        return Image.memory(
+          base64Decode(imageUrl.split(',')[1]),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            color: Colors.grey[200],
+            child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+          ),
+        );
+      } catch (_) {
+        return Container(
+          color: Colors.grey[200],
+          child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+        );
+      }
+    }
+
+    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+      imageUrl = 'https://api.ixes.ai/$imageUrl';
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return Center(
+          child: CircularProgressIndicator(strokeWidth: 2),
+        );
+      },
+      errorBuilder: (_, __, ___) => Container(
+        color: Colors.grey[200],
+        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+      ),
+    );
+  }
 
   void _parseMessage() {
     final rawSender = widget.message['senderId'];
@@ -78,6 +389,10 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     _isAudio = widget.message['isAudio'] == true;
     _isFile = widget.message['isFile'] == true ||
         (widget.message['fileUrl'] != null && !_isAudio);
+    _isSharedPost = widget.message['forwerd'] == true ||
+        widget.message['forwerdMessage'] != null ||
+        widget.message['isSharedPost'] == true ||
+        widget.message['sharedPost'] != null;
   }
 
   @override
@@ -785,14 +1100,17 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                       if (hasReply) _buildReplyPreview(),
 
                       // Content
-                      if (_isAudio)
+                      if (_isSharedPost)
+                        _buildSharedPost()
+                      else if (_isAudio)
                         _buildVoiceBubble()
                       else if (_isFile)
-                        _buildFileBubble()
-                      else if (text.isNotEmpty)
-                          GroupClickableText(text: text, isMe: _isMe),
+                          _buildFileBubble()
+                        else if (text.isNotEmpty)
+                            GroupClickableText(text: text, isMe: _isMe),
 
                       const SizedBox(height: 4),
+
 
                       // Time + read ticks
                       // NEW
@@ -824,6 +1142,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     );
   }
 }
+
+
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // GroupClickableText

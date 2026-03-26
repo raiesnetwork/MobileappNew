@@ -12,7 +12,16 @@
           "package_name": "com.ixes.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "71249839379-7seogt3fsiuki5ngl7bplqudb1ib9une.apps.googleusercontent.com",
+          "client_type": 1
+        },
+        {
+          "client_id": "71249839379-icd4lbchoecibeb8o88t8840osc2mgkb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyApy-Ij_Ga2HtU6dX33HqIVunsdNg5qid8"
@@ -20,7 +29,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "71249839379-icd4lbchoecibeb8o88t8840osc2mgkb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

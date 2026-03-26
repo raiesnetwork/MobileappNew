@@ -3,23 +3,39 @@ import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
 
-class CommunityCouponsScreen extends StatelessWidget {
+class CommunityCouponsScreen extends StatefulWidget {
   final String communityId;
 
   const CommunityCouponsScreen({super.key, required this.communityId});
 
   @override
+  State<CommunityCouponsScreen> createState() => _CommunityCouponsScreenState();
+}
+
+class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
+  // Store the future so it doesn't re-fire on every rebuild
+  late Future<Map<String, dynamic>> _couponsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    // Safe to call here — before the first build, no listeners are notified yet
+    _couponsFuture = context
+        .read<CommunityProvider>()
+        .fetchCommunityCoupons(widget.communityId);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final provider = Provider.of<CommunityProvider>(context, listen: false);
-    final couponsFuture = provider.fetchCommunityCoupons(communityId);
+    final provider = context.watch<CommunityProvider>();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Coupons',style: TextStyle(color: Primary),),
+        title: const Text('Coupons', style: TextStyle(color: Primary)),
         backgroundColor: Colors.grey.shade100,
       ),
       body: FutureBuilder<Map<String, dynamic>>(
-        future: couponsFuture,
+        future: _couponsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -41,7 +57,10 @@ class CommunityCouponsScreen extends StatelessWidget {
             return const Center(
               child: Text(
                 'No coupons available',
-                style: TextStyle(fontSize: 16, color: Colors.black87,fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.black87,
+                    fontWeight: FontWeight.bold),
               ),
             );
           }

@@ -147,7 +147,7 @@ class CommentProvider with ChangeNotifier {
     required String commentContent,
     required int offset,
     required int limit,
-    String? communityId, // ✅ Add communityId parameter
+    String? communityId,
   }) async {
     _isPosting = true;
     notifyListeners();
@@ -159,23 +159,55 @@ class CommentProvider with ChangeNotifier {
       );
 
       if (result['success']) {
-        // ✅ Fetch based on feed type
-        if (communityId != null) {
-          await fetchCommunityPosts(
-            communityId: communityId,
-            offset: offset,
-            limit: limit,
-          );
-        } else {
-          await fetchAllPosts(offset: offset, limit: limit);
+        // ✅ Extract real comment data from server response
+        final newCommentData = result['newComment'];
+
+        String userName = '';
+        String profileImage = '';
+
+        if (newCommentData != null) {
+          final userProfile = newCommentData['userId']?['profile'];
+          userName = userProfile?['name']?.toString() ?? '';
+          profileImage = userProfile?['profileImage']?.toString() ?? '';
         }
 
-        // Now call getCommentsForPost after posts are refreshed
-        final updatedComments = getCommentsForPost(postId);
-        print("Updated comments for $postId: $updatedComments");
+        final realComment = Comment(
+          id: newCommentData?['_id']?.toString() ??
+              'temp_${DateTime.now().millisecondsSinceEpoch}',
+          content: commentContent,
+          createdAt: newCommentData?['createdAt']?.toString() ??
+              DateTime.now().toIso8601String(),
+          userName: userName,
+          profileImage: profileImage,
+          isAdmin: false,
+          userId: newCommentData?['userId']?['_id']?.toString() ?? _currentUserId,
+        );
+
+        // ✅ Add real comment instantly to community posts
+        final cIndex = _communityPosts.indexWhere((p) => p.id == postId);
+        if (cIndex != -1) {
+          _communityPosts[cIndex].comments.add(realComment);
+        }
+
+        // ✅ Add real comment instantly to regular posts
+        final pIndex = _posts.indexWhere((p) => p.id == postId);
+        if (pIndex != -1) {
+          _posts[pIndex].comments.add(realComment);
+        }
 
         _isPosting = false;
-        notifyListeners();
+        notifyListeners(); // ✅ UI updates immediately with correct name + photo
+
+        // ✅ Background refresh to sync full post state
+        if (communityId != null) {
+          fetchCommunityPosts(
+            communityId: communityId,
+            offset: 0,
+            limit: _communityPosts.length > limit ? _communityPosts.length : limit,
+          );
+        } else {
+          fetchAllPosts(offset: offset, limit: limit);
+        }
 
         return true;
       } else {
@@ -304,13 +336,26 @@ class CommentProvider with ChangeNotifier {
   }
 
   Future<void> toggleLike(String postId) async {
+    // ✅ Check both _posts and _communityPosts
     final index = _posts.indexWhere((p) => p.id == postId);
-    if (index == -1) return;
+    final cIndex = _communityPosts.indexWhere((p) => p.id == postId);
 
-    // 🔁 Optimistic UI update
-    final isLiked = _posts[index].isLikedByUser;
-    _posts[index].isLikedByUser = !isLiked;
-    _posts[index].likes += isLiked ? -1 : 1;
+    if (index == -1 && cIndex == -1) return;
+
+    // ✅ Get the right post
+    final bool isLiked = index != -1
+        ? _posts[index].isLikedByUser
+        : _communityPosts[cIndex].isLikedByUser;
+
+    // 🔁 Optimistic UI update for both lists
+    if (index != -1) {
+      _posts[index].isLikedByUser = !isLiked;
+      _posts[index].likes += isLiked ? -1 : 1;
+    }
+    if (cIndex != -1) {
+      _communityPosts[cIndex].isLikedByUser = !isLiked;
+      _communityPosts[cIndex].likes += isLiked ? -1 : 1;
+    }
     notifyListeners();
 
     final result = isLiked
@@ -319,8 +364,14 @@ class CommentProvider with ChangeNotifier {
 
     if (!result['success']) {
       // ❌ Revert on failure
-      _posts[index].isLikedByUser = isLiked;
-      _posts[index].likes += isLiked ? 1 : -1;
+      if (index != -1) {
+        _posts[index].isLikedByUser = isLiked;
+        _posts[index].likes += isLiked ? 1 : -1;
+      }
+      if (cIndex != -1) {
+        _communityPosts[cIndex].isLikedByUser = isLiked;
+        _communityPosts[cIndex].likes += isLiked ? 1 : -1;
+      }
       notifyListeners();
     }
   }

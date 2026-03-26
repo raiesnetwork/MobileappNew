@@ -52,7 +52,7 @@ class CommentService {
         print('✅ Comment Posted Successfully');
         return {
           "success": true,
-          "data": decoded['newComment'],
+          "newComment": decoded['newComment'], // ✅ key matches what provider reads
           "message": decoded['message'] ?? "Comment posted successfully"
         };
       } else {

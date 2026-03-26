@@ -16,12 +16,11 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
-  bool _hasFetched = false; // ✅ Prevent multiple fetches
+  bool _hasFetched = false;
 
   @override
   void initState() {
     super.initState();
-    // ✅ Use post-frame callback to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadData();
     });
@@ -41,10 +40,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  // Helper method to build notification badge
   Widget _buildNotificationBadge(int count) {
     if (count == 0) return const SizedBox.shrink();
-
     return Positioned(
       right: 8,
       top: 8,
@@ -82,7 +79,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header
               const Text(
                 'Dashboard',
                 style: TextStyle(
@@ -109,7 +105,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'community',
                       'GroupRequest',
                     ]);
-
                     final servicesCount = notificationProvider.getUnreadCountForTypes([
                       'Service',
                       'Invoice',
@@ -118,7 +113,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'AddProduct',
                       'ServiceReq',
                     ]);
-
                     final campaignsCount = notificationProvider.getUnreadCountForTypes([
                       'campaign',
                     ]);
@@ -135,7 +129,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             subtitle: 'Total: ${announcementProvider.totalCommunities}',
                             icon: const Icon(Icons.group, color: Colors.white, size: 28),
                             color: const Color(0xFFFF4081),
-                            iconColor: Colors.white,
                             notificationCount: communityCount,
                             onTap: () {
                               Navigator.push(
@@ -158,7 +151,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               color: Colors.white,
                             ),
                             color: const Color(0xFF2196F3),
-                            iconColor: Colors.white,
                             notificationCount: servicesCount,
                             onTap: () {
                               Navigator.push(
@@ -176,7 +168,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             subtitle: 'Total: ${announcementProvider.totalCampaigns}',
                             icon: const Icon(Icons.campaign, color: Colors.white, size: 28),
                             color: const Color(0xFF4CAF50),
-                            iconColor: Colors.white,
                             notificationCount: campaignsCount,
                             onTap: () {
                               Navigator.push(
@@ -252,7 +243,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required String subtitle,
     required Widget icon,
     required Color color,
-    required Color iconColor,
     required VoidCallback onTap,
     int notificationCount = 0,
   }) {

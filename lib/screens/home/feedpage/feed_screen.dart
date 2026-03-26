@@ -66,21 +66,11 @@ class _FeedScreenState extends State<FeedScreen> {
   @override
   void initState() {
     super.initState();
-
+    // ✅ Everything inside postFrameCallback — no setState/notifyListeners during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final commentProvider = context.read<CommentProvider>();
-
-      if (isCommunityFeed) {
-        commentProvider.fetchCommunityPosts(
-            communityId: widget.communityId!, offset: 0, limit: 5);
-      } else {
-        commentProvider.fetchAllPosts(offset: 0, limit:5);
-      }
+      _loadInitialData();
+      _setupScrollListener();
     });
-    // _refreshFeed(); // ❌ Remove this line
-
-    _loadInitialData(); // ✅ Keep only this
-    _setupScrollListener();
   }
 
   @override
@@ -182,17 +172,23 @@ class _FeedScreenState extends State<FeedScreen> {
       _currentSearchQuery = '';
     });
 
+    // ── Single post mode: only load the specific post ──────────────────
+    if (widget.postId != null && widget.postId!.isNotEmpty) {
+      await _loadSinglePost(widget.postId!);
+      return;
+    }
+
+    // ── Normal feed mode ───────────────────────────────────────────────
     final provider = context.read<CommentProvider>();
-    Map<String, dynamic>? result;
 
     if (isCommunityFeed) {
-      result = await provider.fetchCommunityPosts(
+      await provider.fetchCommunityPosts(
         communityId: widget.communityId!,
         offset: 0,
         limit: _postsPerPage,
       );
     } else {
-      result = await provider.fetchAllPosts(
+      await provider.fetchAllPosts(
         offset: 0,
         limit: _postsPerPage,
         isRefresh: true,
@@ -200,7 +196,6 @@ class _FeedScreenState extends State<FeedScreen> {
     }
 
     setState(() {
-      // Use communityPosts for community feed, otherwise use posts
       posts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
       _originalPosts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
       _allPostsCache = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
@@ -208,6 +203,51 @@ class _FeedScreenState extends State<FeedScreen> {
       _hasMorePosts = (isCommunityFeed ? provider.communityPosts : provider.posts).length == _postsPerPage;
       isLoading = false;
     });
+  }
+  Future<void> _loadSinglePost(String postId) async {
+    try {
+      final response = await UserAPI().getPostById(postId);
+      print('📡 getPostById response: $response');
+
+      if (response != null && response['success'] == true) {
+        // New API: response shape is { success: true, data: { ... } }
+        final postJson = response['data'] as Map<String, dynamic>?;
+        if (postJson != null) {
+          try {
+            final targetPost = Post.fromJson(postJson);
+            setState(() {
+              posts = [targetPost];
+              _originalPosts = [targetPost];
+              _allPostsCache = [targetPost];
+              _hasMorePosts = false;
+              isLoading = false;
+            });
+            return;
+          } catch (e) {
+            print('Post.fromJson error: $e');
+          }
+        }
+      }
+
+      // Fallback: show normal feed if post not found
+      final provider = context.read<CommentProvider>();
+      await provider.fetchAllPosts(
+        offset: 0,
+        limit: _postsPerPage,
+        isRefresh: true,
+      );
+      setState(() {
+        posts = List.from(provider.posts);
+        _originalPosts = List.from(provider.posts);
+        _allPostsCache = List.from(provider.posts);
+        _currentPage = 1;
+        _hasMorePosts = provider.posts.length == _postsPerPage;
+        isLoading = false;
+      });
+    } catch (e) {
+      print('_loadSinglePost error: $e');
+      setState(() => isLoading = false);
+    }
   }
 
   void _loadMorePosts() async {
@@ -235,15 +275,15 @@ class _FeedScreenState extends State<FeedScreen> {
     }
 
     setState(() {
-      // Use communityPosts for community feed, otherwise use posts
       posts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
       _originalPosts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
       _allPostsCache = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _currentPage++;
-      isLoadingMore = false;
-      _hasMorePosts = (isCommunityFeed ? provider.communityPosts : provider.posts).length == (_currentPage * _postsPerPage);
+      _currentPage = 1;
+      _hasMorePosts = (isCommunityFeed ? provider.communityPosts : provider.posts).length == _postsPerPage;
+      isLoading = false;
     });
   }
+
 
 
 
@@ -496,10 +536,33 @@ class _FeedScreenState extends State<FeedScreen> {
           SizedBox(height: MediaQuery.of(context).size.height * 0.3),
           Center(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(),
+                Icon(
+                  isCommunityFeed
+                      ? Icons.forum_outlined
+                      : Icons.article_outlined,
+                  size: 52,
+                  color: Colors.grey[350],
+                ),
+                const SizedBox(height: 12),
                 Text(
-                    isCommunityFeed ? "Loading community posts" : "Loading posts.."),
+                  isCommunityFeed
+                      ? 'No community posts found'
+                      : 'No posts found',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  isCommunityFeed
+                      ? 'Be the first to post in this community'
+                      : 'Start following people to see posts',
+                  style: TextStyle(fontSize: 13, color: Colors.grey[400]),
+                ),
               ],
             ),
           ),
@@ -575,15 +638,20 @@ class _FeedScreenState extends State<FeedScreen> {
 
 
   Widget _buildPostCard(BuildContext context, Post post) {
-    // ✅ Filter out empty strings AND relative paths (starting with /)
     final filteredImages = post.postImages
         .where((img) => img.isNotEmpty && !img.startsWith('/'))
         .toList();
+
+    final isTargetPost = widget.postId != null && widget.postId == post.id;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.white,
+        // Highlight the target post with a subtle blue border
+        border: isTargetPost
+            ? Border.all(color: Colors.blue.shade300, width: 2)
+            : null,
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.08),
@@ -817,21 +885,40 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           ),
 
-          // Post Content Centered Between Dividers
+// Post Content Centered Between Dividers
           if (post.postContent.isNotEmpty ||
-              filteredImages.isNotEmpty ||  // ✅ Use filteredImages
+              filteredImages.isNotEmpty ||
               (post.postVideo != null && post.postVideo!.isNotEmpty))
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (filteredImages.isNotEmpty)  // ✅ Use filteredImages
+                  // ✅ Text only post — centered between dividers
+                  if (post.postContent.isNotEmpty &&
+                      filteredImages.isEmpty &&
+                      (post.postVideo == null || post.postVideo!.isEmpty))
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 30),
+                      alignment: Alignment.center,
+                      child: Text(
+                        post.postContent,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          color: Colors.black87,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+
+                  if (filteredImages.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
-                      child: filteredImages.length == 1  // ✅ Use filteredImages
+                      child: filteredImages.length == 1
                           ? _buildSingleImage(filteredImages.first)
-                          : _buildImageCarousel(filteredImages),  // ✅ Use filteredImages
+                          : _buildImageCarousel(filteredImages),
                     ),
                   if (post.postVideo != null && post.postVideo!.isNotEmpty)
                     Padding(
@@ -845,7 +932,7 @@ class _FeedScreenState extends State<FeedScreen> {
               ),
             ),
 
-          // Divider 2 (below content)
+// Divider 2 (below content)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Container(
@@ -854,10 +941,34 @@ class _FeedScreenState extends State<FeedScreen> {
             ),
           ),
 
-          // Action Buttons
+// Action Buttons
           _buildActionButtons(post),
-          if (post.postContent.isNotEmpty)
+
+// ✅ Show text below actions only when media exists
+          if (post.postContent.isNotEmpty &&
+              (filteredImages.isNotEmpty ||
+                  (post.postVideo != null && post.postVideo!.isNotEmpty)))
             PostContentWidget(content: post.postContent),
+          // Show a button to go back and browse the full feed
+          if (widget.postId != null && widget.postId!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('Back to chat'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey[700],
+                    side: BorderSide(color: Colors.grey[300]!),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1331,13 +1442,12 @@ class _FeedScreenState extends State<FeedScreen> {
                                 controller.clear();
                                 FocusScope.of(context).unfocus();
 
-                                // ✅ Pass communityId if it's a community feed
                                 final success = await provider.postComment(
                                   postId: postId,
                                   commentContent: text,
                                   offset: 0,
                                   limit: 10,
-                                  communityId: widget.communityId, // ✅ Pass communityId
+                                  communityId: widget.communityId,
                                 );
 
                                 if (success) {

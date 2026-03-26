@@ -90,4 +90,31 @@ class UserAPI {
       return null;
     }
   }
+  Future<Map<String, dynamic>?> getPostById(String postId) async {
+    try {
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? token = prefs.getString('auth_token');
+
+      final url = Uri.parse('${apiBaseUrl}api/mobile/post/$postId');
+      print('📡 getPostById URL: $url');
+
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      print('📡 getPostById status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return null;
+    } catch (e) {
+      print('getPostById error: $e');
+      return null;
+    }
+  }
 }

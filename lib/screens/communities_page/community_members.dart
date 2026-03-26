@@ -485,11 +485,12 @@ class _CommunityMembersScreenState extends State<CommunityMembersScreen> {
         title: const Text(
           'Community Members',
           style: TextStyle(
-            fontSize: 20,
+            fontSize: 16,
             fontWeight: FontWeight.w700,
             color: Primary,
           ),
         ),
+
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,

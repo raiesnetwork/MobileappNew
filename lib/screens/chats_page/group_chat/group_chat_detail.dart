@@ -60,15 +60,33 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   static const int _maxImageBytes = 800 * 1024;
   static const int _maxAudioBytes = 4 * 1024 * 1024;
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  LIFECYCLE
-  // ════════════════════════════════════════════════════════════════════════
+// Add this field at the top of _GroupChatDetailPageState:
+  late GroupChatProvider _groupChatProvider;
+
+// In initState, save the reference:
   @override
   void initState() {
     super.initState();
+    _groupChatProvider = context.read<GroupChatProvider>(); // ✅ save early
     _loadCurrentUser();
     _initializeRecorder();
     WidgetsBinding.instance.addPostFrameCallback((_) => _initializeChat());
+  }
+
+// In dispose, use the saved reference instead of context.read:
+  @override
+  void dispose() {
+    _groupChatProvider.onNewMessageReceived = null; // ✅ no context.read here
+
+    _recordingTimer?.cancel();
+    _messageController.dispose();
+    _scrollController.dispose();
+    _recorder?.closeRecorder();
+    SocketService().leaveGroup(widget.groupId);
+    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+      try { File(_recordingPath!).deleteSync(); } catch (_) {}
+    }
+    super.dispose();
   }
 
   Future<void> _loadCurrentUser() async {
@@ -89,21 +107,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     };
   }
 
-  @override
-  void dispose() {
-    // ✅ Clear callback
-    context.read<GroupChatProvider>().onNewMessageReceived = null;
 
-    _recordingTimer?.cancel();
-    _messageController.dispose();
-    _scrollController.dispose();
-    _recorder?.closeRecorder();
-    SocketService().leaveGroup(widget.groupId);
-    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
-      try { File(_recordingPath!).deleteSync(); } catch (_) {}
-    }
-    super.dispose();
-  }
 
   String _readableSize(int bytes) {
     if (bytes < 1024) return '${bytes}B';

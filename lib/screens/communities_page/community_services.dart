@@ -4,158 +4,148 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
-
 import '../services_page/booking_screen.dart';
 import '../services_page/create_service_screen.dart';
 import '../services_page/my_services.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVICE DETAIL SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 class ServiceDetailScreen extends StatelessWidget {
   final Map<String, dynamic> service;
 
   const ServiceDetailScreen({super.key, required this.service});
 
-  Widget _buildServiceImage(Map<String, dynamic> service) {
-    bool isBase64(String str) {
-      try {
-        final base64Str = str.contains(',') ? str.split(',').last : str;
-        base64Decode(base64Str);
-        return true;
-      } catch (e) {
-        return false;
-      }
+  bool _isBase64(String str) {
+    try {
+      final base64Str = str.contains(',') ? str.split(',').last : str;
+      base64Decode(base64Str);
+      return true;
+    } catch (_) {
+      return false;
     }
+  }
 
-    if (service['image'] != null && service['image'].isNotEmpty && isBase64(service['image'])) {
+  Widget _buildServiceImage() {
+    if (service['image'] != null &&
+        (service['image'] as String).isNotEmpty &&
+        _isBase64(service['image'])) {
       try {
         final base64Str = service['image'].contains(',')
             ? service['image'].split(',').last
             : service['image'];
-        final imageData = base64Decode(base64Str);
         return ClipRRect(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           child: Image.memory(
-            imageData,
+            base64Decode(base64Str),
             width: double.infinity,
             height: 200,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => _buildDefaultImage(),
+            errorBuilder: (_, __, ___) => _imagePlaceholder(full: true),
           ),
         );
-      } catch (e) {
-        return _buildDefaultImage();
+      } catch (_) {
+        return _imagePlaceholder(full: true);
       }
-    } else {
-      return _buildDefaultImage();
     }
+    return _imagePlaceholder(full: true);
   }
 
-  Widget _buildDefaultImage() {
+  Widget _imagePlaceholder({bool full = false}) {
     return Container(
-      width: double.infinity,
-      height: 200,
+      width: full ? double.infinity : 62,
+      height: full ? 200 : 62,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Primary.withOpacity(0.1), Primary.withOpacity(0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Primary.withOpacity(0.2)),
+        color: Primary.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(full ? 14 : 10),
       ),
       child: Icon(
-        Icons.business_center,
-        color: Primary.withOpacity(0.7),
-        size: 64,
+        Icons.business_center_outlined,
+        color: Primary.withOpacity(0.4),
+        size: full ? 52 : 26,
       ),
     );
   }
 
-  Widget _buildInfoCard({
+  Widget _buildSection({
     required String title,
-    required List<Widget> children,
-    IconData? icon,
+    required IconData icon,
+    required List<_DetailRow> rows,
   }) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withOpacity(0.04),
             blurRadius: 10,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Section header
           Row(
             children: [
-              if (icon != null) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Primary.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, color: Primary, size: 18),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Primary.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(7),
                 ),
-                const SizedBox(width: 10),
-              ],
+                child: Icon(icon, color: Primary, size: 14),
+              ),
+              const SizedBox(width: 8),
               Text(
                 title,
                 style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1A1A2E),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          ...children,
+          const SizedBox(height: 12),
+          Container(height: 1, color: const Color(0xFFF0F0F4)),
+          const SizedBox(height: 10),
+          ...rows.map((row) => _buildDetailRow(row)),
         ],
       ),
     );
   }
 
-  Widget _buildDetailRow({
-    required String label,
-    required String value,
-    Color? valueColor,
-    IconData? icon,
-  }) {
+  Widget _buildDetailRow(_DetailRow row) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (icon != null) ...[
-            Icon(icon, size: 16, color: Colors.grey[600]),
-            const SizedBox(width: 10),
-          ],
-          Expanded(
-            flex: 2,
+          Icon(row.icon, size: 13, color: Primary.withOpacity(0.6)),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 100,
             child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[600],
+              row.label,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFFAAAAAA),
                 fontWeight: FontWeight.w500,
               ),
             ),
           ),
           Expanded(
-            flex: 3,
             child: Text(
-              value,
+              row.value,
               style: TextStyle(
-                fontSize: 13,
-                color: valueColor ?? Colors.black87,
-                fontWeight: FontWeight.w500,
+                fontSize: 12,
+                color: row.valueColor ?? const Color(0xFF1A1A2E),
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
@@ -167,272 +157,262 @@ class ServiceDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isCommunityService =
-    (service['serviceProvider']?.toString().toLowerCase() ?? '').contains('community');
+    (service['serviceProvider']?.toString().toLowerCase() ?? '')
+        .contains('community');
+    final isActive = service['status']?.toString() == 'ACTIVE';
+    final availableDays =
+        (service['availableDays'] as List<dynamic>?)?.cast<String>() ?? [];
+    final cost = service['cost']?.toString() ?? '0';
+    final currency = service['currency']?.toString() ?? '';
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color(0xFFF8F9FB),
       appBar: AppBar(
+        scrolledUnderElevation: 0,
         backgroundColor: Colors.white,
         elevation: 0,
-        scrolledUnderElevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 16, color: Color(0xFF1A1A2E)),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: Text(
           service['name']?.toString() ?? 'Service Details',
           style: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF1A1A2E),
           ),
+          overflow: TextOverflow.ellipsis,
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87),
-          onPressed: () => Navigator.pop(context),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: Color(0xFFEEEEF2)),
         ),
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Service Image
-            _buildServiceImage(service),
-            const SizedBox(height: 20),
+            // Image
+            _buildServiceImage(),
+            const SizedBox(height: 14),
 
-            // Service Header Info
-            _buildInfoCard(
-              title: 'Service Information',
-              icon: Icons.info_outline,
-              children: [
-                Text(
-                  service['name']?.toString() ?? 'Unnamed Service',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600,
-                    color: Primary,
+            // Name + description + badges
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  service['description']?.toString() ?? 'No description available',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Colors.grey[700],
-                    height: 1.4,
-                    fontWeight: FontWeight.w400,
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    service['name']?.toString() ?? 'Unnamed Service',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1A2E),
+                    ),
                   ),
-                ),
-                const SizedBox(height: 14),
-                // Improved badges layout
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    // Cost Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.green.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.attach_money, size: 14, color: Colors.green),
-                          const SizedBox(width: 2),
-                          Flexible(
-                            child: Text(
-                              '${service['cost']?.toString() ?? '0'} ${service['currency']?.toString() ?? ''}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.green,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
+                  const SizedBox(height: 6),
+                  Text(
+                    service['description']?.toString() ??
+                        'No description available',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF7A7A8C),
+                      height: 1.5,
                     ),
-                    // Provider Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: isCommunityService
-                            ? Colors.blue.withOpacity(0.1)
-                            : Colors.orange.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isCommunityService
-                              ? Colors.blue.withOpacity(0.3)
-                              : Colors.orange.withOpacity(0.3),
-                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _buildChip(
+                        '$currency $cost',
+                        const Color(0xFF00C48C),
+                        const Color(0xFFE6FAF5),
                       ),
-                      child: Text(
-                        isCommunityService ? 'Community Service' : 'Member Service',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isCommunityService ? Colors.blue : Colors.orange,
-                        ),
+                      _buildChip(
+                        isCommunityService
+                            ? 'Community Service'
+                            : 'Member Service',
+                        isCommunityService
+                            ? const Color(0xFF6C63FF)
+                            : const Color(0xFFFF9F43),
+                        isCommunityService
+                            ? const Color(0xFFF0EEFF)
+                            : const Color(0xFFFFF4E6),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      _buildChip(
+                        isActive ? 'Active' : 'Inactive',
+                        isActive
+                            ? const Color(0xFF00C48C)
+                            : const Color(0xFFFF6B6B),
+                        isActive
+                            ? const Color(0xFFE6FAF5)
+                            : const Color(0xFFFFF0F0),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            _buildInfoCard(
+            const SizedBox(height: 12),
+
+            // Category
+            _buildSection(
               title: 'Category & Classification',
-              icon: Icons.category,
-              children: [
-                _buildDetailRow(
-                  label: 'Category',
-                  value: service['category']?.toString() ?? 'N/A',
-                  icon: Icons.folder_outlined,
-                ),
-                _buildDetailRow(
-                  label: 'Subcategory',
-                  value: service['subCategory']?.toString() ?? 'N/A',
-                  icon: Icons.subdirectory_arrow_right,
-                ),
-                _buildDetailRow(
-                  label: 'Status',
-                  value: service['status']?.toString() ?? 'N/A',
-                  valueColor: service['status']?.toString() == 'ACTIVE' ? Colors.green : Colors.red,
-                  icon: Icons.toggle_on,
-                ),
+              icon: Icons.category_outlined,
+              rows: [
+                _DetailRow(Icons.folder_outlined, 'Category',
+                    service['category']?.toString() ?? 'N/A'),
+                _DetailRow(Icons.layers_outlined, 'Subcategory',
+                    service['subCategory']?.toString() ?? 'N/A'),
               ],
             ),
 
-            // Pricing & Capacity
-            _buildInfoCard(
+            // Pricing
+            _buildSection(
               title: 'Pricing & Capacity',
-              icon: Icons.monetization_on,
-              children: [
-                _buildDetailRow(
-                  label: 'Cost Per',
-                  value: service['costPer']?.toString() ?? 'N/A',
-                  icon: Icons.schedule,
-                ),
-                _buildDetailRow(
-                  label: 'Capacity',
-                  value: service['capacity']?.toString() ?? 'N/A',
-                  icon: Icons.group,
-                ),
-                _buildDetailRow(
-                  label: 'Currency',
-                  value: service['currency']?.toString() ?? 'N/A',
-                  icon: Icons.currency_exchange,
-                ),
+              icon: Icons.monetization_on_outlined,
+              rows: [
+                _DetailRow(Icons.attach_money_rounded, 'Cost Per',
+                    service['costPer']?.toString() ?? 'N/A'),
+                _DetailRow(Icons.people_outline_rounded, 'Capacity',
+                    service['capacity']?.toString() ?? 'N/A'),
+                _DetailRow(Icons.currency_exchange_outlined, 'Currency',
+                    service['currency']?.toString() ?? 'N/A'),
               ],
             ),
 
-            // Schedule & Availability
-            _buildInfoCard(
+            // Schedule
+            _buildSection(
               title: 'Schedule & Availability',
-              icon: Icons.access_time,
-              children: [
-                _buildDetailRow(
-                  label: 'Available Days',
-                  value: (service['availableDays'] as List<dynamic>?)?.join(', ') ?? 'N/A',
-                  icon: Icons.calendar_today,
-                ),
-                _buildDetailRow(
-                  label: 'Opening Hours',
-                  value: '${service['openHourFrom']?.toString() ?? 'N/A'} - ${service['openHourEnd']?.toString() ?? 'N/A'}',
-                  icon: Icons.access_time_filled,
-                ),
+              icon: Icons.schedule_outlined,
+              rows: [
+                _DetailRow(
+                    Icons.calendar_today_outlined,
+                    'Available Days',
+                    availableDays.isNotEmpty
+                        ? availableDays.join(', ')
+                        : 'N/A'),
+                _DetailRow(
+                    Icons.access_time_rounded,
+                    'Opening Hours',
+                    '${service['openHourFrom']?.toString() ?? 'N/A'} – ${service['openHourEnd']?.toString() ?? 'N/A'}'),
               ],
             ),
 
-            // Location & Provider
-            _buildInfoCard(
+            // Location
+            _buildSection(
               title: 'Location & Provider',
-              icon: Icons.location_on,
-              children: [
-                _buildDetailRow(
-                  label: 'Location',
-                  value: service['location']?.toString() ?? 'N/A',
-                  icon: Icons.place,
-                ),
-                _buildDetailRow(
-                  label: 'Service Provider',
-                  value: service['serviceProvider']?.toString() ?? 'N/A',
-                  icon: Icons.person,
-                ),
+              icon: Icons.location_on_outlined,
+              rows: [
+                _DetailRow(Icons.place_outlined, 'Location',
+                    service['location']?.toString() ?? 'N/A'),
+                _DetailRow(Icons.person_outline_rounded, 'Provider',
+                    service['serviceProvider']?.toString() ?? 'N/A'),
               ],
             ),
-
-            const SizedBox(height: 20),
           ],
         ),
       ),
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         decoration: BoxDecoration(
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withOpacity(0.06),
               blurRadius: 10,
               offset: const Offset(0, -2),
             ),
           ],
         ),
         child: SafeArea(
-          child: ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => BookingScreen(
-                    serviceId: service['_id']?.toString() ?? '',
-                    serviceName: service['name']?.toString() ?? 'Service',
-                    costPerSlot: service['cost'] ?? 0,
-                    currency: service['currency']?.toString() ?? 'INR',
-                    maxSlots: service['capacity'] ?? 10,
-                    serviceImage: service['image']?.toString() ?? '',
-                    location: service['location']?.toString() ?? '',
+          child: SizedBox(
+            height: 46,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => BookingScreen(
+                      serviceId: service['_id']?.toString() ?? '',
+                      serviceName:
+                      service['name']?.toString() ?? 'Service',
+                      costPerSlot: service['cost'] ?? 0,
+                      currency:
+                      service['currency']?.toString() ?? 'INR',
+                      maxSlots: service['capacity'] ?? 10,
+                      serviceImage:
+                      service['image']?.toString() ?? '',
+                      location:
+                      service['location']?.toString() ?? '',
+                    ),
                   ),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Primary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
-              elevation: 0,
-            ),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.calendar_today, size: 20),
-                SizedBox(width: 10),
-                Text(
-                  'Book Now',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+              icon: const Icon(Icons.calendar_today_rounded, size: 16),
+              label: const Text(
+                'Book Now',
+                style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700),
+              ),
             ),
           ),
         ),
       ),
     );
   }
+
+  Widget _buildChip(String label, Color textColor, Color bgColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
+      ),
+    );
+  }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COMMUNITY SERVICES SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
 class CommunityServicesScreen extends StatefulWidget {
   final String communityId;
 
   const CommunityServicesScreen({super.key, required this.communityId});
 
   @override
-  State<CommunityServicesScreen> createState() => _CommunityServicesScreenState();
+  State<CommunityServicesScreen> createState() =>
+      _CommunityServicesScreenState();
 }
 
 class _CommunityServicesScreenState extends State<CommunityServicesScreen>
@@ -444,8 +424,6 @@ class _CommunityServicesScreenState extends State<CommunityServicesScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      print('🚀 Initiating fetchCommunityServices with communityId: ${widget.communityId}');
-      // Changed to use CommunityProvider instead of ServicesProvider
       Provider.of<CommunityProvider>(context, listen: false)
           .fetchCommunityServices(widget.communityId);
     });
@@ -457,155 +435,123 @@ class _CommunityServicesScreenState extends State<CommunityServicesScreen>
     super.dispose();
   }
 
-  // Filter services based on service provider type
-  List<dynamic> _filterServices(List<dynamic> services, bool isCommunityTab) {
-    print('🔍 Filtering services - Total: ${services.length}, isCommunityTab: $isCommunityTab');
-
-    final filtered = services.where((service) {
-      final serviceProvider = service['serviceProvider']?.toString().toLowerCase() ?? '';
-      print('  Service: ${service['name']} | Provider: $serviceProvider');
-
+  List<dynamic> _filterServices(
+      List<dynamic> services, bool isCommunityTab) {
+    return services.where((service) {
+      final sp =
+          service['serviceProvider']?.toString().toLowerCase() ?? '';
       if (isCommunityTab) {
-        final isMatch = serviceProvider == 'community' || serviceProvider.contains('community');
-        print('    Community tab match: $isMatch');
-        return isMatch;
+        return sp == 'community' || sp.contains('community');
       } else {
-        final isMatch = serviceProvider != 'community' &&
-            !serviceProvider.contains('community') &&
-            serviceProvider.isNotEmpty &&
-            serviceProvider != 'n/a';
-        print('    Member tab match: $isMatch');
-        return isMatch;
+        return sp != 'community' &&
+            !sp.contains('community') &&
+            sp.isNotEmpty &&
+            sp != 'n/a';
       }
     }).toList();
-
-    print('🔍 Filtered result: ${filtered.length} services');
-    return filtered;
   }
 
-  // Debug method to print service information - Updated for CommunityProvider
-  void _debugPrintServiceInfo(CommunityProvider provider) {
-    if (kDebugMode) {
-      print('=== DEBUG SERVICE INFO ===');
-      print('Loading: ${provider.isLoadingServices}');
-      print('Has Error: ${provider.servicesError != null}');
-      print('Message: ${provider.servicesError ?? "No error"}');
-
-      final services = provider.communityServices['services'] as List<dynamic>? ?? [];
-      print('Services count: ${services.length}');
-
-      if (services.isNotEmpty) {
-        print('First service: ${services[0]}');
-        print('Service provider types:');
-        for (var service in services) {
-          print('  - Name: ${service['name']} | Provider: ${service['serviceProvider']}');
-        }
-      }
-      print('========================');
+  bool _isBase64(String str) {
+    try {
+      final base64Str = str.contains(',') ? str.split(',').last : str;
+      base64Decode(base64Str);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
   Widget _buildServiceImage(Map<String, dynamic> service) {
-    // Helper function to check if a string is a valid Base64
-    bool isBase64(String str) {
-      try {
-        final base64Str = str.contains(',') ? str.split(',').last : str;
-        base64Decode(base64Str);
-        return true;
-      } catch (e) {
-        return false;
-      }
-    }
-
-    if (service['image'] != null && service['image'].isNotEmpty && isBase64(service['image'])) {
+    const double size = 62;
+    if (service['image'] != null &&
+        (service['image'] as String).isNotEmpty &&
+        _isBase64(service['image'])) {
       try {
         final base64Str = service['image'].contains(',')
             ? service['image'].split(',').last
             : service['image'];
-        final imageData = base64Decode(base64Str);
         return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           child: Image.memory(
-            imageData,
-            width: 80,
-            height: 80,
+            base64Decode(base64Str),
+            width: size,
+            height: size,
             fit: BoxFit.cover,
-            errorBuilder: (context, error, stackTrace) => _buildDefaultImage(),
+            errorBuilder: (_, __, ___) => _imagePlaceholder(size),
           ),
         );
-      } catch (e) {
-        return _buildDefaultImage();
+      } catch (_) {
+        return _imagePlaceholder(size);
       }
-    } else {
-      return _buildDefaultImage();
     }
+    return _imagePlaceholder(size);
   }
 
-  Widget _buildDefaultImage() {
+  Widget _imagePlaceholder(double size) {
     return Container(
-      width: 80,
-      height: 80,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Primary.withOpacity(0.1), Primary.withOpacity(0.05)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Primary.withOpacity(0.2)),
+        color: Primary.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(10),
       ),
-      child: Icon(
-        Icons.business_center,
-        color: Primary.withOpacity(0.7),
-        size: 32,
+      child: Icon(Icons.business_center_outlined,
+          color: Primary.withOpacity(0.4), size: 26),
+    );
+  }
+
+  Widget _buildChip(String label, Color textColor, Color bgColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+            fontSize: 11, fontWeight: FontWeight.w600, color: textColor),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
 
-  Widget _buildServiceCard(Map<String, dynamic> service, int index) {
-    final isCommunityService =
-    (service['serviceProvider']?.toString().toLowerCase() ?? '').contains('community');
+  Widget _buildServiceCard(Map<String, dynamic> service) {
+    final cost = service['cost']?.toString() ?? '0';
+    final currency = service['currency']?.toString() ?? '';
+    final isCommunity =
+    (service['serviceProvider']?.toString().toLowerCase() ?? '')
+        .contains('community');
 
-    return Card(
-      elevation: 3,
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: Colors.grey[200]!,
-          width: 1,
-        ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: InkWell(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ServiceDetailScreen(service: service),
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Primary.withOpacity(0.05),
-                Primary.withOpacity(0.02),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ServiceDetailScreen(service: service),
           ),
-          padding: const EdgeInsets.all(16),
+        ),
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Image
               _buildServiceImage(service),
-              const SizedBox(width: 16),
-              // Basic Info
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -614,87 +560,86 @@ class _CommunityServicesScreenState extends State<CommunityServicesScreen>
                     Text(
                       service['name']?.toString() ?? 'Unnamed Service',
                       style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Primary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1A1A2E),
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     // Description
                     Text(
-                      service['description']?.toString() ?? 'No description available',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey[700],
-                        height: 1.3,
-                        fontWeight: FontWeight.w400,
+                      service['description']?.toString() ??
+                          'No description',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF7A7A8C),
+                        height: 1.4,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 10),
-                    // Cost and Book Button Row
+                    const SizedBox(height: 8),
+                    // Chips + Book button
                     Row(
                       children: [
-                        // Cost Container
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green.withOpacity(0.3)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
                             children: [
-                              const Icon(Icons.attach_money, size: 12, color: Colors.green),
-                              const SizedBox(width: 2),
-                              Text(
-                                '${service['cost']?.toString() ?? '0'} ${service['currency']?.toString() ?? ''}',
-                                style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.green,
-                                ),
+                              _buildChip(
+                                '$currency $cost',
+                                const Color(0xFF00C48C),
+                                const Color(0xFFE6FAF5),
+                              ),
+                              _buildChip(
+                                isCommunity ? 'Community' : 'Member',
+                                const Color(0xFF6C63FF),
+                                const Color(0xFFF0EEFF),
                               ),
                             ],
                           ),
                         ),
-                        const Spacer(),
-                        // Book Button
-                        ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => BookingScreen(
-                                  serviceId: service['_id']?.toString() ?? '',
-                                  serviceName: service['name']?.toString() ?? 'Service',
-                                  costPerSlot: service['cost'] ?? 0,
-                                  currency: service['currency']?.toString() ?? 'INR',
-                                  maxSlots: service['capacity'] ?? 10,
-                                  serviceImage: service['image']?.toString() ?? '',
-                                  location: service['location']?.toString() ?? '',
-                                ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BookingScreen(
+                                serviceId:
+                                service['_id']?.toString() ?? '',
+                                serviceName:
+                                service['name']?.toString() ??
+                                    'Service',
+                                costPerSlot: service['cost'] ?? 0,
+                                currency: service['currency']
+                                    ?.toString() ??
+                                    'INR',
+                                maxSlots: service['capacity'] ?? 10,
+                                serviceImage:
+                                service['image']?.toString() ?? '',
+                                location:
+                                service['location']?.toString() ??
+                                    '',
                               ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            shape: RoundedRectangleBorder(
+                            ),
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: Primary,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            elevation: 0,
-                          ),
-                          child: const Text(
-                            'Book',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                            child: const Text(
+                              'Book',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
@@ -710,217 +655,245 @@ class _CommunityServicesScreenState extends State<CommunityServicesScreen>
     );
   }
 
-  Widget _buildTabContent(CommunityProvider provider, bool isCommunityTab) {
-    // Debug print service info
-    _debugPrintServiceInfo(provider);
-
-    // Get services from communityServices map
-    final services = provider.communityServices['services'] as List<dynamic>? ?? [];
-    final filteredServices = _filterServices(services, isCommunityTab);
-    final tabName = isCommunityTab ? 'Community Services' : 'Member Services';
-
-    print('🎨 Building tab content for $tabName');
-    print('📊 Provider state - Loading: ${provider.isLoadingServices}, Error: ${provider.servicesError != null}');
-    print('📦 Total services: ${services.length}, Filtered: ${filteredServices.length}');
+  Widget _buildTabContent(
+      CommunityProvider provider, bool isCommunityTab) {
+    final services =
+        provider.communityServices['services'] as List<dynamic>? ?? [];
+    final filtered = _filterServices(services, isCommunityTab);
+    final tabName =
+    isCommunityTab ? 'Community Services' : 'Member Services';
 
     return RefreshIndicator(
-      onRefresh: () async {
-        print('🔄 Pull to refresh triggered');
-        await provider.fetchCommunityServices(widget.communityId);
-      },
+      onRefresh: () async =>
+          provider.fetchCommunityServices(widget.communityId),
       color: Primary,
       child: provider.isLoadingServices
           ? const Center(
         child: CircularProgressIndicator(
           valueColor: AlwaysStoppedAnimation<Color>(Primary),
+          strokeWidth: 2,
         ),
       )
           : provider.servicesError != null
-          ? Center(
+          ? _buildErrorState(provider)
+          : filtered.isEmpty
+          ? _buildEmptyState(isCommunityTab, tabName)
+          : ListView.builder(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
+        itemCount: filtered.length,
+        itemBuilder: (_, index) =>
+            _buildServiceCard(filtered[index]),
+      ),
+    );
+  }
+
+  Widget _buildErrorState(CommunityProvider provider) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.red[400],
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                  color: Color(0xFFFFF0F0), shape: BoxShape.circle),
+              child: const Icon(Icons.error_outline_rounded,
+                  size: 32, color: Color(0xFFFF6B6B)),
             ),
             const SizedBox(height: 12),
             Text(
-              provider.servicesError!,
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[700],
-                fontWeight: FontWeight.w500,
-              ),
+              provider.servicesError ?? 'Something went wrong',
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: Color(0xFF7A7A8C),
+                  fontWeight: FontWeight.w500),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Primary,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-              ),
-              onPressed: () {
-                print('🔄 Retry button pressed');
-                provider.fetchCommunityServices(widget.communityId);
-              },
-              child: const Text(
-                'Retry',
-                style: TextStyle(fontSize: 14, color: Colors.white),
-              ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () =>
+                  provider.fetchCommunityServices(widget.communityId),
+              child: const Text('Retry',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Primary)),
             ),
           ],
         ),
-      )
-          : filteredServices.isEmpty
-          ? Center(
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(bool isCommunityTab, String tabName) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              isCommunityTab ? Icons.business : Icons.people_outline,
-              size: 60,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'No $tabName Available',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                  color: Primary.withOpacity(0.06),
+                  shape: BoxShape.circle),
+              child: Icon(
+                isCommunityTab
+                    ? Icons.business_center_outlined
+                    : Icons.people_outline_rounded,
+                size: 36,
+                color: Primary.withOpacity(0.5),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 14),
+            Text(
+              'No $tabName',
+              style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1A1A2E)),
+            ),
+            const SizedBox(height: 4),
             Text(
               isCommunityTab
-                  ? 'No services provided by the community yet'
-                  : 'No services provided by community members yet',
-              style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                  ? 'No services added by the community yet'
+                  : 'No services added by members yet',
+              style: const TextStyle(
+                  fontSize: 12, color: Color(0xFFAAAAAA)),
               textAlign: TextAlign.center,
             ),
           ],
         ),
-      )
-          : ListView.builder(
-        padding: const EdgeInsets.all(8),
-        itemCount: filteredServices.length,
-        itemBuilder: (context, index) {
-          final service = filteredServices[index];
-          return _buildServiceCard(service, index);
-        },
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Changed Consumer to use CommunityProvider instead of ServicesProvider
     return Consumer<CommunityProvider>(
       builder: (context, provider, child) {
         return Scaffold(
+          backgroundColor: const Color(0xFFF8F9FB),
           appBar: AppBar(
             scrolledUnderElevation: 0,
+            backgroundColor: Colors.white,
+            elevation: 0,
+            centerTitle: true,
             title: const Text(
               'Community Services',
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Primary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1A1A2E),
+                letterSpacing: 0.2,
               ),
             ),
-            backgroundColor: Colors.white,
-            elevation: 2,
-            shadowColor: Colors.grey.withOpacity(0.2),
-            centerTitle: true,
             actions: [
               Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const MyServicesScreen(),
-                      ),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Primary,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding: const EdgeInsets.only(right: 12),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => const MyServicesScreen()),
                   ),
-                  child: const Text(
-                    'My Services',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Text(
+                      'My Services',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Primary,
+                      ),
                     ),
                   ),
                 ),
               ),
             ],
-            bottom: TabBar(
-              controller: _tabController,
-              indicatorColor: Primary,
-              labelColor: Primary,
-              unselectedLabelColor: Colors.grey[600],
-              labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.normal, fontSize: 13),
-              indicatorWeight: 3,
-              tabs: const [
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.business, size: 16),
-                      SizedBox(width: 6),
-                      Text('Community'),
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(49),
+              child: Column(
+                children: [
+                  const Divider(height: 1, color: Color(0xFFEEEEF2)),
+                  TabBar(
+                    controller: _tabController,
+                    indicatorColor: Primary,
+                    indicatorWeight: 2.5,
+                    labelColor: Primary,
+                    unselectedLabelColor: const Color(0xFFAAAAAA),
+                    labelStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
+                    unselectedLabelStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w500),
+                    tabs: const [
+                      Tab(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.business_center_outlined,
+                                size: 15),
+                            SizedBox(width: 6),
+                            Text('Community'),
+                          ],
+                        ),
+                      ),
+                      Tab(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.people_outline_rounded,
+                                size: 15),
+                            SizedBox(width: 6),
+                            Text('Members'),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                Tab(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.people, size: 16),
-                      SizedBox(width: 6),
-                      Text('Members'),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           body: TabBarView(
             controller: _tabController,
             children: [
-              _buildTabContent(provider, true), // Community Services tab
-              _buildTabContent(provider, false), // Member Services tab
+              _buildTabContent(provider, true),
+              _buildTabContent(provider, false),
             ],
           ),
           floatingActionButton: FloatingActionButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => CreateServiceScreen(communityId: widget.communityId),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CreateServiceScreen(
+                    communityId: widget.communityId),
+              ),
+            ),
             backgroundColor: Primary,
-            elevation: 6,
-            child: const Icon(Icons.add, color: Colors.white, size: 28),
+            elevation: 4,
+            child: const Icon(Icons.add_rounded,
+                color: Colors.white, size: 26),
           ),
         );
       },
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+class _DetailRow {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color? valueColor;
+  const _DetailRow(this.icon, this.label, this.value, {this.valueColor});
 }

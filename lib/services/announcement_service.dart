@@ -294,6 +294,8 @@ class AnnouncementService {
           'totalCommunities': 0,
           'totalCampaigns': 0,
           'totalServices': 0,
+          'communities': [],
+          'campaigns': [],
         };
       }
 
@@ -312,6 +314,8 @@ class AnnouncementService {
           'totalCommunities': data['totalCommunities'] ?? 0,
           'totalCampaigns': data['totalCampaigns'] ?? 0,
           'totalServices': data['totalServices'] ?? 0,
+          'communities': data['communities'] ?? [],
+          'campaigns': data['campaigns'] ?? [],
         };
       } else {
         return {
@@ -320,6 +324,8 @@ class AnnouncementService {
           'totalCommunities': 0,
           'totalCampaigns': 0,
           'totalServices': 0,
+          'communities': [],
+          'campaigns': [],
         };
       }
     } catch (e) {
@@ -329,6 +335,8 @@ class AnnouncementService {
         'totalCommunities': 0,
         'totalCampaigns': 0,
         'totalServices': 0,
+        'communities': [],
+        'campaigns': [],
       };
     }
   }

@@ -499,36 +499,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
               onPressed: isSubmitting ? null : () => Navigator.pop(context),
               child: const Text('Cancel'),
             ),
-            ElevatedButton(
-              onPressed: isSubmitting
-                  ? null
-                  : () => _addUser(
-                formKey,
-                setDialogState,
-                provider,
-                memberType,
-                nameController,
-                emailController,
-                mobileController,
-                passwordController,
-                userIdController,
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF800080),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: isSubmitting
-                  ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-                  : const Text('Add User'),
-            ),
+
           ],
         ),
       ),
@@ -537,60 +508,8 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
 
 
 
-  Future<void> _addUser(
-      GlobalKey<FormState> formKey,
-      void Function(void Function()) setDialogState,
-      CommunityProvider provider,
-      String memberType,
-      TextEditingController nameController,
-      TextEditingController emailController,
-      TextEditingController mobileController,
-      TextEditingController passwordController,
-      TextEditingController userIdController,
-      ) async {
-    // Validate form first
-    if (!(formKey.currentState?.validate() ?? false)) return;
 
 
-    setDialogState(() => _isSubmitting = true); // Remove the underscore
-
-    try {
-      final result = await provider.addUserToCommunity(
-        communityId: widget.communityId,
-        name: memberType == 'New' ? nameController.text.trim() : null,
-        email: memberType == 'New' ? emailController.text.trim() : null,
-        mobile: memberType == 'New' ? mobileController.text.trim() : null,
-        password: memberType == 'New' ? passwordController.text.trim() : null,
-        memberType: memberType,
-        userId: memberType == 'Exist' ? userIdController.text.trim() : null,
-      );
-
-
-      setDialogState(() => _isSubmitting = false);
-
-      if (mounted) {
-        _showSnackBar(
-          result['error'] == true
-              ? result['message'] ?? 'Failed to add user'
-              : 'User added successfully',
-          result['error'] == true ? Colors.red : Colors.green,
-        );
-      }
-      if (!(result['error'] as bool)) {
-        if (mounted) {
-          Navigator.pop(context);
-          provider.fetchCommunityInfo(widget.communityId);
-        }
-      }
-    } catch (e) {
-      // Stop loading on error
-      setDialogState(() => _isSubmitting = false); // Remove the underscore
-
-      if (mounted) {
-        _showSnackBar('Error: ${e.toString()}', Colors.red);
-      }
-    }
-  }
 
   void _showExitCommunityDialog(
       String communityId, String communityName, CommunityProvider provider) {

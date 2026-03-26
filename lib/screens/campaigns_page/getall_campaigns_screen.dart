@@ -31,9 +31,12 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CampaignProvider>().fetchAllCampaigns(page: 1);
+      final provider = context.read<CampaignProvider>();
+      if (provider.campaigns.isEmpty) {
+        provider.fetchAllCampaigns(page: 1);
+      }
+      _setupScrollListener(); // ✅ called after first frame, ListView is built
     });
-    _setupScrollListener();
   }
 
   @override
@@ -44,6 +47,7 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
+      if (!_scrollController.hasClients) return; // ✅ safety guard
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 300) {
         _loadMoreCampaigns();
@@ -62,27 +66,18 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   }
 
   void _loadMoreCampaigns() async {
+    if (_isLoadingMore) return; // ✅ synchronous check first
+
     final provider = context.read<CampaignProvider>();
+    if (provider.isLoading || !provider.hasMoreCampaigns) return;
 
-    if (_isLoadingMore || provider.isLoading || !provider.hasMoreCampaigns) {
-      return;
-    }
+    _isLoadingMore = true; // ✅ set synchronously before any await
+    if (mounted) setState(() {});
 
-    setState(() {
-      _isLoadingMore = true;
-    });
-
-    final currentPage = (provider.campaigns.length / 10).ceil();
-    final nextPage = currentPage + 1;
-
-    print('📄 Loading page $nextPage (current campaigns: ${provider.campaigns.length})');
-
-    await provider.fetchAllCampaigns(page: nextPage);
+    await provider.fetchAllCampaigns(page: provider.currentPage + 1); // ✅ use provider's page
 
     if (mounted) {
-      setState(() {
-        _isLoadingMore = false;
-      });
+      setState(() => _isLoadingMore = false);
     }
   }
 

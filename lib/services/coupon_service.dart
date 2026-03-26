@@ -1,77 +1,69 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../constants/apiConstants.dart';
+
+
 class CouponService {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // HELPER: returns auth headers
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, String>?> _authHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null || token.isEmpty) return null;
+    return {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+  }
 
-
-
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 1. GET ALL COUPONS  →  GET /api/coupon/getAll-coupon
+  // Returns { createdCoupons: [], receivedCoupons: [] }
+  // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getUserCoupons() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'createdCoupons': [],
-          'receivedCoupons': [],
-        };
+      final headers = await _authHeaders();
+      if (headers == null) {
+        return _authError(['createdCoupons', 'receivedCoupons']);
       }
 
-      final uri = Uri.parse('${apiBaseUrl}api/coupon/getAll-coupon');
-
       final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+        Uri.parse('${apiBaseUrl}api/coupon/getAll-coupon'),
+        headers: headers,
       );
-
-      print('getUserCoupons - Status Code: ${response.statusCode}');
-      print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-
         return {
           'error': false,
-          'message': 'Coupons fetched successfully',
           'createdCoupons': decoded['createdCoupons'] ?? [],
           'receivedCoupons': decoded['receivedCoupons'] ?? [],
         };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch coupons',
-          'createdCoupons': [],
-          'receivedCoupons': [],
-        };
       }
+      return _parseError(response.body, {'createdCoupons': [], 'receivedCoupons': []});
     } catch (e) {
-      print('Error in getUserCoupons: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching coupons: ${e.toString()}',
-        'createdCoupons': [],
-        'receivedCoupons': [],
-      };
+      return _exception(e, {'createdCoupons': [], 'receivedCoupons': []});
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 2. CREATE COUPON  →  POST /api/coupon/create-coupon  (multipart, supports image)
+  // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> createCoupon({
     required String name,
     required String details,
-    required String type,
-    required String expiry,
+    required String type,        // 'coupon' | 'coins' | 'rewards'
+    required String expiry,      // ISO8601 string
     required String code,
-    String? couponType,
-    String? image,
+    String? couponType,          // 'discount-amount' | 'discount-in-percentage'
+    File? imageFile,             // optional image file
     String? link,
-    Map<String, dynamic>? discountAmount,
+    Map<String, dynamic>? discountAmount,   // { amount: double, currency: String }
     double? discountPercentage,
     int? coinAmount,
     String? rewardType,
@@ -79,80 +71,171 @@ class CouponService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'coupon': null,
-        };
-      }
-
-      // Build request body
-      final Map<String, dynamic> requestBody = {
-        'name': name,
-        'details': details,
-        'type': type,
-        'expiry': expiry,
-        'code': code,
-      };
-
-      // Add optional fields
-      if (couponType != null) requestBody['couponType'] = couponType;
-      if (image != null && image.isNotEmpty) requestBody['image'] = image;
-      if (link != null && link.isNotEmpty) requestBody['link'] = link;
-
-      // Add type-specific fields
-      if (type == 'coupon') {
-        if (couponType == 'discount-amount' && discountAmount != null) {
-          requestBody['discountAmount'] = discountAmount;
-        } else if (couponType == 'discount-in-percentage' && discountPercentage != null) {
-          requestBody['discountPercentage'] = discountPercentage;
-        }
-      } else if (type == 'coins' && coinAmount != null) {
-        requestBody['coinAmount'] = coinAmount;
-      } else if (type == 'rewards' && rewardType != null) {
-        requestBody['rewardType'] = rewardType;
-      }
+      if (token == null || token.isEmpty) return _authError(['coupon']);
 
       final uri = Uri.parse('${apiBaseUrl}api/coupon/create-coupon');
+      final request = http.MultipartRequest('POST', uri)
+        ..headers['Authorization'] = 'Bearer $token'
+        ..fields['name'] = name
+        ..fields['details'] = details
+        ..fields['type'] = type
+        ..fields['expiry'] = expiry
+        ..fields['code'] = code;
 
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
+      if (couponType != null) request.fields['couponType'] = couponType;
+      if (link != null && link.isNotEmpty) request.fields['link'] = link;
 
-      print('createCoupon - Status Code: ${response.statusCode}');
-      print('Request body: ${jsonEncode(requestBody)}');
-      print('Response body: ${response.body}');
+      // Type-specific fields
+      if (type == 'coupon') {
+        if (couponType == 'discount-amount' && discountAmount != null) {
+          request.fields['discountAmount'] = jsonEncode(discountAmount);
+        } else if (couponType == 'discount-in-percentage' && discountPercentage != null) {
+          request.fields['discountPercentage'] = discountPercentage.toString();
+        }
+      } else if (type == 'coins' && coinAmount != null) {
+        request.fields['coinAmount'] = coinAmount.toString();
+      } else if (type == 'rewards' && rewardType != null) {
+        request.fields['rewardType'] = rewardType;
+      }
+
+      // Attach image if provided
+      if (imageFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'image',
+          imageFile.path,
+          contentType: MediaType('image', imageFile.path.split('.').last),
+        ));
+      }
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        final decoded = jsonDecode(response.body);
-
-        return {
-          'error': false,
-          'message': 'Coupon created successfully',
-          'coupon': decoded,
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to create coupon',
-          'coupon': null,
-        };
+        return {'error': false, 'message': 'Coupon created successfully', 'coupon': jsonDecode(response.body)};
       }
+      return _parseError(response.body, {'coupon': null});
     } catch (e) {
-      print('Error in createCoupon: $e');
-      return {
-        'error': true,
-        'message': 'Error creating coupon: ${e.toString()}',
-        'coupon': null,
-      };
+      return _exception(e, {'coupon': null});
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 3. SEND COUPON TO USER  →  POST /api/coupon/send-coupon
+  // Body: { couponId, receiverId }
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> sendCouponToUser({
+    required String couponId,
+    required String receiverId,
+  }) async {
+    return _post('api/coupon/send-coupon', {'couponId': couponId, 'receiverId': receiverId});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 4. SEND COUPON TO GROUP/COMMUNITY  →  POST /api/coupon/send-community
+  // Body: { couponId, groupId }
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> sendCouponToGroup({
+    required String couponId,
+    required String groupId,
+  }) async {
+    return _post('api/coupon/send-community', {'couponId': couponId, 'groupId': groupId});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 5. ADD COUPON CODE TO SERVICE  →  POST /api/coupon/add-to-service
+  // Body: { couponCode, serviceId }
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> addCouponToService({
+    required String couponCode,
+    required String serviceId,
+  }) async {
+    return _post('api/coupon/add-to-service', {'couponCode': couponCode, 'serviceId': serviceId});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 6. VERIFY COUPON  →  POST /api/coupon/verify
+  // Body: { code, store? }
+  // Returns: { error, message, coupon }
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> verifyCoupon({
+    required String code,
+    String? store,
+  }) async {
+    final body = <String, dynamic>{'code': code};
+    if (store != null) body['store'] = store;
+    return _post('api/coupon/verify', body);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 7. VERIFY iXES SUBSCRIPTION COUPON  →  POST /api/coupon/verify-ixes-coupon
+  // Body: { code }
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> verifyIxesCoupon({required String code}) async {
+    return _post('api/coupon/verify-ixes-coupon', {'code': code});
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // 8. GET USER LIST  →  GET /api/coupon/get-users
+  // Returns up to 10 users
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> getUserList() async {
+    try {
+      final headers = await _authHeaders();
+      if (headers == null) return _authError(['users']);
+
+      final response = await http.get(
+        Uri.parse('${apiBaseUrl}api/coupon/get-users'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        return {'error': false, 'users': decoded['users'] ?? []};
+      }
+      return _parseError(response.body, {'users': []});
+    } catch (e) {
+      return _exception(e, {'users': []});
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PRIVATE HELPERS
+  // ─────────────────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
+    try {
+      final headers = await _authHeaders();
+      if (headers == null) return _authError([]);
+
+      final response = await http.post(
+        Uri.parse('$apiBaseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {'error': false, ...jsonDecode(response.body) as Map<String, dynamic>};
+      }
+      return _parseError(response.body, {});
+    } catch (e) {
+      return _exception(e, {});
+    }
+  }
+
+  Map<String, dynamic> _authError(List<String> emptyKeys) => {
+    'error': true,
+    'message': 'Authentication token is missing',
+    for (final k in emptyKeys) k: k.endsWith('s') ? [] : null,
+  };
+
+  Map<String, dynamic> _parseError(String body, Map<String, dynamic> defaults) {
+    try {
+      final decoded = jsonDecode(body) as Map<String, dynamic>;
+      return {'error': true, 'message': decoded['message'] ?? decoded['error'] ?? 'Request failed', ...defaults};
+    } catch (_) {
+      return {'error': true, 'message': 'Request failed', ...defaults};
+    }
+  }
+
+  Map<String, dynamic> _exception(Object e, Map<String, dynamic> defaults) =>
+      {'error': true, 'message': 'Network error: ${e.toString()}', ...defaults};
 }

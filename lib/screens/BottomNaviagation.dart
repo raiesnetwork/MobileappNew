@@ -16,6 +16,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'chats_page/personal_chat_screen.dart';
 import 'communities_page/my_community_screen.dart';
+import 'coupon_page/coupon_screens.dart';
 import 'my_products/my_products_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -280,8 +281,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             builder: (context, notifProvider, child) {
               final unreadCount = notifProvider.totalUnreadCount;
 
+
               return Stack(
                 children: [
+
                   IconButton(
                     icon: const Icon(Icons.notifications_outlined, color: Primary),
                     onPressed: () async {
@@ -301,6 +304,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
                   _buildBadge(unreadCount),
                 ],
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.local_offer_outlined, color: Primary),
+            tooltip: 'My Coupons',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const CouponListScreen(),
+                ),
               );
             },
           ),

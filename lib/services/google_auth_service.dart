@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
+import 'package:ixes.app/constants/apiConstants.dart';
 
 
 
@@ -31,21 +32,19 @@ class GoogleAuthResponse {
 class GoogleAuthService {
   // ── Configuration ──────────────────────────────────────────────────────────
 
+
+
+
+
+  static const String _googleMobileEndpoint = 'api/auth/google/mobile';
+
   static const String _serverClientId =
-      '574318127867-kbc7sr8jf2g3eravojk5ur34ncisvn38.apps.googleusercontent.com';
-
-  // TODO: Replace with your actual base URL once backend provides the endpoint
-  static const String _baseUrl = 'https://api.ixes.ai';
-
-  static const String _googleMobileEndpoint = '/api/auth/google/mobile';
-
-  // ── Google Sign-In instance ─────────────────────────────────────────────────
+      '71249839379-icd4lbchoecibeb8o88t8840osc2mgkb.apps.googleusercontent.com';
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     serverClientId: _serverClientId,
     scopes: ['email', 'profile'],
   );
-
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /// Signs in with Google and authenticates with the backend.
@@ -54,8 +53,11 @@ class GoogleAuthService {
   /// Returns [GoogleAuthResponse] with error message on failure.
   Future<GoogleAuthResponse> signInWithGoogle() async {
     try {
-      // Step 1: Trigger Google Sign-In
       debugPrint('GoogleAuthService: Starting Google Sign-In...');
+
+      // ✅ Sign out first so the account picker always appears
+      await _googleSignIn.signOut();
+
       final GoogleSignInAccount? account = await _googleSignIn.signIn();
 
       if (account == null) {
@@ -84,6 +86,7 @@ class GoogleAuthService {
 
       // Step 3: Send ID Token to backend
       return await _sendTokenToBackend(idToken);
+
     } on Exception catch (e) {
       debugPrint('GoogleAuthService: Exception → $e');
       return GoogleAuthResponse(
@@ -111,7 +114,7 @@ class GoogleAuthService {
   /// Expected success response: { "success": true, "token": "<jwt>", "user": { ... } }
   /// Expected failure response: { "success": false, "message": "<error>" }
   Future<GoogleAuthResponse> _sendTokenToBackend(String idToken) async {
-    final Uri url = Uri.parse('$_baseUrl$_googleMobileEndpoint');
+    final Uri url = Uri.parse('$apiBaseUrl$_googleMobileEndpoint');
 
     debugPrint('GoogleAuthService: Sending ID Token to → $url');
 

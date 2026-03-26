@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';  // For network images
 
 import '../../providers/personal_chat_provider.dart';
+import '../home/feedpage/feed_screen.dart';
 
 class MessageBubble extends StatefulWidget {
   final String? content;
@@ -227,8 +228,18 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     }
   }
+  List<dynamic> _resolvePostImages(Map<String, dynamic> postData) {
+    for (final key in ['images', 'image', 'media', 'attachments', 'photos']) {
+      final v = postData[key];
+      if (v is List && v.isNotEmpty) return v;
+      if (v is String && v.isNotEmpty) return [v];
+    }
+    return [];
+  }
 
   Widget _buildSharedPost() {
+    // sharedPostData is already resolved by _resolveSharedPostData
+    // in chat_detail_screen.dart before being passed here
     if (widget.sharedPostData == null) {
       return Container(
         padding: const EdgeInsets.all(12),
@@ -261,11 +272,13 @@ class _MessageBubbleState extends State<MessageBubble> {
 
     final postData = widget.sharedPostData!;
     final postContent = postData['text'] ?? '';
-    final postImages = postData['images'] as List<dynamic>? ?? [];
+    final postImages = _resolvePostImages(postData);
     final authorName = postData['authorName'] ?? 'Unknown User';
     final authorProfile = postData['authorProfile'];
     final likesCount = postData['likesCount'] ?? 0;
     final commentsCount = postData['commentsCount'] ?? 0;
+    print('🖼️ sharedPost data: ${jsonEncode(postData)}');
+    print('🖼️ images field: ${postData['images']}');
 
     return GestureDetector(
       onTap: () {
@@ -448,80 +461,54 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildPostImage(dynamic imageData) {
-    if (imageData == null) {
-      return Container(
-        color: widget.isMe
-            ? Colors.white.withOpacity(0.1)
-            : Colors.grey[200],
-        child: Center(
-          child: Icon(
-            Icons.image,
-            size: 40,
-            color: widget.isMe ? Colors.white30 : Colors.grey[400],
-          ),
-        ),
-      );
-    }
+    String? imageUrl;
 
-    final imageUrl = imageData is Map
-        ? imageData['url'] ?? imageData['image']
-        : imageData.toString();
+    if (imageData is String) {
+      imageUrl = imageData.isNotEmpty ? imageData : null;
+    } else if (imageData is Map) {
+      imageUrl = (imageData['url'] ??
+          imageData['image'] ??
+          imageData['imageUrl'] ??
+          imageData['src'] ??
+          imageData['path'])
+          ?.toString();
+    }
 
     if (imageUrl == null || imageUrl.isEmpty) {
-      return Container(
-        color: widget.isMe
-            ? Colors.white.withOpacity(0.1)
-            : Colors.grey[200],
-        child: Center(
-          child: Icon(
-            Icons.image,
-            size: 40,
-            color: widget.isMe ? Colors.white30 : Colors.grey[400],
-          ),
-        ),
-      );
+      return _buildImageError();
     }
 
-    // Handle base64 images
     if (imageUrl.startsWith('data:image/')) {
       try {
-        final base64Data = imageUrl.split(',')[1];
         return Image.memory(
-          base64Decode(base64Data),
+          base64Decode(imageUrl.split(',')[1]),
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return _buildImageError();
-          },
+          errorBuilder: (_, __, ___) => _buildImageError(),
         );
-      } catch (e) {
-        print('Error decoding base64 image: $e');
+      } catch (_) {
         return _buildImageError();
       }
     }
 
-    // Handle network images
+    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
+      imageUrl = 'https://api.ixes.ai/$imageUrl';
+    }
+
     return Image.network(
       imageUrl,
       fit: BoxFit.cover,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) return child;
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
         return Center(
           child: CircularProgressIndicator(
-            value: loadingProgress.expectedTotalBytes != null
-                ? loadingProgress.cumulativeBytesLoaded /
-                loadingProgress.expectedTotalBytes!
-                : null,
             strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(
-              widget.isMe ? Colors.white70 : Colors.grey[400]!,
-            ),
+            value: progress.expectedTotalBytes != null
+                ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                : null,
           ),
         );
       },
-      errorBuilder: (context, error, stackTrace) {
-        print('Error loading network image: $error');
-        return _buildImageError();
-      },
+      errorBuilder: (_, __, ___) => _buildImageError(),
     );
   }
 
@@ -554,14 +541,47 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _navigateToPost(Map<String, dynamic> postData) {
-    // TODO: Navigate to post detail screen
-    // You can implement this based on your app's navigation
-    print('Navigate to post: ${postData['_id']}');
+    // ✅ Guard against unmounted widget
+    if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Open post: ${postData['_id'] ?? 'Unknown'}'),
-        duration: const Duration(seconds: 2),
+    final postId = postData['_id']?.toString();
+    if (postId == null || postId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Post link not available'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // ✅ Capture context before async gap
+    final ctx = context;
+    if (!mounted) return;
+
+    Navigator.push(
+      ctx,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          appBar: AppBar(
+            backgroundColor: Colors.white,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back, color: Colors.black),
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: const Text(
+              'Post',
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          body: FeedScreen(postId: postId),
+        ),
       ),
     );
   }

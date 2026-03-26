@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/apiConstants.dart';
@@ -83,85 +84,65 @@ class CampaignService {
   Future<Map<String, dynamic>> createCampaign(
       Map<String, dynamic> campaignData) async {
     try {
-      print('createCampaign - Starting with data: $campaignData');
-      print('createCampaign - Community ID: ${campaignData['communityId']}');
-      print('createCampaign - Has base64 image: ${campaignData['coverImageBase64']?.isNotEmpty ?? false}');
-
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       if (token == null || token.isEmpty) {
-        print('createCampaign - Error: Authentication token is missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'campaign': null
-        };
+        return {'error': true, 'message': 'Authentication token is missing', 'campaign': null};
       }
 
-      final processedData = Map<String, dynamic>.from(campaignData);
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${apiBaseUrl}api/campaigns/create'),
+      );
 
-      // Handle base64 image properly
-      if (processedData['coverImageBase64'] != null &&
-          processedData['coverImageBase64'].toString().isNotEmpty) {
-        String base64Image = processedData['coverImageBase64'].toString();
+      request.headers['Authorization'] = 'Bearer $token';
 
-        if (base64Image.contains('data:image')) {
-          final parts = base64Image.split(',');
-          if (parts.length > 1) {
-            base64Image = parts.last;
+      campaignData.forEach((key, value) {
+        if (key != 'coverImageBase64' && value != null) {
+          if (value is List || value is Map) {
+            request.fields[key] = jsonEncode(value);
+          } else {
+            request.fields[key] = value.toString();
           }
         }
+      });
 
-        base64Image = base64Image.replaceAll(RegExp(r'\s+'), '');
-        processedData['coverImageBase64'] = base64Image;
-        print('createCampaign - Processed base64 image length: ${base64Image.length}');
-      } else {
-        processedData.remove('coverImageBase64');
+      final base64Image = campaignData['coverImageBase64']?.toString() ?? '';
+      if (base64Image.isNotEmpty) {
+        String cleanBase64 = base64Image;
+        if (cleanBase64.contains(',')) {
+          cleanBase64 = cleanBase64.split(',').last;
+        }
+        cleanBase64 = cleanBase64.replaceAll(RegExp(r'\s+'), '');
+
+        final imageBytes = base64Decode(cleanBase64);
+        request.files.add(http.MultipartFile.fromBytes(
+          'file',
+          imageBytes,
+          filename: 'cover_image.jpg',
+          contentType: MediaType('image', 'jpeg'),
+        ));
       }
 
-      print('createCampaign - Sending data: ${processedData.keys}');
-
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/campaigns/create'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: jsonEncode(processedData),
-      );
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       print('createCampaign - Status Code: ${response.statusCode}');
       print('createCampaign - Response Body: ${response.body}');
 
       if (response.statusCode == 201 || response.statusCode == 200) {
         final decoded = _safeJsonDecode(response.body);
-
-        Map<String, dynamic>? campaign;
-        if (decoded.containsKey('campaign')) {
-          campaign = decoded['campaign'];
-        } else if (decoded.containsKey('data')) {
-          campaign = decoded['data'];
-        } else if (decoded.containsKey('result')) {
-          campaign = decoded['result'];
-        } else {
-          campaign = decoded;
-        }
-
-        print('createCampaign - Extracted campaign: $campaign');
-
         return {
           'error': false,
           'message': decoded['message'] ?? 'Campaign created successfully',
-          'campaign': campaign
+          'campaign': decoded['campaign'] ?? {'_id': 'new'},
         };
       } else {
         final decoded = _safeJsonDecode(response.body);
-        print('createCampaign - Error: ${decoded['message'] ?? 'Failed to create campaign'}');
         return {
           'error': true,
-          'message': decoded['message'] ?? 'Failed to create campaign',
-          'campaign': null
+          'message': decoded['message'] ?? decoded['error'] ?? 'Failed to create campaign',
+          'campaign': null,
         };
       }
     } catch (e) {
@@ -169,7 +150,7 @@ class CampaignService {
       return {
         'error': true,
         'message': 'Error creating campaign: ${e.toString()}',
-        'campaign': null
+        'campaign': null,
       };
     }
   }
@@ -337,7 +318,7 @@ class CampaignService {
       }
 
       final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/community/campaigns/members/$campaignId'),
+        Uri.parse('${apiBaseUrl}api/campaigns/members/$campaignId'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',

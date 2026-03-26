@@ -188,22 +188,30 @@ class AnnouncementProvider with ChangeNotifier {
   int _totalCommunities = 0;
   int _totalCampaigns = 0;
   int _totalServices = 0;
+  List<dynamic> _dashboardCommunities = [];
+  List<dynamic> _dashboardCampaigns = [];
 
   int get totalCommunities => _totalCommunities;
   int get totalCampaigns => _totalCampaigns;
   int get totalServices => _totalServices;
+  List<dynamic> get dashboardCommunities => _dashboardCommunities;
+  List<dynamic> get dashboardCampaigns => _dashboardCampaigns;
+
   Future<void> fetchDashboardCounts() async {
     final result = await _announcementService.getDashboardCounts();
     if (result['error'] == false) {
       _totalCommunities = result['totalCommunities'] ?? 0;
       _totalCampaigns = result['totalCampaigns'] ?? 0;
       _totalServices = result['totalServices'] ?? 0;
+      _dashboardCommunities = result['communities'] ?? [];
+      _dashboardCampaigns = result['campaigns'] ?? [];
     } else {
-      // You can handle the error message here if needed
       print('Dashboard count fetch error: ${result['message']}');
       _totalCommunities = 0;
       _totalCampaigns = 0;
       _totalServices = 0;
+      _dashboardCommunities = [];
+      _dashboardCampaigns = [];
     }
     notifyListeners();
   }

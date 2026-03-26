@@ -33,6 +33,55 @@ class AuthProvider with ChangeNotifier {
     _errorMessage = '';
     notifyListeners();
   }
+  Future<void> saveUserFromGoogle({
+    required String token,
+    required String userId,
+    required String username,
+    Map<String, dynamic>? userData,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      // Save token
+      await prefs.setString('auth_token', token);
+      print('✅ Google token saved');
+
+      // Save user ID
+      await prefs.setString('user_id', userId);
+      print('✅ Google user ID saved');
+
+      // Save username
+      await prefs.setString('user_name', username);
+      print('✅ Google username saved');
+
+      // Save full user data as JSON
+      final Map<String, dynamic> userMap = {
+        'id': userId,
+        'username': username,
+        'token': token,
+        'mobile': '',
+        'isFamilyHead': false,
+        'guidStatus': userData?['guid'] ?? false,
+        ...?userData,
+      };
+      await prefs.setString('user_data', jsonEncode(userMap));
+      print('✅ Google user data saved');
+
+      // Set user in memory
+      _user = User(
+        id: userId,
+        username: username,
+        mobile: '',
+        isFamilyHead: false,
+        guidStatus: userData?['guid'] ?? false,
+        token: token,
+      );
+
+      notifyListeners();
+    } catch (e) {
+      print('❌ Error saving Google user data: $e');
+    }
+  }
 
   Future<bool> signup({
     required String mobile,

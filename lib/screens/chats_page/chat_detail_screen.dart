@@ -839,6 +839,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemBuilder: (context, index) {
                       final message = messages[index];
+
+// ✅ Debug shared post
+                      if (message['isSharedPost'] == true || message['sharedPost'] != null ||
+                          (message['text']?.toString() ?? '').contains('Forwarded')) {
+                        print('🔍 SHARED POST MESSAGE: ${jsonEncode(message)}');
+                      }
+
                       if (message['isDelete'] == true)
                         return const SizedBox.shrink();
 
@@ -880,16 +887,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               isOptimistic: message['isOptimistic'] ?? false,
                               readBy: message['readBy'] ?? false,
                               messageId: message['_id'] ?? '',
-                              receiverId: isMe
-                                  ? message['receiverId']
-                                  : message['senderId'],
+                              receiverId: isMe ? message['receiverId'] : message['senderId'],
                               isAudio: message['isAudio'] ?? false,
                               audioUrl: message['audioUrl'],
+                              // ✅ Pass shared post data
+                              isSharedPost: message['forwerd'] == true ||
+                                  message['forwerdMessage'] != null ||
+                                  message['isSharedPost'] == true ||
+                                  message['sharedPost'] != null,
+                              sharedPostData: _resolveSharedPostData(message),
                             ),
                           ),
                         ],
                       );
                     },
+
                   ),
 
                       ),
@@ -930,6 +942,45 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         },
       ),
     );
+  }
+  Map<String, dynamic>? _resolveSharedPostData(Map<String, dynamic> message) {
+    final direct = message['sharedPost'];
+    if (direct is Map<String, dynamic>) return direct;
+
+    final isForwarded = message['forwerd'] == true ||
+        message['forwerdMessage'] != null;
+
+    if (isForwarded) {
+      final image = message['image']?.toString() ?? '';
+      final text = message['text']?.toString() ?? '';
+      final forwardLabel = message['forwerdMessage']?.toString() ?? '';
+
+      // ✅ Extract actual postId from forwerdUrl
+      // forwerdUrl format: "https://ixes.ai/feeds/6954b0fcfb282e4eb94cee1a"
+      String actualPostId = '';
+      final forwerdUrl = message['forwerdUrl']?.toString() ?? '';
+      if (forwerdUrl.isNotEmpty) {
+        actualPostId = forwerdUrl.split('/').last;
+      }
+      // Fallback to sharedPostId if forwerdUrl not available
+      if (actualPostId.isEmpty) {
+        actualPostId = message['sharedPostId']?.toString() ?? '';
+      }
+
+      print('✅ Resolved postId: $actualPostId from forwerdUrl: $forwerdUrl');
+
+      return {
+        '_id': actualPostId,
+        'text': text,
+        'images': image.isNotEmpty ? [image] : [],
+        'authorName': forwardLabel,
+        'authorProfile': '',
+        'likesCount': 0,
+        'commentsCount': 0,
+      };
+    }
+
+    return null;
   }
 
   // ── Input bar ─────────────────────────────────────────────────────────────

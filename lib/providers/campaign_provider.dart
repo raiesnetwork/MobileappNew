@@ -20,20 +20,41 @@ class CampaignProvider with ChangeNotifier {
   int _itemsPerPage = 10;
   bool _allDataLoaded = false;
 
+  // ✅ Expose currentPage for screen to use
+  int get currentPage => _currentPage;
+
+  // ✅ Silent reset — no notifyListeners, used internally before fetch
+  void _resetState() {
+    _allCampaigns = [];
+    campaigns = [];
+    hasMoreCampaigns = true;
+    _currentPage = 0;
+    _allDataLoaded = false;
+    errorMessage = null;
+    isLoading = false;
+  }
+
+  // ✅ Public clear for logout — notifies listeners to update UI
+  void clearCampaigns() {
+    _resetState();
+    notifyListeners();
+  }
+
   Future<void> fetchAllCampaigns({required int page, int limit = 10}) async {
     _itemsPerPage = limit;
 
-    // If this is the first page, fetch from server
     if (page == 1) {
       await _fetchFromServer();
       _loadPage(1);
       return;
     }
 
-    // For subsequent pages, just load from cached data
-    if (_allDataLoaded) {
-      _loadPage(page);
+    // ✅ If somehow data isn't loaded yet, fetch first
+    if (!_allDataLoaded) {
+      await _fetchFromServer();
     }
+
+    _loadPage(page); // ✅ Always runs now
   }
 
   Future<void> _fetchFromServer() async {
@@ -42,9 +63,12 @@ class CampaignProvider with ChangeNotifier {
       return;
     }
 
+    // ✅ Silently reset state before fetch — no extra notifyListeners
+    _resetState();
+
     isLoading = true;
     errorMessage = null;
-    notifyListeners();
+    notifyListeners(); // ✅ Only ONE notify for loading state
 
     print('🔄 Fetching all campaigns from server...');
 
@@ -55,7 +79,6 @@ class CampaignProvider with ChangeNotifier {
 
       print('✅ Fetched ${fetchedCampaigns.length} total campaigns from server');
 
-      // Store all campaigns
       _allCampaigns = fetchedCampaigns
           .map((campaign) => Map<String, dynamic>.from(campaign as Map))
           .toList();
@@ -88,17 +111,14 @@ class CampaignProvider with ChangeNotifier {
       return;
     }
 
-    // Calculate actual end index (don't exceed array bounds)
     final actualEndIndex = endIndex > _allCampaigns.length
         ? _allCampaigns.length
         : endIndex;
 
     if (page == 1) {
-      // First page - replace campaigns
       campaigns = _allCampaigns.sublist(startIndex, actualEndIndex);
       print('🔄 Loaded first page: ${campaigns.length} campaigns');
     } else {
-      // Subsequent pages - append campaigns
       final newCampaigns = _allCampaigns.sublist(startIndex, actualEndIndex);
       campaigns.addAll(newCampaigns);
       print('➕ Added ${newCampaigns.length} campaigns (total: ${campaigns.length})');
@@ -132,7 +152,6 @@ class CampaignProvider with ChangeNotifier {
         final Map<String, dynamic> typedCampaign =
         Map<String, dynamic>.from(newCampaign as Map);
 
-        // Add to both all campaigns and displayed campaigns
         _allCampaigns.insert(0, typedCampaign);
         campaigns.insert(0, typedCampaign);
 
@@ -151,16 +170,14 @@ class CampaignProvider with ChangeNotifier {
     return response;
   }
 
-  // Handle both S3 URLs and relative paths
   String? getCampaignImageUrl(Map<String, dynamic> campaign) {
     final imageFields = ['coverImage', 'coverImageUrl', 'image'];
 
     for (final field in imageFields) {
       if (campaign[field] != null && campaign[field].toString().isNotEmpty) {
         String imageUrl = campaign[field].toString().trim();
-        String originalUrl = imageUrl; // For debugging
+        String originalUrl = imageUrl;
 
-        // Already a full URL (S3, HTTP, HTTPS)
         if (imageUrl.startsWith('http://') ||
             imageUrl.startsWith('https://') ||
             imageUrl.contains('amazonaws.com') ||
@@ -169,7 +186,6 @@ class CampaignProvider with ChangeNotifier {
           return imageUrl;
         }
 
-        // Relative path - prepend base URL
         if (imageUrl.isNotEmpty) {
           imageUrl = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
           final finalUrl = '${apiBaseUrl}$imageUrl';
@@ -183,7 +199,6 @@ class CampaignProvider with ChangeNotifier {
     return null;
   }
 
-  // Better image widget with caching
   Widget buildCampaignImage(
       Map<String, dynamic> campaign, {
         double? width,
@@ -278,7 +293,6 @@ class CampaignProvider with ChangeNotifier {
       final updatedCampaign =
       Map<String, dynamic>.from(response['campaign'] as Map);
 
-      // Update in both lists
       final allIndex = _allCampaigns.indexWhere((c) => c['_id'] == campaignId);
       if (allIndex != -1) {
         _allCampaigns[allIndex] = updatedCampaign;
@@ -307,12 +321,10 @@ class CampaignProvider with ChangeNotifier {
     final response = await _campaignService.deleteCampaign(campaignId);
 
     if (!response['error']) {
-      // Remove from both lists
       _allCampaigns.removeWhere((c) => c['_id'] == campaignId);
       campaigns.removeWhere((c) => c['_id'] == campaignId);
       print('Campaign $campaignId removed from lists');
 
-      // Update hasMore flag
       hasMoreCampaigns = campaigns.length < _allCampaigns.length;
     } else {
       errorMessage = response['message'];
@@ -325,16 +337,9 @@ class CampaignProvider with ChangeNotifier {
 
   Future<void> refreshCampaigns() async {
     print('🔄 Refreshing campaigns...');
-    _currentPage = 0;
-    _allCampaigns.clear();
-    campaigns.clear();
-    hasMoreCampaigns = true;
-    _allDataLoaded = false;
-    errorMessage = null;
     await fetchAllCampaigns(page: 1);
   }
 
-  // Get current pagination info
   String getPaginationInfo() {
     final totalPages = (_allCampaigns.length / _itemsPerPage).ceil();
     return 'Page $_currentPage of $totalPages (${campaigns.length}/${_allCampaigns.length} campaigns)';

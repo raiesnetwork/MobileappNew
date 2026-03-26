@@ -5,9 +5,11 @@ import 'package:ixes.app/globalwidget/global_textfild.dart';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/compoants.dart/forgetpassword.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
 import 'package:country_picker/country_picker.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/auth_service.dart';
 import '../../services/google_auth_service.dart';
 import 'signup_screen.dart';
 import 'otp_screen.dart';
@@ -155,12 +157,37 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleGoogleSignIn() async {
+    // ✅ Step 1: Clear old session first so backend doesn't conflict
+    final prefs = await SharedPreferences.getInstance();
+    final oldToken = prefs.getString('auth_token');
+    if (oldToken != null) {
+      // Tell backend to invalidate old session
+      await AuthService.logout();
+      // Clear local storage immediately
+      await prefs.remove('auth_token');
+      await prefs.remove('user_data');
+      await prefs.remove('user_id');
+      await prefs.remove('user_name');
+    }
+
+    // ✅ Step 2: Now do Google Sign-In with clean slate
     final result = await _googleAuthService.signInWithGoogle();
     if (!mounted) return;
+
     if (result.success && result.token != null) {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.saveUserFromGoogle(
+        token: result.token!,
+        userId: result.user?['id'] ?? '',
+        username: result.user?['username'] ?? result.user?['name'] ?? '',
+        userData: result.user,
+      );
+
+      if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-            builder: (context) => const MainScreen(initialIndex: 0)),
+          builder: (context) => const MainScreen(initialIndex: 0),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -168,8 +195,7 @@ class _LoginScreenState extends State<LoginScreen>
           content: Text(result.message ?? 'Google Sign-In failed.'),
           backgroundColor: Colors.redAccent,
           behavior: SnackBarBehavior.floating,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
@@ -550,6 +576,8 @@ class _LoginScreenState extends State<LoginScreen>
                                 fontSize: 13.sp,
                                 fontWeight: FontWeight.w700,
                               ),
+
+
                             ),
                           ),
                         ],

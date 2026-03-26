@@ -27,7 +27,6 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
 
-  /// Roles that are allowed to see the Dashboard card.
   static const Set<String> _dashboardAllowedRoles = {
     'Student',
     'Head of Department (HOD)',
@@ -53,15 +52,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = Provider.of<CommunityProvider>(context, listen: false);
-
-      // ── KEY FIX ────────────────────────────────────────────────────────
-      // Clear any leftover hierarchy stats from the previously viewed
-      // community BEFORE the new fetch starts.  Without this, the old
-      // stats (and the wrong userRole) are visible for the ~200 ms it
-      // takes the new request to complete, causing the "first community
-      // flashes" bug.
       provider.clearHierarchyStats();
-
       print('🚀 Fetching hierarchy stats for: ${widget.communityId}');
       provider.fetchCommunityHierarchyStats(widget.communityId);
     });
@@ -73,21 +64,162 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // userRole helper
-  // ─────────────────────────────────────────────────────────────────────────
-
-  /// Reads userRole ONLY when communityInfo in the provider belongs to THIS
-  /// community.  If the provider still holds stale info (different _id),
-  /// returns null so the dashboard card stays hidden until fresh data arrives.
   String? _resolveUserRole(CommunityProvider provider) {
     final loadedId = provider.communityInfo['_id']?.toString() ?? '';
-    if (loadedId != widget.communityId) return null; // stale — ignore
+    if (loadedId != widget.communityId) return null;
     return provider.communityInfo['userRole'] as String?;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Widgets
+  // ✅ NEW: Horizontal Resources Cards
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Widget _buildResourcesHorizontal(Map<String, dynamic> statsData) {
+    final items = [
+      {
+        'title': 'Communities',
+        'value': (statsData['totalCommunities'] ?? 0).toString(),
+        'icon': Icons.business,
+        'color': const Color(0xFF3B82F6),
+        'bgColor': const Color(0xFFEFF6FF),
+        'onTap': _navigateToCommunities,
+      },
+      {
+        'title': 'Services',
+        'value': (statsData['totalServices'] ?? 0).toString(),
+        'icon': Icons.business_center,
+        'color': const Color(0xFFF59E0B),
+        'bgColor': const Color(0xFFFFFBEB),
+        'onTap': _navigateToServices,
+      },
+      {
+        'title': 'Campaigns',
+        'value': (statsData['totalCampaigns'] ?? 0).toString(),
+        'icon': Icons.campaign,
+        'color': const Color(0xFFEC4899),
+        'bgColor': const Color(0xFFFDF2F8),
+        'onTap': _navigateToCampaigns,
+      },
+    ];
+
+    return AnimatedBuilder(
+      animation: _fadeAnimation,
+      builder: (context, child) {
+        return Transform.translate(
+          offset: Offset(0, 50 * (1 - _fadeAnimation.value)),
+          child: Opacity(
+            opacity: _fadeAnimation.value,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'RESOURCES',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[500],
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: items.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final item = entry.value;
+                    return Expanded(
+                      child: GestureDetector(
+                        onTap: item['onTap'] as VoidCallback,
+                        child: Container(
+                          margin: EdgeInsets.only(
+                            right: i < items.length - 1 ? 10 : 0,
+                          ),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.grey.withOpacity(0.12),
+                              width: 0.5,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Icon badge
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: item['bgColor'] as Color,
+                                  borderRadius: BorderRadius.circular(9),
+                                ),
+                                child: Icon(
+                                  item['icon'] as IconData,
+                                  size: 16,
+                                  color: item['color'] as Color,
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                              // Value
+                              Text(
+                                item['value'] as String,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.black87,
+                                  height: 1,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              // Label
+                              Text(
+                                item['title'] as String,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.grey[500],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 10),
+                              // Bottom accent bar
+                              Container(
+                                height: 3,
+                                decoration: BoxDecoration(
+                                  color:
+                                  (item['color'] as Color).withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: 0.6,
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      color: item['color'] as Color,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Existing grouped stats box (used for Management)
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildGroupedStatsBox({
@@ -428,7 +560,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
             padding: const EdgeInsets.all(24),
             decoration:
             BoxDecoration(color: Colors.red[50], shape: BoxShape.circle),
-            child: Icon(Icons.error_outline, size: 48, color: Colors.red[400]),
+            child:
+            Icon(Icons.error_outline, size: 48, color: Colors.red[400]),
           ),
           const SizedBox(height: 16),
           Text(
@@ -443,8 +576,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(
               error,
-              style:
-              TextStyle(fontSize: 12, color: Colors.grey[600], height: 1.4),
+              style: TextStyle(
+                  fontSize: 12, color: Colors.grey[600], height: 1.4),
               textAlign: TextAlign.center,
             ),
           ),
@@ -473,7 +606,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
                       .fetchCommunityHierarchyStats(widget.communityId);
                 },
                 icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Retry', style: TextStyle(fontSize: 12)),
+                label:
+                const Text('Retry', style: TextStyle(fontSize: 12)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Primary,
                   foregroundColor: Colors.white,
@@ -627,7 +761,8 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black87, size: 20),
+          icon:
+          const Icon(Icons.arrow_back, color: Colors.black87, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
@@ -636,13 +771,14 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
               Provider.of<CommunityProvider>(context, listen: false)
                   .fetchCommunityHierarchyStats(widget.communityId);
             },
-            icon: const Icon(Icons.refresh, color: Colors.black87, size: 20),
+            icon:
+            const Icon(Icons.refresh, color: Colors.black87, size: 20),
           ),
         ],
       ),
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
-          // ── Loading ────────────────────────────────────────────────────
+          // ── Loading ──────────────────────────────────────────────────
           if (provider.isLoadingHierarchyStats) {
             return const Center(
               child: Column(
@@ -665,7 +801,7 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
             );
           }
 
-          // ── Error ──────────────────────────────────────────────────────
+          // ── Error ────────────────────────────────────────────────────
           if (provider.hierarchyStatsError != null) {
             return _buildErrorState(provider.hierarchyStatsError!);
           }
@@ -674,14 +810,9 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
               provider.communityHierarchyStats['data'] as Map<String, dynamic>?
                   ?? {};
 
-          // ── Empty / still-loading ──────────────────────────────────────
+          // ── Empty ────────────────────────────────────────────────────
           if (statsData.isEmpty) return _buildEmptyState();
 
-          // ── FIX: Resolve userRole safely ───────────────────────────────
-          // _resolveUserRole returns null when communityInfo._id ≠ this
-          // community's ID, meaning the provider still holds stale data
-          // from the previous community.  In that case we hide the
-          // Dashboard card rather than show the wrong role.
           final String? userRole = _resolveUserRole(provider);
 
           print('🎭 userRole: $userRole  |  communityId: ${widget.communityId}');
@@ -699,45 +830,14 @@ class _CommunityStatsScreenState extends State<CommunityStatsScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Header analytics card
                   _buildHeaderCard(statsData),
 
-                  // Resources — always visible
-                  _buildGroupedStatsBox(
-                    title: 'Resources',
-                    primaryColor: const Color(0xFF8B5CF6),
-                    index: 0,
-                    items: [
-                      {
-                        'title': 'Communities',
-                        'value':
-                        (statsData['totalCommunities'] ?? 0).toString(),
-                        'icon': Icons.business,
-                        'color': const Color(0xFF3B82F6),
-                        'onTap': _navigateToCommunities,
-                      },
-                      {
-                        'title': 'Services',
-                        'value':
-                        (statsData['totalServices'] ?? 0).toString(),
-                        'icon': Icons.business_center,
-                        'color': const Color(0xFFF59E0B),
-                        'onTap': _navigateToServices,
-                      },
-                      {
-                        'title': 'Campaigns',
-                        'value':
-                        (statsData['totalCampaigns'] ?? 0).toString(),
-                        'icon': Icons.campaign,
-                        'color': const Color(0xFFEC4899),
-                        'onTap': _navigateToCampaigns,
-                      },
-                    ],
-                  ),
+                  // ✅ Resources — horizontal 3-column cards
+                  _buildResourcesHorizontal(statsData),
 
                   // Management — Dashboard tile is role-gated
                   _buildManagementBox(statsData, userRole),
-
-                  
 
                   const SizedBox(height: 12),
                 ],
