@@ -20,11 +20,19 @@ class GoogleAuthResponse {
   });
 
   factory GoogleAuthResponse.fromJson(Map<String, dynamic> json) {
+    // ✅ Backend returns flat response, build user map manually
+    final user = <String, dynamic>{
+      'id': json['id'] ?? json['_id'] ?? '',
+      'username': json['username'] ?? '',
+      'guid': json['guid'] ?? false,
+      'role': json['role'] ?? 'USER',
+    };
+
     return GoogleAuthResponse(
       success: json['success'] == true,
       token: json['token'],
       message: json['message'],
-      user: json['user'],
+      user: user,  // ✅ now properly populated
     );
   }
 }

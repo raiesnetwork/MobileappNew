@@ -15,9 +15,12 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   @override
+  @override
   void initState() {
     super.initState();
-    Provider.of<NotificationProvider>(context, listen: false).loadNotifications();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<NotificationProvider>(context, listen: false).loadNotifications();
+    });
   }
 
   Future<void> _refresh() async {
@@ -210,7 +213,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 final message = item['message'] ?? 'No message';
                 final type = item['type'] ?? 'Notification';
                 final createdAt = formatDate(item['createdAt'] ?? '');
-                final isUnread = item['status'] == 'unread' || item['read'] == false;
+                final isUnread = item['read'] == false;
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),

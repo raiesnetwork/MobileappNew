@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/comment_provider.dart';
 import '../BottomNaviagation.dart';
 
 class OTPScreen extends StatefulWidget {
@@ -46,6 +48,13 @@ Future<void> _verifyOTP() async {
   if (!mounted) return;
 
   if (success) {
+    // ✅ ADD THESE 4 LINES
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id') ?? '';
+    if (userId.isNotEmpty) {
+      Provider.of<CommentProvider>(context, listen: false)
+          .setCurrentUserId(userId);
+    }
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (context) => const MainScreen(initialIndex: 0)),
     );

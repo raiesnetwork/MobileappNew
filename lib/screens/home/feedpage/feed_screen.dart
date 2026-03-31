@@ -53,6 +53,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Set<String> processingLikes = {};
   Set<String> processingComments = {};
   Set<String> processingShares = {};
+  bool _isInitialized = false;
 
   // Pagination settings
   static const int _postsPerPage = 10;
@@ -163,6 +164,7 @@ class _FeedScreenState extends State<FeedScreen> {
   Future<void> _loadInitialData() async {
     setState(() {
       isLoading = true;
+      _isInitialized = false;
       _currentPage = 0;
       posts.clear();
       _originalPosts.clear();
@@ -172,13 +174,12 @@ class _FeedScreenState extends State<FeedScreen> {
       _currentSearchQuery = '';
     });
 
-    // ── Single post mode: only load the specific post ──────────────────
     if (widget.postId != null && widget.postId!.isNotEmpty) {
       await _loadSinglePost(widget.postId!);
+      if (mounted) setState(() => _isInitialized = true);
       return;
     }
 
-    // ── Normal feed mode ───────────────────────────────────────────────
     final provider = context.read<CommentProvider>();
 
     if (isCommunityFeed) {
@@ -195,13 +196,18 @@ class _FeedScreenState extends State<FeedScreen> {
       );
     }
 
+    if (!mounted) return;
+
     setState(() {
-      posts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _originalPosts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _allPostsCache = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
+      final currentPosts =
+      isCommunityFeed ? provider.communityPosts : provider.posts;
+      posts = List.from(currentPosts);
+      _originalPosts = List.from(currentPosts);
+      _allPostsCache = List.from(currentPosts);
       _currentPage = 1;
-      _hasMorePosts = (isCommunityFeed ? provider.communityPosts : provider.posts).length == _postsPerPage;
+      _hasMorePosts = currentPosts.length == _postsPerPage;
       isLoading = false;
+      _isInitialized = true;
     });
   }
   Future<void> _loadSinglePost(String postId) async {
@@ -453,6 +459,10 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Widget _buildBody() {
+    if (!_isInitialized) {
+      return _buildLoadingState();
+    }
+
     if (isLoading && posts.isEmpty) {
       return _buildLoadingState();
     }
@@ -472,7 +482,7 @@ class _FeedScreenState extends State<FeedScreen> {
             padding: const EdgeInsets.symmetric(vertical: 5),
             sliver: SliverList(
               delegate: SliverChildBuilderDelegate(
-                (context, index) {
+                    (context, index) {
                   if (index < posts.length) {
                     return _buildPostCard(context, posts[index]);
                   } else if (index == posts.length && _hasMorePosts) {

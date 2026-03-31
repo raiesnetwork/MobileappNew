@@ -93,9 +93,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       print('✅ Group bubble resolved postId: $actualPostId from forwerdUrl: $forwerdUrl');
 
       postData = {
-        '_id': actualPostId,   // ← FIXED: now uses actual post ID
+        '_id': actualPostId,
         'text': text,
-        'images': image.isNotEmpty ? [image] : [],
+        'images': (image.isNotEmpty &&
+            (image.startsWith('http://') ||
+                image.startsWith('https://') ||
+                image.startsWith('data:image')))
+            ? [image]
+            : [],   // ← don't add plain text as image
         'authorName': forwardLabel,
         'authorProfile': '',
         'likesCount': 0,
@@ -353,9 +358,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         );
       }
     }
-
-    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-      imageUrl = 'https://api.ixes.ai/$imageUrl';
+    if (!imageUrl.startsWith('http://') &&
+        !imageUrl.startsWith('https://') &&
+        !imageUrl.startsWith('data:image/')) {
+      // Not a valid image URL or base64 — show broken image placeholder
+      return Container(
+        color: Colors.grey[200],
+        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+      );
     }
 
     return Image.network(

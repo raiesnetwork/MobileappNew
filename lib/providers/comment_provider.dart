@@ -688,4 +688,11 @@ class CommentProvider with ChangeNotifier {
     _totalUserPages = 1;
     notifyListeners();
   }
+  void clearAllData() {
+    _posts = [];
+    _communityPosts = [];
+    _currentUserId = ''; // ✅ clears stale userId
+    _commentsByPostId.clear();
+    notifyListeners();
+  }
 }

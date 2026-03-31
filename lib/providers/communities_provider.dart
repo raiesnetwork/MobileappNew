@@ -219,32 +219,43 @@ class CommunityProvider with ChangeNotifier {
 
       final result = await _communityService.joinCommunity(communityId);
 
+      // ✅ Check for onboarding message FIRST — before touching any state
+      final message = result['message']?.toString().toLowerCase() ?? '';
+      final needsOnboarding = message.contains('onboarding') ||
+          message.contains('finish') ||
+          message.contains('complete');
+
+      if (needsOnboarding) {
+        // ❌ Don't update any state — just return the result as-is
+        _isLoadingAll = false;
+        notifyListeners();
+        return result;
+      }
+
       if (!(result['error'] as bool)) {
-        // Update local all communities list immediately
         final communityList = _allCommunities['data'] as List<dynamic>? ?? [];
         final index = communityList.indexWhere((c) => c['_id'] == communityId);
 
         if (index != -1) {
-          final community = communityList[index] as Map<String, dynamic>;
-          final isPrivate = result['isPrivate'] as bool? ?? community['isPrivate'] ?? false;
+          final community = Map<String, dynamic>.from(
+              communityList[index] as Map<String, dynamic>);
+          final isPrivate =
+              result['isPrivate'] as bool? ?? community['isPrivate'] ?? false;
 
           communityList[index] = {
             ...community,
             'isJoined': !isPrivate,
             'isMember': !isPrivate,
-            'requestStatus': isPrivate ? (result['requestStatus'] ?? 'pending') : null,
+            'requestStatus': isPrivate ? 'pending' : null,
           };
-
           _allCommunities = {..._allCommunities, 'data': communityList};
         }
 
-        // CRITICAL: Refresh my communities FIRST, then all communities
         await fetchMyCommunities();
-        await fetchCommunities(page: 1);
-
         _allCommunitiesError = null;
       } else {
-        _allCommunitiesError = result['message'] as String? ?? 'Failed to join community';
+        _allCommunitiesError =
+            result['message'] as String? ?? 'Failed to join community';
       }
 
       _isLoadingAll = false;

@@ -414,52 +414,37 @@ class CommunityService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-
       if (token == null || token.isEmpty) {
         return {
           'error': true,
           'message': 'Authentication token is missing',
+          'data': null
         };
       }
+      final uri = Uri.parse('${apiBaseUrl}api/communities/$communityId');
+      final request = http.MultipartRequest('PUT', uri);
 
-      final body = {
-        'name': name,
-        'description': description,
-        'isPrivate': isPrivate,
-        'coverImage': coverImage, // Explicitly include, even if null
-        'profileImage': profileImage, // Explicitly include, even if null
-      };
+      request.headers['Authorization'] = 'Bearer $token';
+      request.fields['name'] = name;
+      request.fields['description'] = description;
+      request.fields['isPrivate'] = isPrivate.toString();
 
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/communities/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
-
-      print('Update Community Status: ${response.statusCode}');
-      print('Update Response: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': false,
-          'message': decoded['message'] ?? 'Community updated successfully',
-        };
-      } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to update community',
-        };
+      // ✅ Send as file, not base64
+      if (profileImage != null && profileImage.startsWith('/')) {
+        request.files.add(await http.MultipartFile.fromPath(
+            'profileImage', profileImage));
       }
+      if (coverImage != null && coverImage.startsWith('/')) {
+        request.files.add(await http.MultipartFile.fromPath(
+            'coverImage', coverImage));
+      }
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      final body = jsonDecode(response.body);
+      return {'error': response.statusCode != 200, ...body};
     } catch (e) {
-      return {
-        'error': true,
-        'message': 'Error updating community: ${e.toString()}',
-      };
+      return {'error': true, 'message': e.toString()};
     }
   }
 

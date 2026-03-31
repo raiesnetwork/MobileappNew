@@ -15,6 +15,7 @@ import 'community_events.dart';
 import 'community_members.dart';
 import 'community_services.dart';
 import 'community_stats.dart';
+import 'create_community_screen.dart';
 import 'invite_status_screen.dart';
 
 class CommunityInfoScreen extends StatefulWidget {
@@ -55,6 +56,7 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     }
   }
 
+// REPLACE the entire try block inside _pickImage with this:
   Future<void> _pickImage(ImageSource source, bool isProfileImage,
       void Function(void Function()) setDialogState) async {
     try {
@@ -67,20 +69,13 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
       if (pickedFile == null) return;
 
       final imageFile = File(pickedFile.path);
-      final imageBytes = await imageFile.readAsBytes();
-      final base64Image = base64Encode(imageBytes);
-      final extension = pickedFile.path.split('.').last.toLowerCase();
-      final mimeType = _getMimeType(extension);
-      final dataUrl = 'data:$mimeType;base64,$base64Image';
 
       setDialogState(() {
         if (isProfileImage) {
           _profileImageFile = imageFile;
-          _profileImageBase64 = dataUrl;
           _existingProfileImage = null;
         } else {
           _coverImageFile = imageFile;
-          _coverImageBase64 = dataUrl;
           _existingCoverImage = null;
         }
       });
@@ -131,64 +126,462 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     _existingCoverImage = community['coverImage'];
     _profileImageFile = null;
     _coverImageFile = null;
-    _profileImageBase64 = null;
-    _coverImageBase64 = null;
     _isSubmitting = false;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Edit Community',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Form(
-            key: _formKey,
-            child: SingleChildScrollView(
+        builder: (context, setDialogState) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          child: SingleChildScrollView(
+            child: Form(
+              key: _formKey,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildTextField(_nameController, 'Name', true),
-                  const SizedBox(height: 12),
-                  _buildTextField(_descriptionController, 'Description', true),
-                  const SizedBox(height: 12),
-                  _buildPrivacyToggle(setDialogState),
-                  const SizedBox(height: 16),
-                  _buildImageSelectors(setDialogState),
+
+                  // ── Header ──────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36, height: 36,
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.edit_outlined,
+                              color: Colors.blue.shade600, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Edit community',
+                                  style: TextStyle(
+                                      fontSize: 15, fontWeight: FontWeight.w600)),
+                              Text('Update your community details',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[500])),
+                            ],
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => Navigator.pop(context),
+                          child: Container(
+                            width: 28, height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.grey.shade200),
+                            ),
+                            child: const Icon(Icons.close, size: 14,
+                                color: Colors.grey),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                    child: Column(
+                      children: [
+
+                        // ── Cover image + remove button ──────────────────
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () => _showImageSourceDialog(false, setDialogState),
+                              child: Container(
+                                height: 110,
+                                width: double.infinity,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  color: Colors.grey.shade100,
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: _coverImageFile != null
+                                      ? Image.file(_coverImageFile!, fit: BoxFit.cover)
+                                      : _existingCoverImage?.isNotEmpty == true
+                                      ? _buildImageWidget(_existingCoverImage!)
+                                      : Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.add_photo_alternate_outlined,
+                                          color: Colors.grey[400], size: 28),
+                                      const SizedBox(height: 4),
+                                      Text('Tap to add cover image',
+                                          style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.grey[400])),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // Red remove button for cover
+                            if (_coverImageFile != null ||
+                                _existingCoverImage?.isNotEmpty == true)
+                              Positioned(
+                                top: -8,
+                                right: -8,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => setDialogState(() {
+                                    _coverImageFile = null;
+                                    _existingCoverImage = null;
+                                  }),
+                                  child: Container(
+                                    width: 24,
+                                    height: 24,
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.white, width: 2),
+                                    ),
+                                    child: const Icon(Icons.close, size: 12, color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+
+                        // ── Profile image row (negative top margin to overlap cover) ──
+                        Transform.translate(
+                          offset: const Offset(0, -20),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 12),
+                            child: Row(
+                              children: [
+                                Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+
+                                    // Profile image — large enough to tap easily
+                                    GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onTap: () {
+                                        debugPrint('Profile image tapped');
+                                        _showImageSourceDialog(true, setDialogState);
+                                      },
+                                      child: Container(
+                                        width: 70,
+                                        height: 70,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(color: Colors.white, width: 3),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.15),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                          color: const Color(0xFF800080),
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(13),
+                                          child: _profileImageFile != null
+                                              ? Image.file(_profileImageFile!,
+                                              fit: BoxFit.cover)
+                                              : _existingProfileImage?.isNotEmpty == true
+                                              ? _buildImageWidget(
+                                            _existingProfileImage!,
+                                            isProfileImage: true,
+                                          )
+                                              : Center(
+                                            child: Text(
+                                              (_nameController.text.isNotEmpty
+                                                  ? _nameController.text[0]
+                                                  : 'C')
+                                                  .toUpperCase(),
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 24,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+
+                                    // Pencil badge — IgnorePointer so taps pass through
+                                    Positioned(
+                                      bottom: 0,
+                                      right: 0,
+                                      child: IgnorePointer(
+                                        child: Container(
+                                          width: 22,
+                                          height: 22,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Colors.white,
+                                            border: Border.all(color: Colors.grey.shade300),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.1),
+                                                blurRadius: 3,
+                                              ),
+                                            ],
+                                          ),
+                                          child: const Icon(Icons.edit,
+                                              size: 12, color: Colors.black87),
+                                        ),
+                                      ),
+                                    ),
+
+                                    // Red remove button — only when image exists
+                                    if (_profileImageFile != null ||
+                                        _existingProfileImage?.isNotEmpty == true)
+                                      Positioned(
+                                        top: -6,
+                                        right: -6,
+                                        child: GestureDetector(
+                                          behavior: HitTestBehavior.opaque,
+                                          onTap: () => setDialogState(() {
+                                            _profileImageFile = null;
+                                            _existingProfileImage = null;
+                                          }),
+                                          child: Container(
+                                            width: 22,
+                                            height: 22,
+                                            decoration: BoxDecoration(
+                                              color: Colors.red,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.white, width: 2),
+                                            ),
+                                            child: const Icon(Icons.close,
+                                                size: 11, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+// Remove the old const SizedBox(height: 44) and replace with:
+                  const SizedBox(height: 8),
+
+                  // ── Fields ───────────────────────────────────────
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        // Name field
+                        _buildLabel('Community name *'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _nameController,
+                          decoration: _inputDecoration('Enter community name'),
+                          validator: (v) =>
+                          v?.isEmpty == true ? 'Name is required' : null,
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Description field
+                        _buildLabel('Description *'),
+                        const SizedBox(height: 6),
+                        TextFormField(
+                          controller: _descriptionController,
+                          maxLines: 3,
+                          decoration: _inputDecoration('What is this community about?'),
+                          validator: (v) =>
+                          v?.isEmpty == true ? 'Description is required' : null,
+                        ),
+                        const SizedBox(height: 14),
+
+                        // Visibility toggle
+                        _buildLabel('Visibility'),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setDialogState(() => _isPrivate = false),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10, horizontal: 12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: !_isPrivate
+                                          ? Colors.blue.shade400
+                                          : Colors.grey.shade200,
+                                      width: !_isPrivate ? 2 : 0.5,
+                                    ),
+                                    color: !_isPrivate
+                                        ? Colors.blue.shade50
+                                        : Colors.transparent,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.public,
+                                          size: 16,
+                                          color: !_isPrivate
+                                              ? Colors.blue.shade600
+                                              : Colors.grey),
+                                      const SizedBox(width: 6),
+                                      Text('Public',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: !_isPrivate
+                                                  ? Colors.blue.shade700
+                                                  : Colors.grey[600])),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setDialogState(() => _isPrivate = true),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(
+                                      vertical: 10, horizontal: 12),
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: _isPrivate
+                                          ? Colors.orange.shade400
+                                          : Colors.grey.shade200,
+                                      width: _isPrivate ? 2 : 0.5,
+                                    ),
+                                    color: _isPrivate
+                                        ? Colors.orange.shade50
+                                        : Colors.transparent,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.lock_outline,
+                                          size: 16,
+                                          color: _isPrivate
+                                              ? Colors.orange.shade600
+                                              : Colors.grey),
+                                      const SizedBox(width: 6),
+                                      Text('Private',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                              color: _isPrivate
+                                                  ? Colors.orange.shade700
+                                                  : Colors.grey[600])),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+                    ),
+                  ),
+
+                  // ── Action buttons ───────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                    decoration: BoxDecoration(
+                      border: Border(
+                          top: BorderSide(color: Colors.grey.shade100)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              side: BorderSide(color: Colors.grey.shade300),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: Text('Cancel',
+                                style: TextStyle(color: Colors.grey[700])),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            onPressed: _isSubmitting
+                                ? null
+                                : () => _updateCommunity(setDialogState),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF800080),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                            ),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                width: 18, height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ))
+                                : const Text('Save changes',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: _isSubmitting ? null : () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed:
-              _isSubmitting ? null : () => _updateCommunity(setDialogState),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF800080),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              child: _isSubmitting
-                  ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-                  : const Text('Update'),
-            ),
-          ],
         ),
       ),
     );
   }
+
+// Helper widgets
+  Widget _buildLabel(String text) => Text(text,
+      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
+          color: Colors.grey[600]));
+
+  InputDecoration _inputDecoration(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(fontSize: 14, color: Colors.grey[400]),
+    filled: true,
+    fillColor: Colors.grey.shade50,
+    border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.grey.shade200)),
+    enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: Colors.grey.shade200)),
+    focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: Color(0xFF800080))),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  );
 
   Widget _buildTextField(
       TextEditingController controller, String label, bool required) {
@@ -247,12 +640,12 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
   }
 
   Widget _buildImageSelector(
-      String title,
-      File? imageFile,
-      String? existingImage,
-      bool isProfile,
-      void Function(void Function()) setDialogState,
-      ) {
+    String title,
+    File? imageFile,
+    String? existingImage,
+    bool isProfile,
+    void Function(void Function()) setDialogState,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -325,14 +718,10 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
       void Function(void Function()) setDialogState) async {
     if (_formKey.currentState?.validate() ?? false) {
       setDialogState(() => _isSubmitting = true);
-      final profileImageToSend = _profileImageBase64 ??
-          (_existingProfileImage?.isNotEmpty ?? false
-              ? _existingProfileImage
-              : null);
-      final coverImageToSend = _coverImageBase64 ??
-          (_existingCoverImage?.isNotEmpty ?? false
-              ? _existingCoverImage
-              : null);
+      // WITH THIS:
+// Only send if user picked a NEW image — backend preserves existing from DB
+      final profileImageToSend = _profileImageFile?.path;
+      final coverImageToSend = _coverImageFile?.path;
       final provider = Provider.of<CommunityProvider>(context, listen: false);
       final result = await provider.updateCommunity(
         communityId: widget.communityId,
@@ -405,112 +794,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     );
   }
 
-  void _showAddUserDialog(BuildContext context, CommunityProvider provider) {
-    final formKey = GlobalKey<FormState>();
-    final nameController = TextEditingController();
-    final emailController = TextEditingController();
-    final mobileController = TextEditingController();
-    final passwordController = TextEditingController();
-    final userIdController = TextEditingController();
-    String memberType = 'New';
-    bool isSubmitting = false;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Add User to Community',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    value: memberType,
-                    decoration: InputDecoration(
-                      labelText: 'Member Type *',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'New', child: Text('New User')),
-                      DropdownMenuItem(
-                          value: 'Exist', child: Text('Existing User')),
-                    ],
-                    onChanged: (value) =>
-                        setDialogState(() => memberType = value ?? 'New'),
-                    validator: (value) =>
-                    value == null ? 'Member type is required' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  if (memberType == 'New') ...[
-                    _buildTextField(nameController, 'Name', true),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: InputDecoration(
-                        labelText: 'Email *',
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                      ),
-                      validator: (value) {
-                        if (value?.isEmpty ?? true) return 'Email is required';
-                        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$')
-                            .hasMatch(value!)) {
-                          return 'Enter a valid email';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    _buildTextField(mobileController, 'Mobile', true),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: passwordController,
-                      decoration: InputDecoration(
-                        labelText: 'Password *',
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8)),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
-                      ),
-                      obscureText: true,
-                      validator: (value) => value?.isEmpty ?? true
-                          ? 'Password is required'
-                          : null,
-                    ),
-                  ] else ...[
-                    _buildTextField(userIdController, 'User ID', true),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isSubmitting ? null : () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-
-          ],
-        ),
-      ),
-    );
-  }
-
-
-
-
-
-
   void _showExitCommunityDialog(
       String communityId, String communityName, CommunityProvider provider) {
     bool isLoading = false;
@@ -521,7 +804,8 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Exit $communityName'),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -549,27 +833,26 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
               onPressed: isLoading
                   ? null
                   : () async {
-                setDialogState(() => isLoading = true);
-                final result =
-                await provider.exitCommunity(communityId);
-                setDialogState(() {
-                  isLoading = false;
-                  if (result['error'] == true) {
-                    errorMessage = result['message'] as String? ??
-                        'Failed to exit community';
-                  }
-                });
+                      setDialogState(() => isLoading = true);
+                      final result = await provider.exitCommunity(communityId);
+                      setDialogState(() {
+                        isLoading = false;
+                        if (result['error'] == true) {
+                          errorMessage = result['message'] as String? ??
+                              'Failed to exit community';
+                        }
+                      });
 
-                if (result['error'] != true) {
-                  _showSnackBar(
-                    'Successfully exited $communityName',
-                    Colors.green,
-                  );
-                  Navigator.pop(context);
-                  provider.fetchMyCommunities();
-                  provider.fetchCommunities(page: 1);
-                }
-              },
+                      if (result['error'] != true) {
+                        _showSnackBar(
+                          'Successfully exited $communityName',
+                          Colors.green,
+                        );
+                        Navigator.pop(context);
+                        provider.fetchMyCommunities();
+                        provider.fetchCommunities(page: 1);
+                      }
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
                 shape: RoundedRectangleBorder(
@@ -578,17 +861,17 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
               ),
               child: isLoading
                   ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
                   : const Text(
-                'Exit',
-                style: TextStyle(color: Colors.white),
-              ),
+                      'Exit',
+                      style: TextStyle(color: Colors.white),
+                    ),
             ),
           ],
         ),
@@ -780,18 +1063,18 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
               child: communityInfo['coverImage']?.isNotEmpty ?? false
                   ? _buildImageWidget(communityInfo['coverImage'])
                   : Container(
-                color: Colors.grey[300],
-                child: const Center(
-                  child: Text(
-                    'No Cover Photo',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                      color: Colors.grey[300],
+                      child: const Center(
+                        child: Text(
+                          'No Cover Photo',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              ),
             ),
           ),
           Padding(
@@ -820,24 +1103,24 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: communityInfo['profileImage']?.isNotEmpty ??
-                            false
+                                false
                             ? _buildImageWidget(communityInfo['profileImage'],
-                            isProfileImage: true)
+                                isProfileImage: true)
                             : Container(
-                          color: const Color(0xFF800080),
-                          child: Center(
-                            child: Text(
-                              communityInfo['name']?.isNotEmpty ?? false
-                                  ? communityInfo['name'][0].toUpperCase()
-                                  : 'C',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 20,
+                                color: const Color(0xFF800080),
+                                child: Center(
+                                  child: Text(
+                                    communityInfo['name']?.isNotEmpty ?? false
+                                        ? communityInfo['name'][0].toUpperCase()
+                                        : 'C',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 20,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -882,7 +1165,6 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: 12),
                 _buildActionButtons(communityInfo, provider),
               ],
@@ -896,55 +1178,66 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
   Widget _buildActionButtons(
       Map<String, dynamic> communityInfo, CommunityProvider provider) {
     final communityId = communityInfo['_id']?.toString() ?? '';
-    final communityName = communityInfo['name']?.toString() ?? 'Unnamed Community';
-
+    final communityName =
+        communityInfo['name']?.toString() ?? 'Unnamed Community';
 
     final superAdminButtons = [
       _buildActionButton(
         Icons.share,
         Colors.cyan,
-            () => _navigateToInviteStatusScreen(context, communityId, communityName), // Added navigation
-      ),
-      const SizedBox(width: 8),
-      _buildActionButton(
-        Icons.person_add,
-        Colors.blue,
-            () => _showAddUserDialog(context, provider),
+        () => _navigateToInviteStatusScreen(
+            context, communityId, communityName), // Added navigation
       ),
       const SizedBox(width: 8),
       _buildActionButton(
         Icons.edit,
         Colors.green,
-            () => _showCommunityDialog(communityInfo),
+        () => _showCommunityDialog(communityInfo),
       ),
       const SizedBox(width: 8),
       _buildActionButton(
         Icons.delete,
         Colors.red,
-            () => _confirmDeleteCommunity(communityId),
+        () => _confirmDeleteCommunity(communityId),
       ),
       const SizedBox(width: 8),
-      _buildActionButton(Icons.add_circle_outlined, Colors.orange),
+      // REPLACE WITH:
+      _buildActionButton(
+        Icons.add_circle_outlined,
+        Colors.orange,
+            () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => CreateCommunityScreen(
+              parentId: communityId, // ← pass current community as parent
+            ),
+          ),
+        ).then((_) {
+          // Refresh community info after returning
+          Provider.of<CommunityProvider>(context, listen: false)
+              .fetchCommunityInfo(widget.communityId);
+        }),
+      ),
       const SizedBox(width: 8),
       _buildActionButton(
         Icons.exit_to_app_outlined,
         Colors.cyan,
-            () => _showExitCommunityDialog(communityId, communityName, provider),
+        () => _showExitCommunityDialog(communityId, communityName, provider),
       ),
     ];
-
 
     final nonAdminButtons = [
       _buildActionButton(
         Icons.share,
         Colors.cyan,
-            () => _navigateToInviteStatusScreen(context, communityId, communityName),
+        () =>
+            _navigateToInviteStatusScreen(context, communityId, communityName),
       ),
       const SizedBox(width: 8),
       _buildActionButton(
         Icons.exit_to_app_outlined,
         Colors.cyan,
-            () => _showExitCommunityDialog(communityId, communityName, provider),
+        () => _showExitCommunityDialog(communityId, communityName, provider),
       ),
     ];
 
@@ -975,7 +1268,8 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
     );
   }
 
-  void _navigateToInviteStatusScreen(BuildContext context, String communityId, String communityName) {
+  void _navigateToInviteStatusScreen(
+      BuildContext context, String communityId, String communityName) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -990,53 +1284,56 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
   Widget _buildGridView() {
     final gridItems = [
       {
-        'icon': Icons.safety_check,
+        'icon': Icons.shield_outlined,
         'title': 'Home',
+        'color': const Color(0xFF6C63FF),
+        'bgColor': const Color(0xFFF0EFFE),
         'screen': CommunityStatsScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.group,
+        'icon': Icons.group_outlined,
         'title': 'Users',
+        'color': const Color(0xFF00B894),
+        'bgColor': const Color(0xFFE6F8F5),
         'screen': CommunityMembersScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.feed_sharp,
+        'icon': Icons.dynamic_feed_outlined,
         'title': 'Feeds',
+        'color': const Color(0xFF0984E3),
+        'bgColor': const Color(0xFFE8F4FD),
         'screen': FeedScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.campaign,
-        'title': 'Campaigns',
-        'screen': CommunityCampaignsScreen(communityId: widget.communityId)
-      },
-      {
-        'icon': Icons.local_offer,
-        'title': 'Coupons',
-        'screen': CommunityCouponsScreen(communityId: widget.communityId)
-      },
-      {
-        'icon': Icons.build,
+        'icon': Icons.home_repair_service_outlined,
         'title': 'Services',
+        'color': const Color(0xFFE17055),
+        'bgColor': const Color(0xFFFDF0EC),
         'screen': CommunityServicesScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.announcement,
+        'icon': Icons.announcement_outlined,
         'title': 'Announcements',
+        'color': const Color(0xFFFD79A8),
+        'bgColor': const Color(0xFFFEF0F5),
         'screen': AnnouncementScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.support_agent,
+        'icon': Icons.support_agent_outlined,
         'title': 'Service Requests',
+        'color': const Color(0xFF00CEC9),
+        'bgColor': const Color(0xFFE6FAFA),
         'screen': AllServiceRequestsScreen(communityId: widget.communityId)
       },
       {
-        'icon': Icons.event,
+        'icon': Icons.event_outlined,
         'title': 'Community Events',
+        'color': const Color(0xFFA29BFE),
+        'bgColor': const Color(0xFFF3F2FE),
         'screen': Builder(
           builder: (context) {
             final provider = Provider.of<CommunityProvider>(context, listen: false);
             final communityName = provider.communityInfo['name'] ?? 'Community';
-
             return CommunityEventsScreen(
               communityId: widget.communityId,
               communityName: communityName,
@@ -1044,92 +1341,115 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
           },
         )
       },
-
-
+      {
+        'icon': Icons.campaign_outlined,
+        'title': 'Campaigns',
+        'color': const Color(0xFFFFAA00),
+        'bgColor': const Color(0xFFFFF8E6),
+        'screen': CommunityCampaignsScreen(communityId: widget.communityId)
+      },
+      {
+        'icon': Icons.local_offer_outlined,
+        'title': 'Coupons',
+        'color': const Color(0xFFE84393),
+        'bgColor': const Color(0xFFFEEAF3),
+        'screen': CommunityCouponsScreen(communityId: widget.communityId)
+      },
     ];
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       child: Container(
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 24,
-              childAspectRatio: 0.9,
-            ),
-            itemCount: gridItems.length,
-            itemBuilder: (context, index) {
-              final item = gridItems[index];
-              return _buildGridItem(
-                context,
-                icon: item['icon'] as IconData,
-                title: item['title'] as String,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => item['screen'] as Widget),
-                ),
-              );
-            },
+        child: GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 8,
+            mainAxisSpacing: 8,
+            childAspectRatio: 1.0,
           ),
+          itemCount: gridItems.length,
+          itemBuilder: (context, index) {
+            final item = gridItems[index];
+            return _buildGridItem(
+              context,
+              icon: item['icon'] as IconData,
+              title: item['title'] as String,
+              iconColor: item['color'] as Color,
+              bgColor: item['bgColor'] as Color,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => item['screen'] as Widget,
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildGridItem(BuildContext context,
-      {required IconData icon,
+  Widget _buildGridItem(
+      BuildContext context, {
+        required IconData icon,
         required String title,
-        required VoidCallback onTap}) {
+        required VoidCallback onTap,
+        required Color iconColor,
+        required Color bgColor,
+      }) {
     return GestureDetector(
       onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: Primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(14),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                icon,
+                size: 24,
+                color: iconColor,
+              ),
             ),
-            child: Icon(
-              icon,
-              size: 26,
-              color: Primary,
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF333333),
+                height: 1.2,
+              ),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF1a1a1a),
-              letterSpacing: -0.1,
-              height: 1.2,
-            ),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1232,8 +1552,8 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
 
   Widget _buildRequestButton(
       {required IconData icon,
-        required Color color,
-        required VoidCallback onPressed}) {
+      required Color color,
+      required VoidCallback onPressed}) {
     return GestureDetector(
       onTap: onPressed,
       child: Container(
@@ -1251,12 +1571,12 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
   Future<void> _handleJoinRequest(
       CommunityProvider provider, String userId, bool approve) async {
     final result =
-    await provider.updateJoinRequest(widget.communityId, userId, approve);
+        await provider.updateJoinRequest(widget.communityId, userId, approve);
     if (mounted) {
       _showSnackBar(
         result['error'] == true
             ? result['message'] ??
-            'Failed to ${approve ? 'approve' : 'reject'} request'
+                'Failed to ${approve ? 'approve' : 'reject'} request'
             : 'Request ${approve ? 'approved' : 'rejected'}',
         result['error'] == true ? Colors.red : Colors.green,
       );

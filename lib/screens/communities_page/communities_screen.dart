@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/communities_provider.dart';
 import '../service_request/service_request_screen.dart';
 import 'community_info_screen.dart';
@@ -207,36 +208,144 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     if (!_isActionEnabled(community)) return;
 
     final provider = Provider.of<CommunityProvider>(context, listen: false);
-    final isPrivate = community['isPrivate'] ?? false;
+    final result = await provider.joinCommunity(community['_id'] as String);
 
-    Map<String, dynamic> result;
+    if (!mounted) return;
 
-    if (isPrivate) {
-      // For private communities, send join request
-      result = await provider.joinCommunity(community['_id'] as String);
-    } else {
-      // For public communities, join directly
-      result = await provider.joinCommunity(community['_id'] as String);
+    final message = result['message']?.toString() ?? '';
+    final isError = result['error'] == true || result['success'] == false;
+
+    final needsOnboarding = message.toLowerCase().contains('onboarding') ||
+        message.toLowerCase().contains('finish') ||
+        message.toLowerCase().contains('complete');
+
+    if (needsOnboarding) {
+      _showOnboardingDialog();
+      return;
     }
 
-    if (mounted) {
-      String message;
-      if (result['error'] == true) {
-        message = result['message'] ?? 'Failed to perform action';
-      } else {
-        if (isPrivate) {
-          message = result['message'] ?? 'Request sent successfully';
-        } else {
-          message = result['message'] ?? 'Joined successfully';
-        }
-      }
+    // ✅ Show appropriate message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message.isNotEmpty ? message : (isError ? 'Failed' : 'Success')),
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
+  }
+  void _showOnboardingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: Primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.assignment_outlined,
+                    color: Primary, size: 36),
+              ),
+              const SizedBox(height: 16),
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: result['error'] == true ? Colors.red : Colors.green,
+              // Title
+              const Text(
+                'Complete Onboarding First',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+
+              // Subtitle
+              Text(
+                'You need to complete your onboarding steps before joining a community. It only takes a few minutes!',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+
+              // Complete Onboarding button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _launchOnboarding();
+                  },
+                  icon: const Icon(Icons.open_in_browser, size: 18),
+                  label: const Text(
+                    'Complete Onboarding',
+                    style: TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Cancel button
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(color: Colors.grey[300]!),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    'Maybe Later',
+                    style: TextStyle(
+                        fontSize: 15,
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      );
+      ),
+    );
+  }
+
+  Future<void> _launchOnboarding() async {
+    final uri = Uri.parse('https://ixes.ai/onboarding/');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not open onboarding page'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 

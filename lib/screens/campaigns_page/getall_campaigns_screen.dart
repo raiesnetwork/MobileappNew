@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/campaigns_page/share_campaign.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import '../../constants/constants.dart';
 import '../../providers/campaign_provider.dart';
 import 'campaign_members.dart';
@@ -23,66 +22,73 @@ class CampaignsScreen extends StatefulWidget {
   State<CampaignsScreen> createState() => _CampaignsScreenState();
 }
 
-class _CampaignsScreenState extends State<CampaignsScreen> {
+class _CampaignsScreenState extends State<CampaignsScreen>
+    with SingleTickerProviderStateMixin {
   final ScrollController _scrollController = ScrollController();
   bool _isLoadingMore = false;
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOut,
+    );
+    _fadeController.forward();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<CampaignProvider>();
       if (provider.campaigns.isEmpty) {
         provider.fetchAllCampaigns(page: 1);
       }
-      _setupScrollListener(); // ✅ called after first frame, ListView is built
+      _setupScrollListener();
     });
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _fadeController.dispose();
     super.dispose();
   }
 
   void _setupScrollListener() {
     _scrollController.addListener(() {
-      if (!_scrollController.hasClients) return; // ✅ safety guard
+      if (!_scrollController.hasClients) return;
       if (_scrollController.position.pixels >=
           _scrollController.position.maxScrollExtent - 300) {
         _loadMoreCampaigns();
       }
     });
   }
+
   void _shareCampaign(String campaignId) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ShareCampaignScreen(
-          campaignId: campaignId,
-        ),
+        builder: (context) => ShareCampaignScreen(campaignId: campaignId),
       ),
     );
   }
 
   void _loadMoreCampaigns() async {
-    if (_isLoadingMore) return; // ✅ synchronous check first
-
+    if (_isLoadingMore) return;
     final provider = context.read<CampaignProvider>();
     if (provider.isLoading || !provider.hasMoreCampaigns) return;
 
-    _isLoadingMore = true; // ✅ set synchronously before any await
+    _isLoadingMore = true;
     if (mounted) setState(() {});
-
-    await provider.fetchAllCampaigns(page: provider.currentPage + 1); // ✅ use provider's page
-
-    if (mounted) {
-      setState(() => _isLoadingMore = false);
-    }
+    await provider.fetchAllCampaigns(page: provider.currentPage + 1);
+    if (mounted) setState(() => _isLoadingMore = false);
   }
 
   void _editCampaign(dynamic campaign) async {
-    print('Editing campaign: $campaign');
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -100,179 +106,275 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
   void _confirmDelete(String campaignId) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         backgroundColor: Colors.white,
-        contentPadding: const EdgeInsets.all(24),
-        title: const Row(
-          children: [
-            Icon(Icons.delete_outline, color: Colors.red, size: 28),
-            SizedBox(width: 12),
-            Text(
-              'Delete Campaign',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 20,
-                color: Colors.black87,
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEEEE),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Color(0xFFE53935),
+                  size: 32,
+                ),
               ),
-            ),
-          ],
-        ),
-        content: const Text(
-          'Are you sure you want to delete this campaign? This action cannot be undone.',
-          style: TextStyle(fontSize: 16, color: Colors.black54, height: 1.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 20),
+              const Text(
+                'Delete Campaign?',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1A1A2E),
+                  letterSpacing: -0.3,
+                ),
               ),
-            ),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(
-                color: Colors.grey,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 10),
+              const Text(
+                'This action cannot be undone. All campaign data will be permanently removed.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Color(0xFF6B7280),
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
               ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final response = await context
-                  .read<CampaignProvider>()
-                  .deleteCampaign(campaignId);
-              if (mounted) {
-                final isError = response['error'] ?? true;
-                final message = response['message'] ?? 'Unknown error';
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Row(
-                      children: [
-                        Icon(
-                          isError
-                              ? Icons.error_outline
-                              : Icons.check_circle_outline,
-                          color: Colors.white,
+              const SizedBox(height: 28),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        backgroundColor: const Color(0xFFF3F4F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            isError ? 'Error: $message' : message,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                            ),
-                          ),
+                      ),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: Color(0xFF374151),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
                         ),
-                      ],
-                    ),
-                    backgroundColor: isError ? Colors.red : Colors.green,
-                    behavior: SnackBarBehavior.floating,
-                    margin: const EdgeInsets.all(16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                   ),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final response = await context
+                            .read<CampaignProvider>()
+                            .deleteCampaign(campaignId);
+                        if (mounted) {
+                          final isError = response['error'] ?? true;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  Icon(
+                                    isError
+                                        ? Icons.error_outline
+                                        : Icons.check_circle_outline,
+                                    color: Colors.white,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      isError
+                                          ? 'Error: ${response['message'] ?? 'Unknown error'}'
+                                          : response['message'] ?? 'Deleted',
+                                      style: const TextStyle(
+                                          fontSize: 14, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              backgroundColor: isError
+                                  ? const Color(0xFFE53935)
+                                  : const Color(0xFF10B981),
+                              behavior: SnackBarBehavior.floating,
+                              margin: const EdgeInsets.all(16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                          );
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFE53935),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        'Delete',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              elevation: 0,
-            ),
-            child: const Text(
-              'Delete',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildCampaignImage(String imageUrl) {
     try {
-      if (imageUrl.isEmpty) {
-        return _buildImageErrorWidget();
-      }
-
-      print('🖼️ Building image for URL: $imageUrl');
-
-      // Handle both S3 URLs and relative paths
+      if (imageUrl.isEmpty) return _buildImagePlaceholder();
       if (imageUrl.startsWith('http://') ||
           imageUrl.startsWith('https://') ||
           imageUrl.contains('amazonaws.com') ||
           imageUrl.contains('cloudfront.net')) {
-        // Direct URL (S3, HTTP, HTTPS)
-        print('✅ Loading direct URL: $imageUrl');
         return Image.network(
           imageUrl,
           fit: BoxFit.cover,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) {
-              print('✅ Image loaded successfully: $imageUrl');
-              return child;
-            }
-            final progress = loadingProgress.expectedTotalBytes != null
-                ? loadingProgress.cumulativeBytesLoaded /
-                loadingProgress.expectedTotalBytes!
-                : null;
-            print('⏳ Loading image: ${(progress ?? 0) * 100}%');
-            return Center(
-              child: CircularProgressIndicator(
-                value: progress,
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.grey[400]!),
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return Container(
+              color: const Color(0xFFF3F4F6),
+              child: const Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Primary,
+                ),
               ),
             );
           },
-          errorBuilder: (context, error, stackTrace) {
-            print('❌ Error loading image: $imageUrl');
-            print('❌ Error details: $error');
-            return _buildImageErrorWidget();
-          },
+          errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(),
         );
       } else {
-        // Use buildImageWidget for relative paths
-        print('🔗 Using buildImageWidget for: $imageUrl');
         return widget.buildImageWidget(imageUrl, isProfileImage: false);
       }
     } catch (e) {
-      print('❌ Exception processing campaign image: $e');
-      return _buildImageErrorWidget();
+      return _buildImagePlaceholder();
     }
   }
 
-  Widget _buildImageErrorWidget() {
+  Widget _buildImagePlaceholder() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFFF0F4FF),
+        borderRadius: BorderRadius.circular(16),
       ),
+      child: const Center(
+        child: Icon(
+          Icons.campaign_outlined,
+          color: Primary,
+          size: 36,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FC),
+      appBar: AppBar(
+        scrolledUnderElevation: 0,
+        backgroundColor: const Color(0xFFF7F8FC),
+        elevation: 0,
+        title: const Text(
+          'Campaigns',
+          style: TextStyle(
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF1A1A2E),
+            letterSpacing: -0.5,
+          ),
+        ),
+      ),
+      body: Consumer<CampaignProvider>(
+        builder: (context, provider, _) {
+          if (provider.isLoading && provider.campaigns.isEmpty) {
+            return _buildLoadingState();
+          }
+          if (provider.campaigns.isEmpty && provider.errorMessage != null) {
+            return _buildErrorState(provider);
+          }
+          if (provider.campaigns.isEmpty) {
+            return _buildEmptyState();
+          }
+
+          return FadeTransition(
+            opacity: _fadeAnimation,
+            child: RefreshIndicator(
+              onRefresh: provider.refreshCampaigns,
+              color: Primary,
+              backgroundColor: Colors.white,
+              child: ListView.builder(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: provider.campaigns.length +
+                    (provider.hasMoreCampaigns ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index < provider.campaigns.length) {
+                    return _buildCampaignCard(
+                        provider.campaigns[index], index);
+                  }
+                  return _buildLoadingMoreIndicator();
+                },
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            Icons.image_not_supported_outlined,
-            color: Colors.grey.shade300,
-            size: 36,
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Primary.withOpacity(0.15),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: const Center(
+              child: CircularProgressIndicator(color: Primary, strokeWidth: 2.5),
+            ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'No image',
+          const SizedBox(height: 20),
+          const Text(
+            'Loading campaigns...',
             style: TextStyle(
-              color: Colors.grey.shade400,
-              fontSize: 11,
+              fontSize: 15,
+              color: Color(0xFF6B7280),
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -281,214 +383,90 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
-      appBar: AppBar(
-        scrolledUnderElevation: 0,
-        title: const Text(
-          'Campaigns',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w700,
-            color: Colors.black87,
-            letterSpacing: -0.5,
-          ),
-        ),
-        backgroundColor: const Color(0xFFF5F7FA),
-        elevation: 0,
-      ),
-      body: Consumer<CampaignProvider>(
-        builder: (context, provider, _) {
-          // Initial loading
-          if (provider.isLoading && provider.campaigns.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Primary.withOpacity(0.1),
-                          blurRadius: 20,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const CircularProgressIndicator(
-                      color: Primary,
-                      strokeWidth: 3,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Loading campaigns...',
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+  Widget _buildErrorState(CampaignProvider provider) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEEEE),
+                borderRadius: BorderRadius.circular(24),
               ),
-            );
-          }
-
-          // Error state
-          if (provider.campaigns.isEmpty && provider.errorMessage != null) {
-            return Center(
-              child: Container(
-                margin: const EdgeInsets.all(24),
-                padding: const EdgeInsets.all(32),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 20,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.error_outline,
-                        size: 48,
-                        color: Colors.red,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Text(
-                      provider.errorMessage!,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        color: Colors.black87,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: () => provider.refreshCampaigns(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Primary,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 28,
-                          vertical: 14,
-                        ),
-                        elevation: 0,
-                      ),
-                      icon: const Icon(Icons.refresh_rounded, size: 20),
-                      label: const Text(
-                        'Retry',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          // Empty state
-          if (provider.campaigns.isEmpty) {
-            return Center(
-              child: Container(
-                margin: const EdgeInsets.all(24),
-                padding: const EdgeInsets.all(40),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 20,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Primary.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.campaign_outlined,
-                        size: 56,
-                        color: Primary,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'No Campaigns Yet',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Create your first campaign\nto get started',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: Colors.grey[600],
-                        height: 1.5,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          // Campaign list
-          return RefreshIndicator(
-            onRefresh: provider.refreshCampaigns,
-            color: Primary,
-            backgroundColor: Colors.white,
-            child: ListView.builder(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              itemCount: provider.campaigns.length +
-                  (provider.hasMoreCampaigns ? 1 : 0),
-              itemBuilder: (context, index) {
-                if (index < provider.campaigns.length) {
-                  return _buildCampaignCard(provider.campaigns[index], index);
-                } else {
-                  return _buildLoadingMoreIndicator();
-                }
-              },
+              child: const Icon(Icons.wifi_off_rounded,
+                  size: 40, color: Color(0xFFE53935)),
             ),
-          );
-        },
+            const SizedBox(height: 20),
+            Text(
+              provider.errorMessage!,
+              style: const TextStyle(
+                  fontSize: 16,
+                  color: Color(0xFF374151),
+                  fontWeight: FontWeight.w600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => provider.refreshCampaigns(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Primary,
+                foregroundColor: Colors.white,
+                padding:
+                const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Try Again',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F4FF),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: const Icon(Icons.campaign_outlined,
+                  size: 52, color: Primary),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'No Campaigns Yet',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1A1A2E),
+                letterSpacing: -0.3,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Create your first campaign to engage\nyour community',
+              style: TextStyle(
+                  fontSize: 15, color: Color(0xFF6B7280), height: 1.6),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -497,27 +475,43 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
     final String coverImage = campaign['coverImage'] ?? '';
     final String schedule =
     (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
-    final String communityName = campaign['community']?['name'] ?? 'Unknown';
+    final String communityName =
+        campaign['community']?['name'] ?? 'Unknown';
+    // FIX BUG 7: isUserAdmin comes from campaign['isUserAdmin'], not a community field
     final bool isAdmin = campaign['isUserAdmin'] == true;
+    final String type =
+    (campaign['type'] ?? 'MANDATORY').toString().toUpperCase();
+    final bool isCompleted = campaign['isCompleted'] == true;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
+    return TweenAnimationBuilder<double>(
+      duration: Duration(milliseconds: 400 + (index * 60).clamp(0, 400)),
+      tween: Tween(begin: 0.0, end: 1.0),
+      curve: Curves.easeOut,
+      builder: (context, value, child) => Opacity(
+        opacity: value,
+        child: Transform.translate(
+          offset: Offset(0, 20 * (1 - value)),
+          child: child,
+        ),
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            Navigator.push(
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1A1A2E).withOpacity(0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (_) => CampaignDetailsScreen(
@@ -526,50 +520,42 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                   communityName: communityName,
                 ),
               ),
-            );
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
+            ),
+            borderRadius: BorderRadius.circular(20),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Cover Image
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: Colors.grey.shade50,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: coverImage.isNotEmpty
-                        ? _buildCampaignImage(coverImage)
-                        : Container(
-                      decoration: BoxDecoration(
-                        color: Primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(
-                        Icons.campaign_outlined,
-                        size: 40,
-                        color: Primary,
-                      ),
+                // ── Cover image full-width ──────────────────────────
+                if (coverImage.isNotEmpty)
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(20)),
+                    child: SizedBox(
+                      height: 160,
+                      width: double.infinity,
+                      child: _buildCampaignImage(coverImage),
+                    ),
+                  )
+                else
+                  Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      color: _getTypeColor(type).withOpacity(0.08),
+                      borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(20)),
+                    ),
+                    child: Center(
+                      child: Icon(Icons.campaign_outlined,
+                          size: 48, color: _getTypeColor(type)),
                     ),
                   ),
-                ),
-                const SizedBox(width: 14),
 
-                // Content
-                Expanded(
+                Padding(
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Title row with menu
-                      // Replace the entire Title row with menu section with this:
-
-
+                      // ── Title row + menu ──────────────────────
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -579,245 +565,93 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.black87,
+                                color: Color(0xFF1A1A2E),
+                                letterSpacing: -0.2,
                                 height: 1.3,
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          // ✅ THREE DOTS MENU FOR EVERYONE
-                          PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _editCampaign(campaign);
-                              } else if (value == 'delete') {
-                                _confirmDelete(campaign['_id']);
-                              } else if (value == 'share') {
-                                _shareCampaign(campaign['_id']);
-                              }
-                            },
-                            padding: EdgeInsets.zero,
-                            itemBuilder: (context) {
-                              // Build menu items dynamically based on admin status
-                              List<PopupMenuEntry<String>> menuItems = [];
-
-                              // ✅ Edit - Only for admins
-                              if (isAdmin) {
-                                menuItems.add(
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    height: 44,
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(6),
-                                          decoration: BoxDecoration(
-                                            color: Colors.blue.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: const Icon(
-                                            Icons.edit_outlined,
-                                            size: 16,
-                                            color: Colors.blue,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        const Text(
-                                          'Edit',
-                                          style: TextStyle(
-                                            color: Colors.blue,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              // ✅ Share - For EVERYONE
-                              menuItems.add(
-                                PopupMenuItem(
-                                  value: 'share',
-                                  height: 44,
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.green.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: const Icon(
-                                          Icons.share_outlined,
-                                          size: 16,
-                                          color: Colors.green,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      const Text(
-                                        'Share',
-                                        style: TextStyle(
-                                          color: Colors.green,
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-
-                              // ✅ Delete - Only for admins
-                              if (isAdmin) {
-                                menuItems.add(
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    height: 44,
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(6),
-                                          decoration: BoxDecoration(
-                                            color: Colors.red.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(6),
-                                          ),
-                                          child: const Icon(
-                                            Icons.delete_outline,
-                                            size: 16,
-                                            color: Colors.red,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        const Text(
-                                          'Delete',
-                                          style: TextStyle(
-                                            color: Colors.red,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              }
-
-                              return menuItems;
-                            },
-                            color: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 8,
-                            icon: Icon(
-                              Icons.more_vert,
-                              size: 20,
-                              color: Colors.grey[600],
-                            ),
-                          ),
+                          _buildPopupMenu(campaign, isAdmin),
                         ],
                       ),
                       const SizedBox(height: 6),
 
-                      // Description
+                      // ── Community name ──────────────────────────
+                      Row(
+                        children: [
+                          const Icon(Icons.group_outlined,
+                              size: 13, color: Color(0xFF9CA3AF)),
+                          const SizedBox(width: 4),
+                          Text(
+                            communityName,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF9CA3AF),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // ── Description ────────────────────────────
                       Text(
-                        campaign['description'] ?? 'No description available',
-                        style: TextStyle(
+                        campaign['description'] ?? '',
+                        style: const TextStyle(
                           fontSize: 13,
-                          color: Colors.grey[600],
-                          height: 1.4,
+                          color: Color(0xFF6B7280),
+                          height: 1.5,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 14),
 
-                      // Schedule + Members (with wrap to prevent overflow)
+                      // ── Progress bar (only for payment campaigns) ──
+                      if ((campaign['totalAmountNeeded'] ?? 0) > 0)
+                        _buildProgressBar(campaign),
+
+                      if ((campaign['totalAmountNeeded'] ?? 0) > 0)
+                        const SizedBox(height: 14),
+
+                      // ── Chips row ──────────────────────────────
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          // Schedule Chip
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: _getScheduleColor(schedule).withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: _getScheduleColor(schedule).withOpacity(0.3),
-                                width: 1,
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.schedule_rounded,
-                                  size: 13,
-                                  color: _getScheduleColor(schedule),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  _formatSchedule(schedule),
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: _getScheduleColor(schedule),
-                                    letterSpacing: 0.3,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          _buildChip(
+                            icon: Icons.schedule_rounded,
+                            label: _formatSchedule(schedule),
+                            color: _getScheduleColor(schedule),
                           ),
-
-                          // Members button
+                          _buildChip(
+                            icon: _getTypeIcon(type),
+                            label: type,
+                            color: _getTypeColor(type),
+                          ),
+                          if (isCompleted)
+                            _buildChip(
+                              icon: Icons.check_circle_rounded,
+                              label: 'Completed',
+                              color: const Color(0xFF10B981),
+                            ),
                           if (isAdmin)
-                            InkWell(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => CampaignMembersScreen(
-                                      campaignId: campaign['_id'],
-                                    ),
+                            GestureDetector(
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CampaignMembersScreen(
+                                    campaignId: campaign['_id'],
                                   ),
-                                );
-                              },
-                              borderRadius: BorderRadius.circular(8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
                                 ),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.people_outline_rounded,
-                                      color: Colors.blue,
-                                      size: 14,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Text(
-                                      'Members',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.blue[700],
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              ),
+                              child: _buildChip(
+                                icon: Icons.people_alt_outlined,
+                                label:
+                                'Members${campaign['totalMembers'] != null ? ' · ${campaign['totalMembers']}' : ''}',
+                                color: const Color(0xFF6366F1),
                               ),
                             ),
                         ],
@@ -833,17 +667,175 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
     );
   }
 
+  Widget _buildProgressBar(dynamic campaign) {
+    final double collected =
+    (campaign['totalAmountCollected'] ?? 0).toDouble();
+    final double needed =
+    (campaign['totalAmountNeeded'] ?? 1).toDouble();
+    final double progress = (collected / needed).clamp(0.0, 1.0);
+    final String currency = campaign['currency'] ?? '₹';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '$currency${collected.toInt()} raised',
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF10B981),
+              ),
+            ),
+            Text(
+              'of $currency${needed.toInt()}',
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF9CA3AF),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: LinearProgressIndicator(
+            value: progress,
+            backgroundColor: const Color(0xFFF3F4F6),
+            valueColor: AlwaysStoppedAnimation<Color>(
+              progress >= 1.0
+                  ? const Color(0xFF10B981)
+                  : Primary,
+            ),
+            minHeight: 6,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPopupMenu(dynamic campaign, bool isAdmin) {
+    return PopupMenuButton<String>(
+      onSelected: (value) {
+        if (value == 'edit') _editCampaign(campaign);
+        if (value == 'delete') _confirmDelete(campaign['_id']);
+        if (value == 'share') _shareCampaign(campaign['_id']);
+      },
+      padding: EdgeInsets.zero,
+      itemBuilder: (context) {
+        final items = <PopupMenuEntry<String>>[];
+        if (isAdmin)
+          items.add(_menuItem('edit', 'Edit', Icons.edit_outlined,
+              const Color(0xFF6366F1)));
+        items.add(_menuItem('share', 'Share', Icons.share_outlined,
+            const Color(0xFF10B981)));
+        if (isAdmin)
+          items.add(_menuItem('delete', 'Delete', Icons.delete_outline_rounded,
+              const Color(0xFFE53935)));
+        return items;
+      },
+      color: Colors.white,
+      shape:
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 8,
+      icon: Icon(Icons.more_horiz_rounded,
+          size: 20, color: const Color(0xFF9CA3AF)),
+    );
+  }
+
+  PopupMenuItem<String> _menuItem(
+      String value, String label, IconData icon, Color color) {
+    return PopupMenuItem(
+      value: value,
+      height: 48,
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 15, color: color),
+          ),
+          const SizedBox(width: 12),
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
   Color _getScheduleColor(String schedule) {
-    switch (schedule.toLowerCase()) {
+    switch (schedule) {
       case 'daily':
-        return Colors.blue;
+        return const Color(0xFF3B82F6);
       case 'weekly':
-        return Colors.purple;
+        return const Color(0xFF8B5CF6);
       case 'monthly':
-        return Colors.orange;
-      case 'one_time':
+        return const Color(0xFFF59E0B);
+      case 'yearly':
+        return const Color(0xFFEC4899);
       default:
-        return Colors.green;
+        return const Color(0xFF10B981);
+    }
+  }
+
+  Color _getTypeColor(String type) {
+    switch (type) {
+      case 'MARKETING':
+        return const Color(0xFFF59E0B);
+      case 'MANDATORY':
+        return const Color(0xFFE53935);
+      default:
+        return Primary;
+    }
+  }
+
+  IconData _getTypeIcon(String type) {
+    switch (type) {
+      case 'MARKETING':
+        return Icons.trending_up_rounded;
+      case 'MANDATORY':
+        return Icons.lock_outline_rounded;
+      default:
+        return Icons.campaign_outlined;
     }
   }
 
@@ -853,42 +845,14 @@ class _CampaignsScreenState extends State<CampaignsScreen> {
 
   Widget _buildLoadingMoreIndicator() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.06),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  color: Primary,
-                  strokeWidth: 2.5,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Loading more campaigns...',
-                style: TextStyle(
-                  color: Colors.grey[700],
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: const Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            color: Primary,
+            strokeWidth: 2.5,
           ),
         ),
       ),

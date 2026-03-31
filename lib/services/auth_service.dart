@@ -93,13 +93,19 @@ class AuthService {
     try {
       final Uri url = Uri.parse("https://api.ixes.ai/api/auth/loginWithOTP");
 
+      // ✅ Strip + — DB stores without + prefix
+      final String normalizedMobile = mobile.startsWith('+')
+          ? mobile.substring(1)
+          : mobile;
+
       final Map<String, dynamic> body = {
-        'mobile': mobile,
+        'mobile': normalizedMobile, // sends 917995899113 ✅
         'otp': otp,
       };
 
       print("📤 Login Request URL: $url");
       print("📤 Login BODY: $body");
+      // ... rest stays exactly the same
 
       final response = await http.post(
         url,
@@ -156,10 +162,11 @@ class AuthService {
 
   static Future<Map<String, dynamic>> sendOTP(String mobile) async {
     try {
+      // ✅ Keep + prefix — Twilio needs it to send SMS
       final response = await ApiService.post(
           '/api/auth/sendOTP',
           {
-            'mobile': mobile,
+            'mobile': mobile, // sends +917995899113 ✅
           },
           requireAuth: false);
       print(response);

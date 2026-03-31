@@ -42,41 +42,56 @@ class AuthProvider with ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // Save token
+      // ✅ If userId is empty, decode it from the JWT token directly
+      String resolvedId = userId;
+      String resolvedUsername = username;
+
+      if (resolvedId.isEmpty && token.isNotEmpty) {
+        try {
+          final parts = token.split('.');
+          if (parts.length == 3) {
+            String payload = parts[1];
+            while (payload.length % 4 != 0) {
+              payload += '=';
+            }
+            final decoded = utf8.decode(base64Url.decode(payload));
+            final Map<String, dynamic> payloadMap = jsonDecode(decoded);
+            final userMap = payloadMap['user'] as Map<String, dynamic>?;
+            resolvedId = userMap?['id']?.toString() ?? '';
+            resolvedUsername = userMap?['username']?.toString() ?? resolvedUsername;
+            print('✅ Decoded from JWT → id=$resolvedId | username=$resolvedUsername');
+          }
+        } catch (e) {
+          print('❌ JWT decode error: $e');
+        }
+      }
+
       await prefs.setString('auth_token', token);
-      print('✅ Google token saved');
+      await prefs.setString('user_id', resolvedId);
+      await prefs.setString('user_name', resolvedUsername);
 
-      // Save user ID
-      await prefs.setString('user_id', userId);
-      print('✅ Google user ID saved');
-
-      // Save username
-      await prefs.setString('user_name', username);
-      print('✅ Google username saved');
-
-      // Save full user data as JSON
+      // ✅ Spread userData first, then override with resolved values
       final Map<String, dynamic> userMap = {
-        'id': userId,
-        'username': username,
+        ...?userData,
+        'id': resolvedId,        // ✅ Always wins — not overwritten
+        'username': resolvedUsername,
         'token': token,
         'mobile': '',
         'isFamilyHead': false,
         'guidStatus': userData?['guid'] ?? false,
-        ...?userData,
       };
       await prefs.setString('user_data', jsonEncode(userMap));
-      print('✅ Google user data saved');
 
-      // Set user in memory
       _user = User(
-        id: userId,
-        username: username,
+        id: resolvedId,
+        username: resolvedUsername,
         mobile: '',
         isFamilyHead: false,
         guidStatus: userData?['guid'] ?? false,
         token: token,
       );
 
+      print('✅ Google user saved → id=$resolvedId | username=$resolvedUsername');
       notifyListeners();
     } catch (e) {
       print('❌ Error saving Google user data: $e');
