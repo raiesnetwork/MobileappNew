@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import '../../constants/constants.dart';
 import '../../providers/coupon_provider.dart';
 
 class CreateCouponScreen extends StatefulWidget {
@@ -12,13 +13,6 @@ class CreateCouponScreen extends StatefulWidget {
 }
 
 class _CreateCouponScreenState extends State<CreateCouponScreen> {
-  static const _bg = Color(0xFF0D0D0D);
-  static const _surface = Color(0xFF1A1A1A);
-  static const _card = Color(0xFF242424);
-  static const _accent = Color(0xFFE8FF3A);
-  static const _textPrimary = Color(0xFFF5F5F0);
-  static const _textMuted = Color(0xFF888880);
-
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   final _detailsCtrl = TextEditingController();
@@ -50,170 +44,191 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: Colors.grey[50],
       appBar: AppBar(
-        backgroundColor: _bg,
-        foregroundColor: _textPrimary,
+        scrolledUnderElevation: 0,
+        backgroundColor: Colors.white,
         elevation: 0,
-        surfaceTintColor: Colors.transparent,
-        leading: GestureDetector(
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            margin: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: _surface,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.arrow_back_rounded, size: 20),
-          ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.black87),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Create Coupon',
-          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
+          style: TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.w700,
+            fontSize: 18,
+          ),
         ),
       ),
-      body: Consumer<CouponProvider>(builder: (context, provider, _) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Image picker
-                _buildImagePicker(),
-                const SizedBox(height: 24),
+      body: Consumer<CouponProvider>(
+        builder: (context, provider, _) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Image picker
+                  _buildImagePicker(),
+                  const SizedBox(height: 20),
 
-                _section('Basic Info'),
-                const SizedBox(height: 12),
-                _field(_nameCtrl, 'Coupon Name', required: true,
-                    icon: Icons.local_offer_rounded),
-                const SizedBox(height: 12),
-                _field(_detailsCtrl, 'Description',
-                    required: true,
-                    maxLines: 3,
-                    icon: Icons.description_rounded),
-                const SizedBox(height: 12),
-                _field(_codeCtrl, 'Coupon Code',
-                    required: true,
-                    icon: Icons.confirmation_number_rounded,
-                    caps: TextCapitalization.characters),
-
-                const SizedBox(height: 24),
-                _section('Type'),
-                const SizedBox(height: 12),
-                _buildTypeChips(),
-                const SizedBox(height: 16),
-
-                if (_type == 'coupon') ...[
-                  _buildCouponTypeChips(),
-                  const SizedBox(height: 16),
-                ],
-
-                ..._buildTypeFields(),
-
-                const SizedBox(height: 24),
-                _section('Expiry Date'),
-                const SizedBox(height: 12),
-                _buildDatePicker(),
-
-                const SizedBox(height: 24),
-                _section('Optional'),
-                const SizedBox(height: 12),
-                _field(_linkCtrl, 'Coupon Link (URL)',
-                    icon: Icons.link_rounded),
-
-                const SizedBox(height: 32),
-
-                // Error
-                if (provider.createErrorMessage != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2A1010),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.error_outline,
-                            color: Color(0xFFFF6B6B), size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            provider.createErrorMessage!,
-                            style: const TextStyle(
-                                color: Color(0xFFFF6B6B), fontSize: 13),
-                          ),
-                        ),
-                      ],
-                    ),
+                  _buildCard(
+                    title: 'Basic Info',
+                    children: [
+                      _field(_nameCtrl, 'Coupon Name',
+                          required: true,
+                          icon: Icons.local_offer_rounded),
+                      const SizedBox(height: 12),
+                      _field(_detailsCtrl, 'Description',
+                          required: true,
+                          maxLines: 3,
+                          icon: Icons.description_rounded),
+                      const SizedBox(height: 12),
+                      _field(_codeCtrl, 'Coupon Code',
+                          required: true,
+                          icon: Icons.confirmation_number_rounded,
+                          caps: TextCapitalization.characters),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                ],
 
-                // Submit
-                GestureDetector(
-                  onTap: provider.isCreating ? null : _submit,
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    decoration: BoxDecoration(
-                      color: _accent,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _accent.withOpacity(0.25),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
-                        ),
+                  const SizedBox(height: 16),
+
+                  _buildCard(
+                    title: 'Coupon Type',
+                    children: [
+                      _buildTypeChips(),
+                      if (_type == 'coupon') ...[
+                        const SizedBox(height: 12),
+                        _buildCouponTypeChips(),
                       ],
+                      const SizedBox(height: 16),
+                      ..._buildTypeFields(),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  _buildCard(
+                    title: 'Expiry Date',
+                    children: [_buildDatePicker()],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  _buildCard(
+                    title: 'Optional',
+                    children: [
+                      _field(_linkCtrl, 'Coupon Link (URL)',
+                          icon: Icons.link_rounded),
+                    ],
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  if (provider.createErrorMessage != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: Colors.red.shade400, size: 18),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              provider.createErrorMessage!,
+                              style: TextStyle(
+                                  color: Colors.red.shade600,
+                                  fontSize: 13),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Center(
+                    const SizedBox(height: 16),
+                  ],
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: provider.isCreating ? null : _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor:
+                        Primary.withOpacity(0.5),
+                        padding:
+                        const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
                       child: provider.isCreating
                           ? const SizedBox(
                         width: 22,
                         height: 22,
                         child: CircularProgressIndicator(
-                            color: _bg, strokeWidth: 2.5),
+                            color: Colors.white, strokeWidth: 2.5),
                       )
                           : const Text(
                         'Create Coupon',
                         style: TextStyle(
-                          color: _bg,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                           fontSize: 16,
-                          letterSpacing: 0.3,
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      }),
+          );
+        },
+      ),
     );
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // WIDGETS
-  // ─────────────────────────────────────────────────────────────────────────────
-  Widget _section(String title) {
-    return Text(
-      title.toUpperCase(),
-      style: const TextStyle(
-        color: _textMuted,
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 2,
+  Widget _buildCard(
+      {required String title, required List<Widget> children}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.black87,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          ...children,
+        ],
       ),
     );
   }
@@ -232,50 +247,65 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
       maxLines: maxLines,
       textCapitalization: caps,
       keyboardType: keyboard,
-      style: const TextStyle(color: _textPrimary, fontSize: 15),
+      style: const TextStyle(color: Colors.black87, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(color: _textMuted, fontSize: 14),
+        labelStyle:
+        TextStyle(color: Colors.grey[500], fontSize: 13),
         prefixIcon: icon != null
-            ? Icon(icon, color: _textMuted, size: 18)
+            ? Icon(icon, color: Colors.grey[400], size: 18)
             : null,
         filled: true,
-        fillColor: _surface,
+        fillColor: Colors.grey[50],
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade200),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade200),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide:
-          BorderSide(color: _accent.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Primary, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFFF6B6B)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+          BorderSide(color: Colors.red.shade300),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFFF6B6B)),
+          borderRadius: BorderRadius.circular(12),
+          borderSide:
+          BorderSide(color: Colors.red.shade300),
         ),
-        errorStyle: const TextStyle(color: Color(0xFFFF6B6B)),
+        contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14, vertical: 12),
       ),
       validator: required
-          ? (v) =>
-      (v == null || v.trim().isEmpty) ? '$label is required' : null
+          ? (v) => (v == null || v.trim().isEmpty)
+          ? '$label is required'
+          : null
           : null,
     );
   }
 
   Widget _buildTypeChips() {
-    const labels = {
+    const icons = {
       'coupon': Icons.local_offer_rounded,
       'coins': Icons.monetization_on_rounded,
       'rewards': Icons.card_giftcard_rounded,
     };
+    const colors = {
+      'coupon': Color(0xFF3B82F6),
+      'coins': Color(0xFFF59E0B),
+      'rewards': Color(0xFF8B5CF6),
+    };
+
     return Row(
       children: _types.map((t) {
         final selected = _type == t;
+        final color = colors[t]!;
         return Expanded(
           child: GestureDetector(
             onTap: () => setState(() => _type = t),
@@ -286,29 +316,29 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                   vertical: 12, horizontal: 8),
               decoration: BoxDecoration(
                 color: selected
-                    ? _accent.withOpacity(0.12)
-                    : _surface,
+                    ? color.withOpacity(0.08)
+                    : Colors.grey[50],
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: selected
-                      ? _accent.withOpacity(0.5)
-                      : Colors.white10,
+                      ? color.withOpacity(0.4)
+                      : Colors.grey.shade200,
                 ),
               ),
               child: Column(
                 children: [
-                  Icon(labels[t],
-                      color: selected ? _accent : _textMuted,
+                  Icon(icons[t],
+                      color: selected ? color : Colors.grey[400],
                       size: 20),
                   const SizedBox(height: 4),
                   Text(
                     t[0].toUpperCase() + t.substring(1),
                     style: TextStyle(
-                      color: selected ? _accent : _textMuted,
-                      fontSize: 12,
+                      color: selected ? color : Colors.grey[500],
+                      fontSize: 11,
                       fontWeight: selected
                           ? FontWeight.w700
-                          : FontWeight.normal,
+                          : FontWeight.w400,
                     ),
                   ),
                 ],
@@ -334,29 +364,27 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
               margin: EdgeInsets.only(
                   right: t != _couponTypes.last ? 8 : 0),
               padding: const EdgeInsets.symmetric(
-                  vertical: 12, horizontal: 8),
+                  vertical: 10, horizontal: 8),
               decoration: BoxDecoration(
                 color: selected
-                    ? const Color(0xFF42A5F5).withOpacity(0.12)
-                    : _surface,
-                borderRadius: BorderRadius.circular(12),
+                    ? Primary.withOpacity(0.08)
+                    : Colors.grey[50],
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: selected
-                      ? const Color(0xFF42A5F5).withOpacity(0.5)
-                      : Colors.white10,
+                      ? Primary.withOpacity(0.4)
+                      : Colors.grey.shade200,
                 ),
               ),
               child: Text(
                 label,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: selected
-                      ? const Color(0xFF42A5F5)
-                      : _textMuted,
+                  color: selected ? Primary : Colors.grey[500],
                   fontSize: 12,
                   fontWeight: selected
                       ? FontWeight.w700
-                      : FontWeight.normal,
+                      : FontWeight.w400,
                 ),
               ),
             ),
@@ -407,7 +435,8 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
       case 'rewards':
         return [
           _field(_rewardTypeCtrl, 'Reward Type',
-              required: true, icon: Icons.card_giftcard_rounded),
+              required: true,
+              icon: Icons.card_giftcard_rounded),
         ];
       default:
         return [];
@@ -419,18 +448,18 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
       onTap: () async {
         final date = await showDatePicker(
           context: context,
-          initialDate: _expiry ??
-              DateTime.now().add(const Duration(days: 30)),
+          initialDate:
+          _expiry ?? DateTime.now().add(const Duration(days: 30)),
           firstDate: DateTime.now(),
           lastDate:
           DateTime.now().add(const Duration(days: 730)),
           builder: (ctx, child) => Theme(
-            data: ThemeData.dark().copyWith(
-              colorScheme: const ColorScheme.dark(
-                primary: _accent,
-                onPrimary: _bg,
-                surface: Color(0xFF242424),
-                onSurface: _textPrimary,
+            data: Theme.of(ctx).copyWith(
+              colorScheme: ColorScheme.light(
+                primary: Primary,
+                onPrimary: Colors.white,
+                surface: Colors.white,
+                onSurface: Colors.black87,
               ),
             ),
             child: child!,
@@ -439,22 +468,22 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
         if (date != null) setState(() => _expiry = date);
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 15),
+        padding:
+        const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          color: _surface,
-          borderRadius: BorderRadius.circular(14),
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: _expiry != null
-                ? _accent.withOpacity(0.4)
-                : Colors.white10,
+                ? Primary.withOpacity(0.4)
+                : Colors.grey.shade200,
           ),
         ),
         child: Row(
           children: [
             Icon(
               Icons.calendar_month_rounded,
-              color: _expiry != null ? _accent : _textMuted,
+              color: _expiry != null ? Primary : Colors.grey[400],
               size: 18,
             ),
             const SizedBox(width: 12),
@@ -463,8 +492,10 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                   ? 'Expires ${_expiry!.day}/${_expiry!.month}/${_expiry!.year}'
                   : 'Select Expiry Date',
               style: TextStyle(
-                color: _expiry != null ? _textPrimary : _textMuted,
-                fontSize: 15,
+                color: _expiry != null
+                    ? Colors.black87
+                    : Colors.grey[400],
+                fontSize: 14,
               ),
             ),
           ],
@@ -477,18 +508,22 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
     return GestureDetector(
       onTap: _pickImage,
       child: Container(
-        height: 160,
+        height: 150,
         decoration: BoxDecoration(
-          color: _surface,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _imageFile != null
-                ? _accent.withOpacity(0.4)
-                : Colors.white10,
-            style: _imageFile != null
-                ? BorderStyle.solid
-                : BorderStyle.solid,
+                ? Primary.withOpacity(0.4)
+                : Colors.grey.shade200,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
         child: _imageFile != null
             ? ClipRRect(
@@ -497,10 +532,17 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
             fit: StackFit.expand,
             children: [
               Image.file(_imageFile!, fit: BoxFit.cover),
-              Container(color: Colors.black45),
-              const Center(
-                child: Icon(Icons.edit_rounded,
-                    color: Colors.white, size: 28),
+              Container(color: Colors.black.withOpacity(0.3)),
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.edit_rounded,
+                      color: Primary, size: 20),
+                ),
               ),
             ],
           ),
@@ -508,12 +550,20 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
             : Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.add_photo_alternate_outlined,
-                color: _textMuted, size: 32),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Primary.withOpacity(0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.add_photo_alternate_outlined,
+                  color: Primary, size: 24),
+            ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Add coupon image (optional)',
-              style: TextStyle(color: _textMuted, fontSize: 13),
+              style: TextStyle(
+                  color: Colors.grey[500], fontSize: 13),
             ),
           ],
         ),
@@ -523,21 +573,17 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final picked =
-    await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    final picked = await picker.pickImage(
+        source: ImageSource.gallery, imageQuality: 80);
     if (picked != null) setState(() => _imageFile = File(picked.path));
   }
 
-  // ─────────────────────────────────────────────────────────────────────────────
-  // SUBMIT
-  // ─────────────────────────────────────────────────────────────────────────────
   void _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
     if (_expiry == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Please select an expiry date'),
-        backgroundColor: Color(0xFF3A1A1A),
         behavior: SnackBarBehavior.floating,
       ));
       return;
@@ -582,10 +628,12 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
     );
 
     if (success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Coupon created! 🎉'),
-        backgroundColor: Color(0xFF1A3A1A),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Coupon created! 🎉'),
+        backgroundColor: Primary,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8)),
       ));
       Navigator.pop(context);
     }

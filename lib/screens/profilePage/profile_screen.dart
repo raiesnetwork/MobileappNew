@@ -244,7 +244,6 @@ class _ProfileScreenState extends State<ProfileScreen>
       ),
       child: Stack(
         children: [
-          // Decorative blobs
           Positioned(
             top: -30,
             right: -30,
@@ -269,11 +268,9 @@ class _ProfileScreenState extends State<ProfileScreen>
               ),
             ),
           ),
-          // Content
           SafeArea(
             child: Padding(
-              padding:
-              const EdgeInsets.only(top: 8, bottom: 16, left: 24, right: 24),
+              padding: const EdgeInsets.only(top: 8, bottom: 16, left: 24, right: 24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -299,7 +296,9 @@ class _ProfileScreenState extends State<ProfileScreen>
                       backgroundImage: _getProfileImage(profile),
                       child: _getProfileImage(profile) == null
                           ? Text(
-                        user?.username?.isNotEmpty == true
+                        profile?['name']?.isNotEmpty == true
+                            ? profile!['name'][0].toUpperCase()
+                            : user?.username?.isNotEmpty == true
                             ? user.username[0].toUpperCase()
                             : 'U',
                         style: const TextStyle(
@@ -323,27 +322,39 @@ class _ProfileScreenState extends State<ProfileScreen>
                       letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(height: 8),
 
-                  // Contact chips
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      if (profile?['mobile'] != null ||
-                          user?.mobile != null)
+                  // Contact chips — only rendered when data exists
+                  Builder(builder: (context) {
+                    final phone = (profile?['mobile'] ?? user?.mobile ?? '')
+                        .toString()
+                        .trim();
+                    final email = (profile?['email'] ?? '').toString().trim();
+
+                    final chips = <Widget>[
+                      if (phone.isNotEmpty && phone != 'null')
                         _ContactChip(
                           icon: Icons.phone_rounded,
-                          label: profile?['mobile'] ?? user?.mobile ?? '',
+                          label: phone,
                         ),
-                      if (profile?['email'] != null)
+                      if (email.isNotEmpty && email != 'null')
                         _ContactChip(
                           icon: Icons.email_rounded,
-                          label: profile!['email'],
+                          label: email,
                         ),
-                    ],
-                  ),
+                    ];
+
+                    if (chips.isEmpty) return const SizedBox.shrink();
+
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: chips,
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),

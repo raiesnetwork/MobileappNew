@@ -420,7 +420,7 @@ class _LoginScreenState extends State<LoginScreen>
                             Consumer<AuthProvider>(
                               builder: (context, authProvider, _) {
                                 return _PrimaryButton(
-                                  label: _isPasswordLogin ? 'Sign In' : 'Send OTP',
+                                  label: _isPasswordLogin ? 'Login' : 'Send OTP',
                                   isLoading: authProvider.isLoading,
                                   onPressed: _isPasswordLogin
                                       ? _handlePasswordLogin

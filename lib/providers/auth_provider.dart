@@ -184,11 +184,21 @@ class AuthProvider with ChangeNotifier {
 
     final success = result['success'] == true;
     if (success) {
-      // ✅ Save FCM token to backend after login
+      // Build User object from the response and save it
+      _user = User(
+        id: result['user_id'] ?? '',
+        username: result['username'] ?? '',
+        mobile: mobile,
+        isFamilyHead: false,
+        guidStatus: result['guid'] ?? false,
+        token: result['token'],
+      );
+      await _saveUserData(_user!);   // persists to SharedPreferences
+
       await FcmService.saveFcmToken();
       FcmService.listenForTokenRefresh();
     } else {
-      _setError(result['message']);
+      _setError(result['message'] ?? 'OTP verification failed');
     }
 
     _setLoading(false);

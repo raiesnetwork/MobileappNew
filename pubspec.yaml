@@ -88,6 +88,7 @@ dependencies:
   floating: ^2.0.0
   pip_view:
   flutter_image_compress: ^2.1.0
+  any_link_preview: ^3.0.0
 
 
 

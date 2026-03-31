@@ -1,3 +1,4 @@
+import 'package:any_link_preview/any_link_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -259,34 +260,37 @@ class _FeedScreenState extends State<FeedScreen> {
   void _loadMorePosts() async {
     if (isLoadingMore || !_hasMorePosts || _isSearching) return;
 
-    setState(() {
-      isLoadingMore = true;
-    });
+    setState(() => isLoadingMore = true);
 
     final provider = context.read<CommentProvider>();
-    Map<String, dynamic>? result;
 
     if (isCommunityFeed) {
-      result = await provider.fetchCommunityPosts(
+      await provider.fetchCommunityPosts(
         communityId: widget.communityId!,
         offset: _currentPage * _postsPerPage,
         limit: _postsPerPage,
       );
     } else {
-      result = await provider.fetchAllPosts(
+      await provider.fetchAllPosts(
         offset: _currentPage * _postsPerPage,
         limit: _postsPerPage,
         isRefresh: false,
       );
     }
 
+    if (!mounted) return;
+
+    final currentPosts = isCommunityFeed
+        ? provider.communityPosts
+        : provider.posts;
+
     setState(() {
-      posts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _originalPosts = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _allPostsCache = List.from(isCommunityFeed ? provider.communityPosts : provider.posts);
-      _currentPage = 1;
-      _hasMorePosts = (isCommunityFeed ? provider.communityPosts : provider.posts).length == _postsPerPage;
-      isLoading = false;
+      posts = List.from(currentPosts);        // ✅ Provider already appends
+      _originalPosts = List.from(currentPosts);
+      _allPostsCache = List.from(currentPosts);
+      _currentPage++;                          // ✅ Increment, don't reset
+      _hasMorePosts = currentPosts.length >= _currentPage * _postsPerPage;
+      isLoadingMore = false;                   // ✅ Was missing!
     });
   }
 
@@ -419,42 +423,47 @@ class _FeedScreenState extends State<FeedScreen> {
           ),
         ],
       ),
-      // ✅ Only show FAB for all posts, not community posts
-      floatingActionButton: !isCommunityFeed
-          ? Padding(
-              padding: const EdgeInsets.only(bottom: 20, right: 8),
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => CreatePostScreen()),
-                  );
-                },
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(2, 2),
-                      ),
-                    ],
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Image.asset(
-                      'assets/icons/floatingicon.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 20, right: 8),
+        child: GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CreatePostScreen(
+                  // ✅ Pass communityId if in community feed, null otherwise
+                  communityId: isCommunityFeed ? widget.communityId : null,
                 ),
               ),
-            )
-          : null,
+            ).then((_) {
+              // ✅ Refresh feed after returning from create post
+              _refreshFeed();
+            });
+          },
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 4,
+                  offset: Offset(2, 2),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Image.asset(
+                'assets/icons/floatingicon.png',
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -905,22 +914,22 @@ class _FeedScreenState extends State<FeedScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ✅ Text only post — centered between dividers
+                  // ✅ Text only post — centered between dividers
                   if (post.postContent.isNotEmpty &&
                       filteredImages.isEmpty &&
                       (post.postVideo == null || post.postVideo!.isEmpty))
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 30),
-                      alignment: Alignment.center,
-                      child: Text(
-                        post.postContent,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: Colors.black87,
-                          height: 1.4,
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          alignment: Alignment.center,
+                          child: PostContentWidget(content: post.postContent),
                         ),
-                      ),
+                        // ✅ Show link preview if URL exists in content
+                        LinkPreviewWidget(content: post.postContent),
+                      ],
                     ),
 
                   if (filteredImages.isNotEmpty)
@@ -955,10 +964,13 @@ class _FeedScreenState extends State<FeedScreen> {
           _buildActionButtons(post),
 
 // ✅ Show text below actions only when media exists
+          // ✅ Show text below actions only when media exists
           if (post.postContent.isNotEmpty &&
               (filteredImages.isNotEmpty ||
-                  (post.postVideo != null && post.postVideo!.isNotEmpty)))
+                  (post.postVideo != null && post.postVideo!.isNotEmpty))) ...[
             PostContentWidget(content: post.postContent),
+            LinkPreviewWidget(content: post.postContent),
+          ],
           // Show a button to go back and browse the full feed
           if (widget.postId != null && widget.postId!.isNotEmpty)
             Padding(
@@ -1966,7 +1978,173 @@ class _PostContentWidgetState extends State<PostContentWidget> {
                 ),
               ),
             ),
+
         ],
+      ),
+    );
+  }
+}
+class LinkPreviewWidget extends StatefulWidget {
+  final String content;
+
+  const LinkPreviewWidget({Key? key, required this.content}) : super(key: key);
+
+  @override
+  State<LinkPreviewWidget> createState() => _LinkPreviewWidgetState();
+}
+
+class _LinkPreviewWidgetState extends State<LinkPreviewWidget> {
+  static final RegExp _urlRegExp = RegExp(
+    r'(https?://[-a-zA-Z0-9@:%._\+~#=/?&]+[-a-zA-Z0-9@:%_\+~#=/?&])',
+    caseSensitive: false,
+  );
+
+  String? _url;
+  Metadata? _metadata;
+  bool _isLoading = true;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _url = _urlRegExp.firstMatch(widget.content)?.group(0);
+    if (_url != null) _fetchMetadata();
+  }
+
+  Future<void> _fetchMetadata() async {
+    try {
+      final metadata = await AnyLinkPreview.getMetadata(
+        link: _url!,
+        cache: const Duration(days: 7),
+        proxyUrl: "https://corsproxy.io/?", // ✅ Bypass CORS/block issues
+      );
+
+      if (!mounted) return;
+
+      // ✅ Only show preview if we actually got an image or title
+      if (metadata != null &&
+          (metadata.image != null || metadata.title != null)) {
+        setState(() {
+          _metadata = metadata;
+          _isLoading = false;
+          _hasError = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_url == null) return const SizedBox.shrink();
+
+    // ✅ Show nothing while loading (no flicker)
+    if (_isLoading) return const SizedBox.shrink();
+
+    // ✅ Show nothing on error (LinkedIn blocks scraping)
+    if (_hasError || _metadata == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: GestureDetector(
+        onTap: () async {
+          final uri = Uri.parse(_url!);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.grey.withOpacity(0.2),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ✅ Show image only if available
+              if (_metadata!.image != null && _metadata!.image!.isNotEmpty)
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(8),
+                  ),
+                  child: CachedNetworkImage(
+                    imageUrl: _metadata!.image!,
+                    width: double.infinity,
+                    height: 180,
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                      height: 180,
+                      color: Colors.grey[200],
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
+                    errorWidget: (context, url, error) =>
+                    const SizedBox.shrink(),
+                  ),
+                ),
+
+              // ✅ Title + description
+              if (_metadata!.title != null || _metadata!.desc != null)
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_metadata!.title != null &&
+                          _metadata!.title!.isNotEmpty)
+                        Text(
+                          _metadata!.title!,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.black,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      if (_metadata!.desc != null &&
+                          _metadata!.desc!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _metadata!.desc!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Text(
+                        Uri.parse(_url!).host,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[400],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

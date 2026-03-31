@@ -129,7 +129,7 @@ class AuthService {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('auth_token', token);
         await prefs.setString('user_id', userId ?? '');
-        await prefs.setString('username', username ?? '');
+        await prefs.setString('user_name', username ?? '');
         await prefs.setBool('guid', guid ?? false);
 
         // 🧠 Verify token saved

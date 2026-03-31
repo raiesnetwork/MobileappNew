@@ -1,25 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../constants/constants.dart';
 import '../../providers/coupon_provider.dart';
 
-/// Reusable bottom sheet / widget to verify a coupon code at checkout.
-///
-/// STANDALONE (bottom sheet):
-///   showModalBottomSheet(
-///     context: context,
-///     builder: (_) => const VerifyCouponSheet(),
-///   );
-///
-/// EMBEDDED in checkout (pass onApplied callback):
-///   VerifyCouponSheet(
-///     onApplied: (coupon) { /* apply discount */ },
-///   )
 class VerifyCouponSheet extends StatefulWidget {
-  /// Called when a coupon is successfully verified.
-  /// Receives the coupon map from the server.
   final void Function(Map<String, dynamic> coupon)? onApplied;
-
-  /// If true renders as an inline widget (no drag handle / rounded top).
   final bool inline;
 
   const VerifyCouponSheet({Key? key, this.onApplied, this.inline = false})
@@ -30,14 +15,6 @@ class VerifyCouponSheet extends StatefulWidget {
 }
 
 class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
-  static const _bg = Color(0xFF161616);
-  static const _surface = Color(0xFF222222);
-  static const _accent = Color(0xFFE8FF3A);
-  static const _green = Color(0xFF4CAF50);
-  static const _red = Color(0xFFFF6B6B);
-  static const _textPrimary = Color(0xFFF5F5F0);
-  static const _textMuted = Color(0xFF888880);
-
   final _codeController = TextEditingController();
   Map<String, dynamic>? _appliedCoupon;
 
@@ -55,7 +32,7 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
 
     return Container(
       decoration: const BoxDecoration(
-        color: _bg,
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
@@ -76,22 +53,24 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.white24,
+                color: Colors.grey[300],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             const SizedBox(height: 24),
           ],
+
+          // Header
           Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: _accent.withOpacity(0.1),
+                  color: Primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.local_offer_rounded,
-                    color: _accent, size: 20),
+                child: Icon(Icons.local_offer_rounded,
+                    color: Primary, size: 20),
               ),
               const SizedBox(width: 12),
               const Column(
@@ -100,101 +79,109 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
                   Text(
                     'Apply Coupon',
                     style: TextStyle(
-                        color: _textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700),
+                      color: Colors.black87,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   Text(
                     'Enter code to get discount',
-                    style: TextStyle(color: _textMuted, fontSize: 12),
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                 ],
               ),
             ],
           ),
-          const SizedBox(height: 24),
 
-          // Code input row
+          const SizedBox(height: 20),
+
+          // Input row
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _codeController,
-                  textCapitalization: TextCapitalization.characters,
-                  style: const TextStyle(
-                    color: _textPrimary,
-                    fontFamily: 'Courier',
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 2,
-                    fontSize: 16,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'COUPON CODE',
-                    hintStyle: TextStyle(
-                      color: _textMuted.withOpacity(0.5),
-                      fontFamily: 'Courier',
-                      fontWeight: FontWeight.w400,
+                child: StatefulBuilder(
+                  builder: (_, setS) => TextField(
+                    controller: _codeController,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w700,
                       letterSpacing: 2,
-                      fontSize: 14,
+                      fontSize: 15,
                     ),
-                    filled: true,
-                    fillColor: _surface,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
+                    decoration: InputDecoration(
+                      hintText: 'COUPON CODE',
+                      hintStyle: TextStyle(
+                        color: Colors.grey[300],
+                        fontWeight: FontWeight.w400,
+                        letterSpacing: 2,
+                        fontSize: 13,
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade200),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide:
+                        BorderSide(color: Primary, width: 1.5),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 14),
+                      suffixIcon: _codeController.text.isNotEmpty
+                          ? IconButton(
+                        icon: Icon(Icons.close_rounded,
+                            color: Colors.grey[400], size: 18),
+                        onPressed: () {
+                          _codeController.clear();
+                          context
+                              .read<CouponProvider>()
+                              .clearVerifyState();
+                          setState(() => _appliedCoupon = null);
+                          setS(() {});
+                        },
+                      )
+                          : null,
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(
-                          color: _accent.withOpacity(0.5)),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                    suffixIcon: _codeController.text.isNotEmpty
-                        ? IconButton(
-                      icon: const Icon(Icons.close_rounded,
-                          color: _textMuted, size: 18),
-                      onPressed: () {
-                        _codeController.clear();
-                        context
-                            .read<CouponProvider>()
-                            .clearVerifyState();
-                        setState(() => _appliedCoupon = null);
-                      },
-                    )
-                        : null,
+                    onChanged: (_) => setS(() {}),
                   ),
-                  onChanged: (_) => setState(() {}),
                 ),
               ),
               const SizedBox(width: 10),
               Consumer<CouponProvider>(builder: (_, provider, __) {
-                return GestureDetector(
-                  onTap: provider.isVerifying ? null : _verify,
-                  child: Container(
-                    height: 52,
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 20),
-                    decoration: BoxDecoration(
-                      color: _accent,
-                      borderRadius: BorderRadius.circular(14),
+                return SizedBox(
+                  height: 50,
+                  child: ElevatedButton(
+                    onPressed: provider.isVerifying ? null : _verify,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Primary,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor:
+                      Primary.withOpacity(0.5),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20),
                     ),
-                    child: Center(
-                      child: provider.isVerifying
-                          ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                            color: Color(0xFF0D0D0D),
-                            strokeWidth: 2),
-                      )
-                          : const Text(
-                        'Apply',
-                        style: TextStyle(
-                          color: Color(0xFF0D0D0D),
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
+                    child: provider.isVerifying
+                        ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                        : const Text(
+                      'Apply',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
                       ),
                     ),
                   ),
@@ -205,12 +192,13 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
 
           const SizedBox(height: 16),
 
-          // Result display
+          // Result
           Consumer<CouponProvider>(builder: (_, provider, __) {
             if (provider.verifyErrorMessage != null) {
               return _resultTile(
                 icon: Icons.cancel_rounded,
-                color: _red,
+                color: Colors.red.shade400,
+                bgColor: Colors.red.shade50,
                 title: 'Invalid Coupon',
                 subtitle: provider.verifyErrorMessage!,
               );
@@ -220,16 +208,15 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
               final discount = _discountText(_appliedCoupon!);
               return _resultTile(
                 icon: Icons.check_circle_rounded,
-                color: _green,
+                color: Colors.green.shade500,
+                bgColor: Colors.green.shade50,
                 title: 'Coupon Applied! ${discount.isNotEmpty ? '🎉' : ''}',
                 subtitle: discount.isNotEmpty
                     ? 'You save $discount'
                     : _appliedCoupon!['name'] ?? 'Coupon valid',
                 onAction: !widget.inline
                     ? null
-                    : () {
-                  widget.onApplied?.call(_appliedCoupon!);
-                },
+                    : () => widget.onApplied?.call(_appliedCoupon!),
                 actionLabel: 'Use this',
               );
             }
@@ -238,12 +225,14 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
           }),
         ],
       ),
+
     );
   }
 
   Widget _resultTile({
     required IconData icon,
     required Color color,
+    required Color bgColor,
     required String title,
     required String subtitle,
     VoidCallback? onAction,
@@ -252,8 +241,8 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(14),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Row(
@@ -270,8 +259,8 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
                         fontWeight: FontWeight.w700,
                         fontSize: 14)),
                 Text(subtitle,
-                    style: const TextStyle(
-                        color: _textMuted, fontSize: 12)),
+                    style: TextStyle(
+                        color: Colors.grey[600], fontSize: 12)),
               ],
             ),
           ),
@@ -282,7 +271,7 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.2),
+                  color: color.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -314,14 +303,12 @@ class _VerifyCouponSheetState extends State<VerifyCouponSheet> {
     final code = _codeController.text.trim();
     if (code.isEmpty) return;
 
-    final result = await context
-        .read<CouponProvider>()
-        .verifyCoupon(code: code);
+    final result =
+    await context.read<CouponProvider>().verifyCoupon(code: code);
 
     if (result['success'] == true && mounted) {
       setState(() => _appliedCoupon = result['coupon']);
       if (!widget.inline) {
-        // Close sheet and pass coupon up
         widget.onApplied?.call(result['coupon']);
       }
     }

@@ -1,13 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../constants/constants.dart';
 import '../../providers/coupon_provider.dart';
 
-/// Bottom sheet to send a coupon to a specific user OR a group.
-/// Usage:
-///   showModalBottomSheet(
-///     context: context,
-///     builder: (_) => SendCouponSheet(coupon: coupon),
-///   );
 class SendCouponSheet extends StatefulWidget {
   final Map<String, dynamic> coupon;
 
@@ -19,12 +14,6 @@ class SendCouponSheet extends StatefulWidget {
 
 class _SendCouponSheetState extends State<SendCouponSheet>
     with SingleTickerProviderStateMixin {
-  static const _bg = Color(0xFF161616);
-  static const _surface = Color(0xFF222222);
-  static const _accent = Color(0xFFE8FF3A);
-  static const _textPrimary = Color(0xFFF5F5F0);
-  static const _textMuted = Color(0xFF888880);
-
   late TabController _tab;
   String? _selectedUserId;
   final _groupIdController = TextEditingController();
@@ -49,7 +38,7 @@ class _SendCouponSheetState extends State<SendCouponSheet>
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: _bg,
+        color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.only(
@@ -62,46 +51,55 @@ class _SendCouponSheetState extends State<SendCouponSheet>
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.white24,
+              color: Colors.grey[300],
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           const SizedBox(height: 20),
+
+          // Header
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                const Text(
-                  'Send Coupon',
-                  style: TextStyle(
-                    color: _textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white38,
-                    borderRadius: BorderRadius.circular(20),
+                    color: Primary.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(
-                    widget.coupon['code'] ?? '',
-                    style: const TextStyle(
-                      color: _accent,
-                      fontFamily: 'Courier',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                      letterSpacing: 1.5,
-                    ),
+                  child: Icon(Icons.send_rounded, color: Primary, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Send Coupon',
+                        style: TextStyle(
+                          color: Colors.black87,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        widget.coupon['code'] ?? '',
+                        style: TextStyle(
+                          color: Primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 20),
+
+          const SizedBox(height: 16),
 
           // Tab bar
           Padding(
@@ -109,19 +107,19 @@ class _SendCouponSheetState extends State<SendCouponSheet>
             child: Container(
               height: 42,
               decoration: BoxDecoration(
-                color: _surface,
+                color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(12),
               ),
               child: TabBar(
                 controller: _tab,
-                labelColor: _bg,
-                unselectedLabelColor: _textMuted,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.grey[500],
                 labelStyle: const TextStyle(
-                    fontWeight: FontWeight.w700, fontSize: 13),
+                    fontWeight: FontWeight.w600, fontSize: 13),
                 unselectedLabelStyle: const TextStyle(
                     fontWeight: FontWeight.w400, fontSize: 13),
                 indicator: BoxDecoration(
-                  color: _accent,
+                  color: Primary,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 indicatorSize: TabBarIndicatorSize.tab,
@@ -148,9 +146,8 @@ class _SendCouponSheetState extends State<SendCouponSheet>
   Widget _buildUserTab() {
     return Consumer<CouponProvider>(builder: (context, provider, _) {
       if (provider.userList.isEmpty) {
-        return const Center(
-          child: CircularProgressIndicator(
-              color: _accent, strokeWidth: 2),
+        return Center(
+          child: CircularProgressIndicator(color: Primary, strokeWidth: 2),
         );
       }
 
@@ -165,6 +162,8 @@ class _SendCouponSheetState extends State<SendCouponSheet>
                 final user = provider.userList[i];
                 final uid = user['_id']?.toString() ?? '';
                 final isSelected = _selectedUserId == uid;
+                final name =
+                    user['name']?.toString() ?? 'Unknown';
 
                 return GestureDetector(
                   onTap: () => setState(() => _selectedUserId = uid),
@@ -173,13 +172,13 @@ class _SendCouponSheetState extends State<SendCouponSheet>
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? _accent.withOpacity(0.1)
-                          : _surface,
+                          ? Primary.withOpacity(0.06)
+                          : Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected
-                            ? _accent.withOpacity(0.5)
-                            : Colors.white10,
+                            ? Primary.withOpacity(0.4)
+                            : Colors.grey.shade200,
                       ),
                     ),
                     child: Row(
@@ -187,15 +186,12 @@ class _SendCouponSheetState extends State<SendCouponSheet>
                         CircleAvatar(
                           radius: 18,
                           backgroundColor: isSelected
-                              ? _accent.withOpacity(0.2)
-                              : Colors.white10,
+                              ? Primary.withOpacity(0.15)
+                              : Colors.grey.shade200,
                           child: Text(
-                            (user['name'] ?? user['email'] ?? '?')
-                                .toString()
-                                .substring(0, 1)
-                                .toUpperCase(),
+                            name.substring(0, 1).toUpperCase(),
                             style: TextStyle(
-                              color: isSelected ? _accent : _textMuted,
+                              color: isSelected ? Primary : Colors.grey[600],
                               fontWeight: FontWeight.w700,
                               fontSize: 13,
                             ),
@@ -207,24 +203,26 @@ class _SendCouponSheetState extends State<SendCouponSheet>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                user['name']?.toString() ?? 'Unknown',
+                                name,
                                 style: const TextStyle(
-                                    color: _textPrimary,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14),
+                                  color: Colors.black87,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
                               ),
                               if (user['email'] != null)
                                 Text(
                                   user['email'].toString(),
-                                  style: const TextStyle(
-                                      color: _textMuted, fontSize: 12),
+                                  style: TextStyle(
+                                      color: Colors.grey[400],
+                                      fontSize: 11),
                                 ),
                             ],
                           ),
                         ),
                         if (isSelected)
-                          const Icon(Icons.check_circle_rounded,
-                              color: _accent, size: 18),
+                          Icon(Icons.check_circle_rounded,
+                              color: Primary, size: 18),
                       ],
                     ),
                   ),
@@ -251,40 +249,48 @@ class _SendCouponSheetState extends State<SendCouponSheet>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Group / Community ID',
             style: TextStyle(
-                color: _textMuted,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.5),
+              color: Colors.grey[500],
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.5,
+            ),
           ),
           const SizedBox(height: 10),
           TextField(
             controller: _groupIdController,
-            style: const TextStyle(color: _textPrimary, fontFamily: 'Courier'),
+            style: const TextStyle(
+                color: Colors.black87, fontSize: 14),
             decoration: InputDecoration(
               hintText: 'Paste group ID here',
-              hintStyle: const TextStyle(color: _textMuted),
+              hintStyle: TextStyle(color: Colors.grey[400]),
               filled: true,
-              fillColor: _surface,
-              prefixIcon: const Icon(Icons.group_outlined,
-                  color: _textMuted, size: 18),
+              fillColor: Colors.grey[50],
+              prefixIcon: Icon(Icons.group_outlined,
+                  color: Colors.grey[400], size: 18),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Colors.grey.shade200),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey.shade200),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                    color: _accent.withOpacity(0.5)),
+                borderSide: BorderSide(color: Primary, width: 1.5),
               ),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 12),
             ),
           ),
-          const SizedBox(height: 12),
-          const Text(
+          const SizedBox(height: 10),
+          Text(
             'The coupon will be added to the community associated with this group.',
-            style: TextStyle(color: _textMuted, fontSize: 12, height: 1.5),
+            style:
+            TextStyle(color: Colors.grey[400], fontSize: 12, height: 1.5),
           ),
           const Spacer(),
           _sendButton(
@@ -305,33 +311,30 @@ class _SendCouponSheetState extends State<SendCouponSheet>
   }) {
     return Consumer<CouponProvider>(builder: (_, provider, __) {
       final loading = provider.isSending;
-      return GestureDetector(
-        onTap: (!loading && enabled) ? onTap : null,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 15),
-          decoration: BoxDecoration(
-            color: enabled ? _accent : _surface,
-            borderRadius: BorderRadius.circular(14),
+      return SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: (!loading && enabled) ? onTap : null,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Primary,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: Colors.grey[200],
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            elevation: 0,
           ),
-          child: Center(
-            child: loading
-                ? const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(
-                  color: Color(0xFF0D0D0D), strokeWidth: 2),
-            )
-                : Text(
-              label,
-              style: TextStyle(
-                color: enabled
-                    ? const Color(0xFF0D0D0D)
-                    : _textMuted,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-              ),
-            ),
+          child: loading
+              ? const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+                color: Colors.white, strokeWidth: 2),
+          )
+              : Text(
+            label,
+            style: const TextStyle(
+                fontWeight: FontWeight.w700, fontSize: 14),
           ),
         ),
       );
@@ -351,10 +354,10 @@ class _SendCouponSheetState extends State<SendCouponSheet>
         content: Text(success
             ? 'Coupon sent successfully!'
             : (provider.sendErrorMessage ?? 'Failed to send')),
-        backgroundColor: success
-            ? const Color(0xFF1A3A1A)
-            : const Color(0xFF3A1A1A),
+        backgroundColor: success ? Primary : Colors.red.shade400,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8)),
       ));
     }
   }
@@ -364,7 +367,6 @@ class _SendCouponSheetState extends State<SendCouponSheet>
     if (groupId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Please enter a group ID'),
-        backgroundColor: Color(0xFF3A1A1A),
         behavior: SnackBarBehavior.floating,
       ));
       return;
@@ -380,10 +382,10 @@ class _SendCouponSheetState extends State<SendCouponSheet>
         content: Text(success
             ? 'Coupon sent to group!'
             : (provider.sendErrorMessage ?? 'Failed to send')),
-        backgroundColor: success
-            ? const Color(0xFF1A3A1A)
-            : const Color(0xFF3A1A1A),
+        backgroundColor: success ? Primary : Colors.red.shade400,
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8)),
       ));
     }
   }

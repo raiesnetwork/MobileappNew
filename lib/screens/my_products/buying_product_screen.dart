@@ -37,7 +37,7 @@ class ProductPurchaseScreen extends StatefulWidget {
 class _ProductPurchaseScreenState extends State<ProductPurchaseScreen> {
   late Razorpay _razorpay;
   bool _isProcessing = false;
-  String _razorpayKeyId = 'rzp_test_R9SkYwGQh6HuUF';
+  String _razorpayKeyId = 'rzp_live_SL4ZRZsuETGg36';
 
   @override
   void initState() {
@@ -1013,17 +1013,20 @@ class _ProductPurchaseScreenState extends State<ProductPurchaseScreen> {
     ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.lock_rounded, size: 18),
           const SizedBox(width: 10),
-          Text(
-            _isProcessing
-                ? 'Processing...'
-                : 'Pay INR ${widget.totalAmount}',
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.3,
+          Flexible(
+            child: Text(
+              _isProcessing ? 'Processing...' : 'Pay INR ${widget.totalAmount}',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.3,
+              ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
           ),
         ],
