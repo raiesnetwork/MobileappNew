@@ -1288,139 +1288,418 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         provider.getMyGroupById(widget.groupId);
     if (group == null) return;
 
+    final members = (group['members'] as List<dynamic>?) ?? [];
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
+        height: MediaQuery.of(context).size.height * 0.80,
         decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(20),
-                topRight: Radius.circular(20))),
-        child: Column(children: [
-          Container(
+          color: Colors.white,
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            topRight: Radius.circular(24),
+          ),
+        ),
+        child: Column(
+          children: [
+            // ── Drag Handle ──
+            Container(
               width: 40,
               height: 4,
               margin: const EdgeInsets.symmetric(vertical: 12),
               decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2))),
-          Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                          child: Container(
-                            width: 100,
-                            height: 100,
-                            decoration: BoxDecoration(
-                                color: Colors.grey[300], shape: BoxShape.circle),
-                            child: group['profileImage'] != null &&
-                                (group['profileImage'] as String).isNotEmpty
-                                ? ClipOval(
-                                child: Image.network(group['profileImage'],
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) =>
-                                    const Icon(Icons.group, size: 50)))
-                                : const Icon(Icons.group, size: 50),
-                          )),
-                      const SizedBox(height: 16),
-                      Center(
-                          child: Text(group['name'] ?? 'Unknown Group',
-                              style: const TextStyle(
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold))),
-                      if (group['description'] != null &&
-                          (group['description'] as String).isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Center(
-                            child: Text(group['description'],
-                                style: TextStyle(
-                                    fontSize: 15, color: Colors.grey[600]),
-                                textAlign: TextAlign.center)),
-                      ],
-                      const SizedBox(height: 20),
-                      Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                              color: Colors.grey[50],
-                              borderRadius: BorderRadius.circular(12)),
-                          child: Column(children: [
-                            _infoRow('Members',
-                                '${group['memberCount'] ?? 0}', Icons.people),
-                            const Divider(),
-                            _infoRow(
-                                'Role',
-                                group['isAdmin'] == true
-                                    ? 'Admin'
-                                    : (group['isMember'] == true
-                                    ? 'Member'
-                                    : 'Not a member'),
-                                group['isAdmin'] == true
-                                    ? Icons.admin_panel_settings
-                                    : Icons.person),
-                          ])),
-                      const SizedBox(height: 20),
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
 
-                      if (group['isAdmin'] == true) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: () {
-                              Navigator.pop(context);
-                              _openMemberManagement(adminMode: true);
-                            },
-                            icon: const Icon(Icons.manage_accounts_rounded),
-                            label: const Text('Manage Members'),
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF6C5CE7),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 12)),
+            // ── Group Avatar + Name + Description ──
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  // Avatar
+                  Container(
+                    width: 80,
+                    height: 80,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: (group['profileImage'] == null ||
+                          (group['profileImage'] as String).isEmpty)
+                          ? const LinearGradient(
+                        colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                          : null,
+                    ),
+                    child: CircleAvatar(
+                      radius: 40,
+                      backgroundColor: Colors.transparent,
+                      backgroundImage: (group['profileImage'] != null &&
+                          (group['profileImage'] as String).isNotEmpty)
+                          ? NetworkImage(group['profileImage'])
+                          : null,
+                      child: (group['profileImage'] == null ||
+                          (group['profileImage'] as String).isEmpty)
+                          ? Text(
+                        (group['name'] ?? 'G')[0].toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 30,
+                        ),
+                      )
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    group['name'] ?? 'Unknown Group',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1D2E),
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (group['description'] != null &&
+                      (group['description'] as String).isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      group['description'],
+                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  // ── Stats Row ──
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _infoStatCard(
+                          icon: Icons.people_rounded,
+                          label: 'Members',
+                          value: '${group['memberCount'] ?? members.length}',
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _infoStatCard(
+                          icon: group['isAdmin'] == true
+                              ? Icons.admin_panel_settings_rounded
+                              : Icons.person_rounded,
+                          label: 'Your Role',
+                          value: group['isAdmin'] == true ? 'Admin' : 'Member',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            Divider(color: Colors.grey[100], thickness: 1),
+
+            // ── Members List Header ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+              child: Row(
+                children: [
+                  const Text(
+                    'Members',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1D2E),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6C5CE7).withOpacity(0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${members.length}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF6C5CE7),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (group['isAdmin'] == true)
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        _openMemberManagement(adminMode: true);
+                      },
+                      child: const Text(
+                        'Manage',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6C5CE7),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // ── Members List ──
+            Expanded(
+              child: members.isEmpty
+                  ? Center(
+                child: Text(
+                  'No members to display',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                ),
+              )
+                  : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                itemCount: members.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                itemBuilder: (context, i) {
+                  final m = members[i];
+                  final isAdmin =
+                      m is Map && (m['isAdmin'] == true || m['role'] == 'admin');
+
+                  // Extract name
+                  String name = 'Member';
+                  if (m is Map) {
+                    final profile = m['profile'];
+                    if (profile is Map &&
+                        profile['name'] != null &&
+                        profile['name'].toString().trim().isNotEmpty) {
+                      name = profile['name'].toString().trim();
+                    } else if (m['name'] != null) {
+                      name = m['name'].toString().trim();
+                    } else if (m['mobile'] != null) {
+                      name = m['mobile'].toString().trim();
+                    }
+                  }
+
+                  // Extract mobile
+                  String mobile = '';
+                  if (m is Map) {
+                    mobile = (m['mobile'] ??
+                        (m['profile'] is Map
+                            ? m['profile']['mobile']
+                            : null) ??
+                        '')
+                        .toString();
+                  }
+
+                  // Extract avatar
+                  String? avatar;
+                  if (m is Map) {
+                    final profile = m['profile'];
+                    if (profile is Map) {
+                      final img = profile['profileImage']?.toString() ?? '';
+                      if (img.isNotEmpty && img != 'null') avatar = img;
+                    }
+                  }
+
+                  final initials = name[0].toUpperCase();
+                  final hasAvatar =
+                      avatar != null && avatar.isNotEmpty && avatar != 'null';
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[100]!),
+                    ),
+                    child: Row(
+                      children: [
+                        // Avatar
+                        Stack(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: !hasAvatar
+                                    ? const LinearGradient(
+                                  colors: [
+                                    Color(0xFF9B8FF5),
+                                    Color(0xFF6C5CE7)
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                                    : null,
+                              ),
+                              child: CircleAvatar(
+                                radius: 22,
+                                backgroundColor: Colors.transparent,
+                                backgroundImage: hasAvatar
+                                    ? NetworkImage(avatar!)
+                                    : null,
+                                child: !hasAvatar
+                                    ? Text(
+                                  initials,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                )
+                                    : null,
+                              ),
+                            ),
+                            if (isAdmin)
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 16,
+                                  height: 16,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFB347),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                        color: Colors.white, width: 1.5),
+                                  ),
+                                  child: const Icon(Icons.star_rounded,
+                                      size: 9, color: Colors.white),
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        // Name + mobile
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1A1D2E),
+                                ),
+                              ),
+                              if (mobile.isNotEmpty && mobile != name)
+                                Text(
+                                  mobile,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF9DA3B4),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        // Admin badge
+                        if (isAdmin)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color:
+                              const Color(0xFFFFB347).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Admin',
+                              style: TextStyle(
+                                color: Color(0xFFE08500),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                       ],
+                    ),
+                  );
+                },
+              ),
+            ),
 
-                      if (group['isMember'] == true)
-                        _actionButton('Leave Group', Icons.exit_to_app,
-                            Colors.red, () async {
-                              Navigator.pop(context);
-                              final ok = await provider
-                                  .cancelGroupRequest(widget.groupId);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(SnackBar(
-                                  content: Text(
-                                      ok ? 'Left group' : 'Failed to leave'),
-                                  backgroundColor:
-                                  ok ? Colors.green : Colors.red,
-                                ));
-                              }
-                            })
-                      else if (group['isRequested'] == true)
-                        _actionButton('Request Pending',
-                            Icons.hourglass_empty, Colors.grey, null)
-                      else
-                        _actionButton('Join Group', Icons.add, Colors.blue,
-                                () async {
-                              Navigator.pop(context);
-                              await provider.requestToJoinGroup(widget.groupId);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context)
-                                    .showSnackBar(SnackBar(
-                                  content:
-                                  Text(provider.groupRequestMessage),
-                                ));
-                              }
-                            }),
-                    ]),
-              )),
-        ]),
+            // ── Leave Group (members only, NO join button) ──
+            if (group['isMember'] == true && group['isAdmin'] != true)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(context);
+                      final ok = await provider.cancelGroupRequest(widget.groupId);
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(ok ? 'Left group' : 'Failed to leave'),
+                          backgroundColor: ok ? Colors.green : Colors.red,
+                        ));
+                      }
+                    },
+                    icon: const Icon(Icons.exit_to_app, color: Colors.red),
+                    label: const Text('Leave Group',
+                        style: TextStyle(color: Colors.red)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.red),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+// Add this helper widget alongside _infoRow:
+  Widget _infoStatCard({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF6C5CE7).withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF6C5CE7).withOpacity(0.12)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFF6C5CE7)),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF9DA3B4),
+                      fontWeight: FontWeight.w500)),
+              Text(value,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1D2E))),
+            ],
+          ),
+        ],
       ),
     );
   }

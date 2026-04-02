@@ -255,11 +255,12 @@ class _CouponListScreenState extends State<CouponListScreen>
   }
 
   void _showSendSheet(Map<String, dynamic> coupon) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => SendCouponSheet(coupon: coupon),
+    // ✅ Full screen navigation instead of bottom sheet
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SendCouponScreen(coupon: coupon),
+      ),
     );
   }
 }
@@ -636,6 +637,7 @@ class _CouponCard extends StatelessWidget {
     try {
       return DateTime.parse(coupon['expiry']).isBefore(DateTime.now());
     } catch (_) {
+
       return false;
     }
   }

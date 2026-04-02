@@ -11,7 +11,12 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../providers/group_provider.dart';
+import '../../../providers/video_call_provider.dart';
+import '../../../providers/voice_call_provider.dart';
 import '../../home/feedpage/feed_screen.dart';
+import '../../video_call/video_call_initiate_.dart';
+import '../../voice_call/outgoing_voice_call.dart';
+import '../chat_detail_screen.dart';
 import '../view_file_screen.dart';
 
 class GroupMessageBubble extends StatefulWidget {
@@ -65,6 +70,265 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       final ms = widget.message['audioDurationMs'];
       if (ms is int && ms > 0) _duration = Duration(milliseconds: ms);
     }
+  }
+  void _showMemberProfile() {
+    if (_isMe || _senderMap == null) return;
+
+    final profile = _senderMap!['profile'];
+    final String? imageUrl = profile?['profileImage']?.toString();
+    final String name = _senderName;
+    final String userId = _senderId;
+
+    // Build userProfile map matching ChatDetailScreen's expected format
+    final Map<String, dynamic> userProfile = {
+      '_id': userId,
+      'profile': {
+        'name': name,
+        'profileImage': imageUrl ?? '',
+      },
+    };
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Profile picture
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
+                    ? const LinearGradient(
+                  colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+                    : null,
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF6C5CE7).withOpacity(0.25),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: CircleAvatar(
+                radius: 44,
+                backgroundColor: Colors.transparent,
+                backgroundImage: (imageUrl != null &&
+                    imageUrl.isNotEmpty &&
+                    imageUrl != 'null')
+                    ? _imageProvider(imageUrl)
+                    : null,
+                child: (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
+                    ? Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 14),
+
+            // Name
+            Text(
+              name,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1A1D2E),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Group Member',
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.grey[500],
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+            const SizedBox(height: 32),
+
+            // Action buttons row — Message | Call | Video
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // Message
+                _buildProfileAction(
+                  icon: Icons.chat_rounded,
+                  label: 'Message',
+                  color: const Color(0xFF6C5CE7),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => ChatDetailScreen(
+                          userId: userId,
+                          chatTitle: name,
+                          userProfile: userProfile,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                // Voice Call
+                _buildProfileAction(
+                  icon: Icons.call_rounded,
+                  label: 'Call',
+                  color: const Color(0xFF00B894),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final voiceCallProvider =
+                    context.read<VoiceCallProvider>();
+                    voiceCallProvider.clearMessages();
+                    await voiceCallProvider.initiateVoiceCall(
+                      receiverId: userId,
+                      receiverName: name,
+                      isConference: false,
+                    );
+                    if (!mounted) return;
+                    if (voiceCallProvider.callState ==
+                        VoiceCallState.calling) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => const VoiceCallingScreen()),
+                      );
+                    } else if (voiceCallProvider.errorMessage != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text(voiceCallProvider.errorMessage!),
+                        backgroundColor: Colors.red,
+                      ));
+                    }
+                  },
+                ),
+
+                // Video Call
+                _buildProfileAction(
+                  icon: Icons.videocam_rounded,
+                  label: 'Video',
+                  color: const Color(0xFF0984E3),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final videoCallProvider =
+                    context.read<VideoCallProvider>();
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => const Center(
+                          child: CircularProgressIndicator()),
+                    );
+                    try {
+                      final isBusy =
+                      await videoCallProvider.checkUserBusy(userId);
+                      if (mounted) Navigator.of(context).pop();
+                      if (isBusy) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(
+                          content:
+                          Text('$name is currently in another call'),
+                          backgroundColor: Colors.orange,
+                        ));
+                        return;
+                      }
+                      await videoCallProvider.initiateCall(
+                        receiverId: userId,
+                        receiverName: name,
+                      );
+                      if (videoCallProvider.errorMessage != null) {
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(
+                          content: Text(videoCallProvider.errorMessage!),
+                          backgroundColor: Colors.red,
+                        ));
+                        videoCallProvider.clearMessages();
+                        return;
+                      }
+                      if (mounted) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => CallingScreen()),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('Failed: $e'),
+                        backgroundColor: Colors.red,
+                      ));
+                    }
+                  },
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.10),
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withOpacity(0.20), width: 1.5),
+            ),
+            child: Icon(icon, color: color, size: 26),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey[700],
+            ),
+          ),
+        ],
+      ),
+    );
   }
   Widget _buildSharedPost() {
     // Try nested sharedPost first (future-proof)
@@ -1064,24 +1328,37 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Align(
         alignment: _isMe ? Alignment.centerRight : Alignment.centerLeft,
-        child: GestureDetector(
-          onLongPress: _showMessageOptions,
-          child: Row(
-            mainAxisAlignment: _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              // ── Left avatar ─────────────────────────────────────────────
-              if (!_isMe) ...[
-                SizedBox(width: 36,
-                    child: widget.showAvatar ? _buildAvatar() : const SizedBox()),
-                const SizedBox(width: 6),
-              ],
+        child: Row(
+          mainAxisAlignment: _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            // ── Left avatar ─────────────────────────────────────────────
+            if (!_isMe) ...[
+              SizedBox(
+                width: 36,
+                child: widget.showAvatar
+                    ? GestureDetector(
+                  onTap: _showMemberProfile,
+                  child: _buildAvatar(),
+                )
+                    : GestureDetector(
+                  onTap: _showMemberProfile,
+                  child: const SizedBox(width: 36, height: 36),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
 
-              // ── Bubble ──────────────────────────────────────────────────
-              Flexible(
+            // ── Bubble ──────────────────────────────────────────────────
+            Flexible(
+              child: GestureDetector(
+                onTap: !_isMe ? _showMemberProfile : null,
+                onLongPress: _showMessageOptions,
                 child: Container(
-                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 13),
+                  constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.72),
+                  padding:
+                  const EdgeInsets.symmetric(vertical: 9, horizontal: 13),
                   decoration: BoxDecoration(
                     color: _isMe ? _purple : Colors.white,
                     borderRadius: BorderRadius.only(
@@ -1091,17 +1368,22 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                       bottomRight: Radius.circular(_isMe ? 4 : 18),
                     ),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 5, offset: const Offset(0, 2)),
+                      BoxShadow(
+                          color: Colors.black.withOpacity(0.06),
+                          blurRadius: 5,
+                          offset: const Offset(0, 2)),
                     ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Sender name — only on first bubble in consecutive group
+                      // Sender name
                       if (!_isMe && widget.showAvatar) ...[
                         Text(_senderName,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                                 color: _colorForName(_senderName))),
                         const SizedBox(height: 3),
                       ],
@@ -1121,13 +1403,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
 
                       const SizedBox(height: 4),
 
-
-                      // Time + read ticks
-                      // NEW
+                      // Time + status ticks
                       Row(mainAxisSize: MainAxisSize.min, children: [
                         Text(_formatTime(timestamp),
-                            style: TextStyle(fontSize: 11,
-                                color: _isMe ? Colors.white60 : Colors.grey[500])),
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: _isMe
+                                    ? Colors.white60
+                                    : Colors.grey[500])),
                         if (_isMe) ...[
                           const SizedBox(width: 5),
                           _buildStatusTick(),
@@ -1135,18 +1418,22 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                         if (widget.message['isEdited'] == true) ...[
                           const SizedBox(width: 5),
                           Text('edited',
-                              style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic,
-                                  color: _isMe ? Colors.white54 : Colors.grey[400])),
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  fontStyle: FontStyle.italic,
+                                  color: _isMe
+                                      ? Colors.white54
+                                      : Colors.grey[400])),
                         ],
                       ]),
                     ],
                   ),
                 ),
               ),
+            ),
 
-              if (_isMe) const SizedBox(width: 8),
-            ],
-          ),
+            if (_isMe) const SizedBox(width: 8),
+          ],
         ),
       ),
     );
@@ -1154,11 +1441,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
 }
 
 
-
-
-// ═══════════════════════════════════════════════════════════════════════════
-// GroupClickableText
-// ═══════════════════════════════════════════════════════════════════════════
 class GroupClickableText extends StatelessWidget {
   final String text;
   final bool isMe;

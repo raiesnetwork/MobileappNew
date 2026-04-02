@@ -16,7 +16,9 @@ class CouponProvider with ChangeNotifier {
   List<Map<String, dynamic>> get createdCoupons => _createdCoupons;
   List<Map<String, dynamic>> get receivedCoupons => _receivedCoupons;
 
-  // ── Create coupon state ────────────────────────────────────────────────────
+  // ── Create coupon state ────────────────────────────────────────────────
+  //
+  // ────
   bool _isCreating = false;
   String? _createErrorMessage;
 

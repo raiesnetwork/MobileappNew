@@ -15,6 +15,9 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
 
   // ✅ CRITICAL: save provider ref in initState — NEVER use context.read() in dispose()
   late final VoiceCallProvider _provider;
+  // Add these state variables at the top of _VoiceCallingScreenState:
+  bool _isMuted = false;
+  bool _isSpeakerOn = false;
 
   late AnimationController _pulseController;
   bool _isActioning = false; // prevents double-pop from button + listener
@@ -177,30 +180,33 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
               const SizedBox(height: 60),
 
               // Controls
+              // Controls
+              // Replace the two _buildControlButton calls in Row:
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  // Mute button
                   _buildControlButton(
-                    icon: Icons.mic_off,
-                    color: Colors.white.withOpacity(0.2),
-                    onPressed: null, // disabled during outgoing ring
+                    icon: _provider.isMuted ? Icons.mic_off : Icons.mic,
+                    color: _provider.isMuted
+                        ? Colors.red.withOpacity(0.8)
+                        : Colors.white.withOpacity(0.2),
+                    onPressed: () {
+                      _provider.setMuted(!_provider.isMuted);
+                      setState(() {});
+                    },
                   ),
                   const SizedBox(width: 40),
 
-                  // ✅ End Call button — uses _cancelCall() not manual pop
+                  // End Call
                   Container(
-                    width: 75,
-                    height: 75,
+                    width: 75, height: 75,
                     decoration: BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.red.withOpacity(0.5),
-                          blurRadius: 25,
-                          spreadRadius: 5,
-                        ),
-                      ],
+                      color: Colors.red, shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(
+                        color: Colors.red.withOpacity(0.5),
+                        blurRadius: 25, spreadRadius: 5,
+                      )],
                     ),
                     child: IconButton(
                       onPressed: _cancelCall,
@@ -209,10 +215,18 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
                   ),
                   const SizedBox(width: 40),
 
+                  // Speaker button
                   _buildControlButton(
-                    icon: Icons.volume_up,
-                    color: Colors.white.withOpacity(0.2),
-                    onPressed: null, // disabled during outgoing ring
+                    icon: _provider.isSpeakerOn
+                        ? Icons.volume_up
+                        : Icons.volume_down,
+                    color: _provider.isSpeakerOn
+                        ? Colors.blue.withOpacity(0.8)
+                        : Colors.white.withOpacity(0.2),
+                    onPressed: () {
+                      _provider.setSpeaker(!_provider.isSpeakerOn);
+                      setState(() {});
+                    },
                   ),
                 ],
               ),

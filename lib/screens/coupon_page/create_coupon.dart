@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/coupon_provider.dart';
@@ -27,7 +25,6 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
   String _type = 'coupon';
   String _couponType = 'discount-in-percentage';
   DateTime? _expiry;
-  File? _imageFile;
 
   final _types = ['coupon', 'coins', 'rewards'];
   final _couponTypes = ['discount-in-percentage', 'discount-amount'];
@@ -74,10 +71,6 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Image picker
-                  _buildImagePicker(),
-                  const SizedBox(height: 20),
-
                   _buildCard(
                     title: 'Basic Info',
                     children: [
@@ -94,6 +87,11 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                           required: true,
                           icon: Icons.confirmation_number_rounded,
                           caps: TextCapitalization.characters),
+                      const SizedBox(height: 12),
+                      _field(_linkCtrl, 'Coupon Link (URL)',
+                          required: true,
+                          icon: Icons.link_rounded,
+                          keyboard: TextInputType.url),
                     ],
                   ),
 
@@ -117,16 +115,6 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                   _buildCard(
                     title: 'Expiry Date',
                     children: [_buildDatePicker()],
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  _buildCard(
-                    title: 'Optional',
-                    children: [
-                      _field(_linkCtrl, 'Coupon Link (URL)',
-                          icon: Icons.link_rounded),
-                    ],
                   ),
 
                   const SizedBox(height: 24),
@@ -166,10 +154,8 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Primary,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                        Primary.withOpacity(0.5),
-                        padding:
-                        const EdgeInsets.symmetric(vertical: 16),
+                        disabledBackgroundColor: Primary.withOpacity(0.5),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14)),
                         elevation: 0,
@@ -250,8 +236,7 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
       style: const TextStyle(color: Colors.black87, fontSize: 14),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle:
-        TextStyle(color: Colors.grey[500], fontSize: 13),
+        labelStyle: TextStyle(color: Colors.grey[500], fontSize: 13),
         prefixIcon: icon != null
             ? Icon(icon, color: Colors.grey[400], size: 18)
             : null,
@@ -271,16 +256,14 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-          BorderSide(color: Colors.red.shade300),
+          borderSide: BorderSide(color: Colors.red.shade300),
         ),
         focusedErrorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide:
-          BorderSide(color: Colors.red.shade300),
+          borderSide: BorderSide(color: Colors.red.shade300),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 14, vertical: 12),
+        contentPadding:
+        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       ),
       validator: required
           ? (v) => (v == null || v.trim().isEmpty)
@@ -310,14 +293,10 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
           child: GestureDetector(
             onTap: () => setState(() => _type = t),
             child: Container(
-              margin: EdgeInsets.only(
-                  right: t != _types.last ? 8 : 0),
-              padding: const EdgeInsets.symmetric(
-                  vertical: 12, horizontal: 8),
+              margin: EdgeInsets.only(right: t != _types.last ? 8 : 0),
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
               decoration: BoxDecoration(
-                color: selected
-                    ? color.withOpacity(0.08)
-                    : Colors.grey[50],
+                color: selected ? color.withOpacity(0.08) : Colors.grey[50],
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: selected
@@ -328,17 +307,15 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
               child: Column(
                 children: [
                   Icon(icons[t],
-                      color: selected ? color : Colors.grey[400],
-                      size: 20),
+                      color: selected ? color : Colors.grey[400], size: 20),
                   const SizedBox(height: 4),
                   Text(
                     t[0].toUpperCase() + t.substring(1),
                     style: TextStyle(
                       color: selected ? color : Colors.grey[500],
                       fontSize: 11,
-                      fontWeight: selected
-                          ? FontWeight.w700
-                          : FontWeight.w400,
+                      fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
                 ],
@@ -354,17 +331,16 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
     return Row(
       children: _couponTypes.map((t) {
         final selected = _couponType == t;
-        final label = t == 'discount-in-percentage'
-            ? '% Percentage'
-            : '₹ Fixed Amount';
+        final label =
+        t == 'discount-in-percentage' ? '% Percentage' : '₹ Fixed Amount';
         return Expanded(
           child: GestureDetector(
             onTap: () => setState(() => _couponType = t),
             child: Container(
-              margin: EdgeInsets.only(
-                  right: t != _couponTypes.last ? 8 : 0),
-              padding: const EdgeInsets.symmetric(
-                  vertical: 10, horizontal: 8),
+              margin:
+              EdgeInsets.only(right: t != _couponTypes.last ? 8 : 0),
+              padding:
+              const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
               decoration: BoxDecoration(
                 color: selected
                     ? Primary.withOpacity(0.08)
@@ -382,9 +358,8 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                 style: TextStyle(
                   color: selected ? Primary : Colors.grey[500],
                   fontSize: 12,
-                  fontWeight: selected
-                      ? FontWeight.w700
-                      : FontWeight.w400,
+                  fontWeight:
+                  selected ? FontWeight.w700 : FontWeight.w400,
                 ),
               ),
             ),
@@ -451,8 +426,7 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
           initialDate:
           _expiry ?? DateTime.now().add(const Duration(days: 30)),
           firstDate: DateTime.now(),
-          lastDate:
-          DateTime.now().add(const Duration(days: 730)),
+          lastDate: DateTime.now().add(const Duration(days: 730)),
           builder: (ctx, child) => Theme(
             data: Theme.of(ctx).copyWith(
               colorScheme: ColorScheme.light(
@@ -468,8 +442,7 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
         if (date != null) setState(() => _expiry = date);
       },
       child: Container(
-        padding:
-        const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
           color: Colors.grey[50],
           borderRadius: BorderRadius.circular(12),
@@ -492,9 +465,7 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
                   ? 'Expires ${_expiry!.day}/${_expiry!.month}/${_expiry!.year}'
                   : 'Select Expiry Date',
               style: TextStyle(
-                color: _expiry != null
-                    ? Colors.black87
-                    : Colors.grey[400],
+                color: _expiry != null ? Colors.black87 : Colors.grey[400],
                 fontSize: 14,
               ),
             ),
@@ -502,80 +473,6 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
         ),
       ),
     );
-  }
-
-  Widget _buildImagePicker() {
-    return GestureDetector(
-      onTap: _pickImage,
-      child: Container(
-        height: 150,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: _imageFile != null
-                ? Primary.withOpacity(0.4)
-                : Colors.grey.shade200,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: _imageFile != null
-            ? ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Image.file(_imageFile!, fit: BoxFit.cover),
-              Container(color: Colors.black.withOpacity(0.3)),
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.edit_rounded,
-                      color: Primary, size: 20),
-                ),
-              ),
-            ],
-          ),
-        )
-            : Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Primary.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.add_photo_alternate_outlined,
-                  color: Primary, size: 24),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Add coupon image (optional)',
-              style: TextStyle(
-                  color: Colors.grey[500], fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-        source: ImageSource.gallery, imageQuality: 80);
-    if (picked != null) setState(() => _imageFile = File(picked.path));
   }
 
   void _submit() async {
@@ -601,8 +498,14 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
           'currency': _currencyCtrl.text.trim(),
         };
       } else {
-        discountPercentage =
-            double.tryParse(_discountPercentCtrl.text);
+        discountPercentage = double.tryParse(_discountPercentCtrl.text);
+        if (discountPercentage == null || discountPercentage <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Please enter a valid discount percentage'),
+            behavior: SnackBarBehavior.floating,
+          ));
+          return;
+        }
       }
     } else if (_type == 'coins') {
       coinAmount = int.tryParse(_coinAmountCtrl.text);
@@ -617,10 +520,8 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
       expiry: _expiry!.toIso8601String(),
       code: _codeCtrl.text.trim(),
       couponType: _type == 'coupon' ? _couponType : null,
-      imageFile: _imageFile,
-      link: _linkCtrl.text.trim().isNotEmpty
-          ? _linkCtrl.text.trim()
-          : null,
+      imageFile: null,
+      link: _linkCtrl.text.trim(),  // ✅ always sent, never null
       discountAmount: discountAmount,
       discountPercentage: discountPercentage,
       coinAmount: coinAmount,
@@ -632,8 +533,8 @@ class _CreateCouponScreenState extends State<CreateCouponScreen> {
         content: const Text('Coupon created! 🎉'),
         backgroundColor: Primary,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ));
       Navigator.pop(context);
     }

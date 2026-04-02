@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ixes.app/constants/imageConstant.dart';
@@ -10,6 +14,7 @@ import 'package:sizer/sizer.dart';
 import 'package:country_picker/country_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/comment_provider.dart';
+import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/google_auth_service.dart';
 import 'signup_screen.dart';
@@ -135,17 +140,45 @@ class _LoginScreenState extends State<LoginScreen>
     final result = await authProvider.login(mobile: mobile, password: password);
     if (!mounted) return;
     if (result['success']) {
-      // ✅ ADD THESE 4 LINES
       final userId = authProvider.user?.id ?? '';
       if (userId.isNotEmpty) {
         Provider.of<CommentProvider>(context, listen: false)
             .setCurrentUserId(userId);
       }
+
+      await _saveFcmToken(); // ✅ ADD THIS — saves FCM immediately after login
+
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const MainScreen(initialIndex: 0)),
       );
     } else {
       _showSnack(result['message'], isError: true);
+    }
+  }
+
+  Future<void> _saveFcmToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final authToken = prefs.getString('auth_token');
+      if (authToken == null || authToken.isEmpty) return;
+
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken == null) return;
+
+      final userId = prefs.getString('user_id');
+      debugPrint('📱 [FCM] Saving token for userId=$userId');
+
+      await ApiService.post(
+        '/api/mobile/user/save-fcm',
+        {
+          'fcmToken': fcmToken,
+          'platform': Platform.isAndroid ? 'android' : 'ios',
+        },
+        requireAuth: true,
+      );
+      debugPrint('✅ FCM token saved on login');
+    } catch (e) {
+      debugPrint('❌ FCM save error: $e');
     }
   }
 
@@ -184,6 +217,7 @@ class _LoginScreenState extends State<LoginScreen>
             .setCurrentUserId(resolvedId);
       }
 
+      await _saveFcmToken(); // ✅ ADD THIS
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (context) => const MainScreen(initialIndex: 0)),

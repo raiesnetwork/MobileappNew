@@ -430,40 +430,68 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
+          // Camera toggle
           _buildControlButton(
-            icon: _isCameraEnabled ? Icons.videocam : Icons.videocam_off,
+            icon: _provider.isMuted || !_isCameraEnabled
+                ? Icons.videocam_off
+                : Icons.videocam,
             onPressed: _toggleCamera,
             backgroundColor:
             _isCameraEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
           ),
+
+          // Mic — reads from provider
           _buildControlButton(
-            icon: _isMicEnabled ? Icons.mic : Icons.mic_off,
-            onPressed: _toggleMicrophone,
-            backgroundColor:
-            _isMicEnabled ? Colors.white.withOpacity(0.2) : Colors.red,
+            icon: _provider.isMuted ? Icons.mic_off : Icons.mic,
+            onPressed: () async {
+              _provider.setMuted(!_provider.isMuted);
+              await _room!.localParticipant
+                  ?.setMicrophoneEnabled(!_provider.isMuted);
+              setState(() {});
+            },
+            backgroundColor: _provider.isMuted
+                ? Colors.red
+                : Colors.white.withOpacity(0.2),
           ),
+
+          // End Call
           Container(
             width: 60, height: 60,
             decoration: BoxDecoration(
               color: Colors.red,
               shape: BoxShape.circle,
               boxShadow: [BoxShadow(
-                  color: Colors.red.withOpacity(0.4),
-                  blurRadius: 15, spreadRadius: 2)],
+                color: Colors.red.withOpacity(0.4),
+                blurRadius: 15, spreadRadius: 2,
+              )],
             ),
             child: IconButton(
               onPressed: _endCall,
-              icon: const Icon(Icons.call_end, size: 28, color: Colors.white),
+              icon: const Icon(
+                  Icons.call_end, size: 28, color: Colors.white),
             ),
           ),
+
+          // Flip camera
           _buildControlButton(
-              icon: Icons.flip_camera_ios,
-              onPressed: _switchCamera,
-              backgroundColor: Colors.white.withOpacity(0.2)),
+            icon: Icons.flip_camera_ios,
+            onPressed: _switchCamera,
+            backgroundColor: Colors.white.withOpacity(0.2),
+          ),
+
+          // Speaker — replaces more_vert
           _buildControlButton(
-              icon: Icons.more_vert,
-              onPressed: _showMoreOptions,
-              backgroundColor: Colors.white.withOpacity(0.2)),
+            icon: _provider.isSpeakerOn
+                ? Icons.volume_up
+                : Icons.volume_off,
+            onPressed: () {
+              _provider.setSpeaker(!_provider.isSpeakerOn);
+              setState(() {});
+            },
+            backgroundColor: _provider.isSpeakerOn
+                ? Colors.blue.withOpacity(0.6)
+                : Colors.white.withOpacity(0.2),
+          ),
         ],
       ),
     );

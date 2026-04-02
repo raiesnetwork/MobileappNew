@@ -694,7 +694,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           Consumer<VoiceCallProvider>(
             builder: (context, voiceCallProvider, _) => IconButton(
               icon: Image.asset('assets/icons/call.png',
-                  width: 24, height: 24, color: Colors.grey[800]),
+                  width: 18, height: 18, color: Colors.grey[800]),
               tooltip: 'Audio Call',
               onPressed:
                   voiceCallProvider.isConnected ? _initiateVoiceCall : null,

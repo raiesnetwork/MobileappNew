@@ -57,21 +57,28 @@ class CouponService {
   Future<Map<String, dynamic>> createCoupon({
     required String name,
     required String details,
-    required String type,        // 'coupon' | 'coins' | 'rewards'
-    required String expiry,      // ISO8601 string
+    required String type,
+    required String expiry,
     required String code,
-    String? couponType,          // 'discount-amount' | 'discount-in-percentage'
-    File? imageFile,             // optional image file
+    String? couponType,
+    File? imageFile,
     String? link,
-    Map<String, dynamic>? discountAmount,   // { amount: double, currency: String }
+    Map<String, dynamic>? discountAmount,
     double? discountPercentage,
     int? coinAmount,
     String? rewardType,
   }) async {
     try {
+      print("➡️ [createCoupon] Creating coupon...");
+      print("📝 Data: name=$name, type=$type, code=$code");
+
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) return _authError(['coupon']);
+
+      if (token == null || token.isEmpty) {
+        print("❌ [createCoupon] No auth token");
+        return _authError(['coupon']);
+      }
 
       final uri = Uri.parse('${apiBaseUrl}api/coupon/create-coupon');
       final request = http.MultipartRequest('POST', uri)
@@ -83,14 +90,14 @@ class CouponService {
         ..fields['code'] = code;
 
       if (couponType != null) request.fields['couponType'] = couponType;
-      if (link != null && link.isNotEmpty) request.fields['link'] = link;
+      request.fields['link'] = (link != null && link.isNotEmpty) ? link : '';
 
-      // Type-specific fields
+      // ✅ Type-specific fields
       if (type == 'coupon') {
         if (couponType == 'discount-amount' && discountAmount != null) {
           request.fields['discountAmount'] = jsonEncode(discountAmount);
-        } else if (couponType == 'discount-in-percentage' && discountPercentage != null) {
-          request.fields['discountPercentage'] = discountPercentage.toString();
+        } else if (couponType == 'discount-in-percentage') {
+          request.fields['discountPercentage'] = (discountPercentage ?? 0).toString();
         }
       } else if (type == 'coins' && coinAmount != null) {
         request.fields['coinAmount'] = coinAmount.toString();
@@ -98,8 +105,11 @@ class CouponService {
         request.fields['rewardType'] = rewardType;
       }
 
-      // Attach image if provided
+      print("📦 [createCoupon] Fields: ${request.fields}");
+
+      // ✅ Attach image if provided
       if (imageFile != null) {
+        print("🖼️ [createCoupon] Attaching image: ${imageFile.path}");
         request.files.add(await http.MultipartFile.fromPath(
           'image',
           imageFile.path,
@@ -110,15 +120,25 @@ class CouponService {
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
+      print("📥 [createCoupon] Status Code: ${response.statusCode}");
+      print("📥 [createCoupon] Response: ${response.body}");
+
       if (response.statusCode == 200 || response.statusCode == 201) {
-        return {'error': false, 'message': 'Coupon created successfully', 'coupon': jsonDecode(response.body)};
+        print("✅ [createCoupon] Coupon created successfully");
+        return {
+          'error': false,
+          'message': 'Coupon created successfully',
+          'coupon': jsonDecode(response.body)
+        };
       }
+
+      print("❌ [createCoupon] API Error");
       return _parseError(response.body, {'coupon': null});
     } catch (e) {
+      print("🔥 [createCoupon] Exception: $e");
       return _exception(e, {'coupon': null});
     }
   }
-
   // ─────────────────────────────────────────────────────────────────────────────
   // 3. SEND COUPON TO USER  →  POST /api/coupon/send-coupon
   // Body: { couponId, receiverId }
@@ -138,7 +158,10 @@ class CouponService {
     required String couponId,
     required String groupId,
   }) async {
-    return _post('api/coupon/send-community', {'couponId': couponId, 'groupId': groupId});
+    return _post('api/coupon/send-community', {
+      'couponId': couponId,
+      'communityId': groupId, // ← changed from 'groupId' to 'communityId'
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

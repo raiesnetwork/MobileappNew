@@ -10,38 +10,43 @@ class CallingScreen extends StatefulWidget {
   State<CallingScreen> createState() => _CallingScreenState();
 }
 
-class _CallingScreenState extends State<CallingScreen> {
+class _CallingScreenState extends State<CallingScreen>
+    with SingleTickerProviderStateMixin {
 
-  // ✅ CRITICAL: save provider ref in initState — NEVER use context.read() in dispose()
   late final VideoCallProvider _provider;
-
-  bool _isActioning = false; // prevents double-pop from button + listener
+  late AnimationController _pulseController;
+  bool _isActioning = false;
+  bool _isMuted = false;
+  bool _isSpeakerOn = false;
 
   @override
   void initState() {
     super.initState();
-    _provider = context.read<VideoCallProvider>(); // ✅ safe here
+    _provider = context.read<VideoCallProvider>();
     _provider.addListener(_handleCallStateChange);
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
   }
 
   void _handleCallStateChange() {
     if (!mounted || _isActioning) return;
 
-    // Receiver accepted → go to video call room
     if (_provider.callState == CallState.connected) {
       _isActioning = true;
-      _provider.removeListener(_handleCallStateChange); // stop before navigating
+      _provider.removeListener(_handleCallStateChange);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => VideoCallScreen()),
       );
       return;
     }
 
-    // Receiver rejected / call ended → pop back
     if (_provider.callState == CallState.ended ||
         _provider.callState == CallState.idle) {
       _isActioning = true;
-      _provider.removeListener(_handleCallStateChange); // stop before popping
+      _provider.removeListener(_handleCallStateChange);
 
       final errorMsg = _provider.errorMessage;
       Navigator.of(context).pop();
@@ -61,18 +66,15 @@ class _CallingScreenState extends State<CallingScreen> {
   Future<void> _cancelCall() async {
     if (_isActioning) return;
     _isActioning = true;
-
-    // ✅ Remove listener BEFORE calling endCall() to prevent double-pop
     _provider.removeListener(_handleCallStateChange);
-
     await _provider.endCall();
     if (mounted) Navigator.of(context).pop();
   }
 
   @override
   void dispose() {
-    // ✅ Use saved _provider ref — context.read() crashes here
     _provider.removeListener(_handleCallStateChange);
+    _pulseController.dispose();
     super.dispose();
   }
 
@@ -81,86 +83,154 @@ class _CallingScreenState extends State<CallingScreen> {
     return WillPopScope(
       onWillPop: () async {
         await _cancelCall();
-        return false; // we handle the pop ourselves
+        return false;
       },
       child: Scaffold(
-        backgroundColor: Colors.black87,
+        backgroundColor: const Color(0xFF1A1A2E),
         body: SafeArea(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(),
 
-              // Avatar
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [Colors.blue[400]!, Colors.purple[400]!],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                ),
-                child: Center(
-                  child: Text(
-                    (_provider.currentReceiverName ?? 'U')[0].toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
+              // ── Animated Avatar ──────────────────────────────
+              AnimatedBuilder(
+                animation: _pulseController,
+                builder: (_, __) {
+                  return Container(
+                    width: 140 + (_pulseController.value * 20),
+                    height: 140 + (_pulseController.value * 20),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Colors.blue[400]!, Colors.purple[400]!],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.blue.withOpacity(0.3),
+                          blurRadius: 30,
+                          spreadRadius: 10,
+                        ),
+                      ],
                     ),
-                  ),
-                ),
+                    child: Center(
+                      child: Text(
+                        (_provider.currentReceiverName ?? 'U')[0].toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 52,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 40),
 
-              // Receiver name
+              // ── Receiver Name ────────────────────────────────
               Text(
                 _provider.currentReceiverName ?? 'Unknown',
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 28,
+                  fontSize: 32,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Calling text with animated dots
+              // ── Calling dots ─────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  _buildDot(0),
+                  const SizedBox(width: 4),
+                  _buildDot(1),
+                  const SizedBox(width: 4),
+                  _buildDot(2),
+                  const SizedBox(width: 12),
                   const Text(
                     'Calling',
-                    style: TextStyle(color: Colors.white70, fontSize: 18),
+                    style: TextStyle(color: Colors.white70, fontSize: 20),
                   ),
-                  const SizedBox(width: 4),
-                  const _LoadingDots(),
                 ],
               ),
 
               const Spacer(),
 
-              // ✅ End Call button uses _cancelCall()
+              // ── Video Call label ─────────────────────────────
               Container(
-                width: 70,
-                height: 70,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 20, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.red.withOpacity(0.4),
-                      blurRadius: 20,
-                      spreadRadius: 2,
-                    ),
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(30),
+                  border:
+                  Border.all(color: Colors.white.withOpacity(0.2)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.videocam, color: Colors.blue[300], size: 20),
+                    const SizedBox(width: 8),
+                    const Text('Video Call',
+                        style: TextStyle(
+                            color: Colors.white, fontSize: 16)),
                   ],
                 ),
-                child: IconButton(
-                  onPressed: _cancelCall,
-                  icon: const Icon(Icons.call_end, size: 32, color: Colors.white),
-                ),
+              ),
+              const SizedBox(height: 60),
+
+              // ── Controls ─────────────────────────────────────
+              // Replace the two _buildControlButton calls in Row:
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Mute button
+                  _buildControlButton(
+                    icon: _provider.isMuted ? Icons.mic_off : Icons.mic,
+                    color: _provider.isMuted
+                        ? Colors.red.withOpacity(0.8)
+                        : Colors.white.withOpacity(0.2),
+                    onPressed: () {
+                      _provider.setMuted(!_provider.isMuted);
+                      setState(() {});
+                    },
+                  ),
+                  const SizedBox(width: 40),
+
+                  // End Call
+                  Container(
+                    width: 75, height: 75,
+                    decoration: BoxDecoration(
+                      color: Colors.red, shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(
+                        color: Colors.red.withOpacity(0.5),
+                        blurRadius: 25, spreadRadius: 5,
+                      )],
+                    ),
+                    child: IconButton(
+                      onPressed: _cancelCall,
+                      icon: const Icon(Icons.call_end, size: 35, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 40),
+
+                  // Speaker button
+                  _buildControlButton(
+                    icon: _provider.isSpeakerOn
+                        ? Icons.volume_up
+                        : Icons.volume_down,
+                    color: _provider.isSpeakerOn
+                        ? Colors.blue.withOpacity(0.8)
+                        : Colors.white.withOpacity(0.2),
+                    onPressed: () {
+                      _provider.setSpeaker(!_provider.isSpeakerOn);
+                      setState(() {});
+                    },
+                  ),
+                ],
               ),
               const SizedBox(height: 60),
             ],
@@ -169,50 +239,39 @@ class _CallingScreenState extends State<CallingScreen> {
       ),
     );
   }
-}
 
-// Animated loading dots widget
-class _LoadingDots extends StatefulWidget {
-  const _LoadingDots();
-
-  @override
-  State<_LoadingDots> createState() => _LoadingDotsState();
-}
-
-class _LoadingDotsState extends State<_LoadingDots>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 1500),
-      vsync: this,
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildDot(int index) {
     return AnimatedBuilder(
-      animation: _controller,
+      animation: _pulseController,
       builder: (_, __) {
-        final dots = (_controller.value * 4).floor() % 4;
-        return Text(
-          '.' * dots,
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 18,
-            letterSpacing: 2,
+        final delay = index * 0.3;
+        final value = (_pulseController.value + delay) % 1.0;
+        final opacity = 0.3 + (value * 0.7);
+        return Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(opacity),
+            shape: BoxShape.circle,
           ),
         );
       },
+    );
+  }
+
+  Widget _buildControlButton({
+    required IconData icon,
+    required Color color,
+    VoidCallback? onPressed,
+  }) {
+    return Container(
+      width: 60,
+      height: 60,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      child: IconButton(
+        onPressed: onPressed,
+        icon: Icon(icon, color: Colors.white, size: 28),
+      ),
     );
   }
 }

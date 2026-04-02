@@ -385,18 +385,31 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
+          // ── Speaker (replaces more_horiz) ──────────────────
           _smallControlButton(
-            icon: Icons.more_horiz,
-            color: Colors.white.withOpacity(0.12),
-            onPressed: () {},
+            icon: _provider.isSpeakerOn
+                ? Icons.volume_up_rounded
+                : Icons.volume_off_rounded,
+            color: _provider.isSpeakerOn
+                ? Colors.blue.withOpacity(0.8)
+                : Colors.white.withOpacity(0.12),
+            onPressed: () {
+              _provider.setSpeaker(!_provider.isSpeakerOn);
+            },
           ),
+
+          // ── Volume (keeps existing) ────────────────────────
           _smallControlButton(
-            icon: _isSpeakerOn ? Icons.volume_up_rounded : Icons.volume_down_rounded,
+            icon: _isSpeakerOn
+                ? Icons.hearing_rounded
+                : Icons.hearing_disabled_rounded,
             color: _isSpeakerOn
                 ? Colors.white.withOpacity(0.12)
                 : Colors.white.withOpacity(0.06),
             onPressed: _toggleSpeaker,
           ),
+
+          // ── End Call ───────────────────────────────────────
           GestureDetector(
             onTap: _showEndCallDialog,
             child: Container(
@@ -404,23 +417,33 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
               decoration: BoxDecoration(
                 color: Colors.redAccent,
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.redAccent.withOpacity(0.45),
-                    blurRadius: 24, spreadRadius: 2,
-                  )
-                ],
+                boxShadow: [BoxShadow(
+                  color: Colors.redAccent.withOpacity(0.45),
+                  blurRadius: 24, spreadRadius: 2,
+                )],
               ),
-              child: const Icon(Icons.call_end_rounded, size: 30, color: Colors.white),
+              child: const Icon(
+                  Icons.call_end_rounded, size: 30, color: Colors.white),
             ),
           ),
+
+          // ── Mic ───────────────────────────────────────────
           _smallControlButton(
-            icon: _isMicEnabled ? Icons.mic_none_rounded : Icons.mic_off_rounded,
-            color: _isMicEnabled
-                ? Colors.white.withOpacity(0.12)
-                : Colors.redAccent.withOpacity(0.8),
-            onPressed: _toggleMicrophone,
+            icon: _provider.isMuted
+                ? Icons.mic_off_rounded
+                : Icons.mic_none_rounded,
+            color: _provider.isMuted
+                ? Colors.redAccent.withOpacity(0.8)
+                : Colors.white.withOpacity(0.12),
+            onPressed: () async {
+              _provider.setMuted(!_provider.isMuted);
+              await _room!.localParticipant
+                  ?.setMicrophoneEnabled(!_provider.isMuted);
+              setState(() {});
+            },
           ),
+
+          // ── Dialpad ───────────────────────────────────────
           _smallControlButton(
             icon: Icons.dialpad_rounded,
             color: Colors.white.withOpacity(0.12),

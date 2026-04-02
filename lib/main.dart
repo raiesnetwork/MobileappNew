@@ -160,17 +160,33 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
 
 Future<void> _saveFcmToken() async {
   try {
-    final prefs     = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final authToken = prefs.getString('auth_token');
-    if (authToken == null || authToken.isEmpty) return;
+    if (authToken == null || authToken.isEmpty) {
+      debugPrint('⚠️ [FCM] No auth token — skipping');
+      return;
+    }
+
     final fcmToken = await FirebaseMessaging.instance.getToken();
-    if (fcmToken == null) return;
+    if (fcmToken == null) {
+      debugPrint('⚠️ [FCM] No FCM token');
+      return;
+    }
+
+    // ✅ Print to verify correct user + token
+    final userId = prefs.getString('user_id');
+    debugPrint('📱 [FCM] Saving token for userId=$userId');
+    debugPrint('📱 [FCM] Token=${fcmToken.substring(0, 20)}...');
+
     await ApiService.post(
       '/api/mobile/user/save-fcm',
-      {'fcmToken': fcmToken, 'platform': Platform.isAndroid ? 'android' : 'ios'},
+      {
+        'fcmToken': fcmToken,
+        'platform': Platform.isAndroid ? 'android' : 'ios',
+      },
       requireAuth: true,
     );
-    debugPrint('✅ [FCM TOKEN] Saved');
+    debugPrint('✅ [FCM TOKEN] Saved for userId=$userId');
   } catch (e) {
     debugPrint('❌ [FCM TOKEN] $e');
   }

@@ -33,6 +33,25 @@ class VoiceCallProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _participants = [];
 
   bool _acceptedViaCallKit = false;
+  // Add these fields in VoiceCallProvider:
+  bool _isMuted = false;
+  bool _isSpeakerOn = false;
+
+  bool get isMuted => _isMuted;
+  bool get isSpeakerOn => _isSpeakerOn;
+
+  void setMuted(bool value) {
+    _isMuted = value;
+    _safeNotifyListeners();
+  }
+
+  void setSpeaker(bool value) {
+    _isSpeakerOn = value;
+    _safeNotifyListeners();
+  }
+
+// Reset in _clearCallData():
+
 
   // Getters
   VoiceCallService get service => _service;
@@ -459,6 +478,8 @@ class VoiceCallProvider extends ChangeNotifier {
     _voiceToken = null;
     _acceptedViaCallKit = false;
     _participants.clear();
+    _isMuted = false;
+    _isSpeakerOn = false;
   }
 
   void resetCallState() {

@@ -118,7 +118,7 @@ class _OTPScreenState extends State<OTPScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _C.bg,
-      // Keeps layout stable when keyboard appears
+      // Keeps  stable when keyboard appears
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -241,40 +241,54 @@ class _OTPScreenState extends State<OTPScreen>
                           const SizedBox(height: 16),
 
                           // ── PIN field ─────────────────────────
-                          PinCodeTextField(
-                            appContext: context,
-                            length: 6,
-                            controller: _otpController,
-                            keyboardType: TextInputType.number,
-                            animationType: AnimationType.fade,
-                            animationDuration:
-                            const Duration(milliseconds: 180),
-                            pinTheme: PinTheme(
-                              shape: PinCodeFieldShape.box,
-                              borderRadius: BorderRadius.circular(10),
-                              fieldHeight: 52,
-                              fieldWidth: 44,
-                              // Active (focused + filled)
-                              activeFillColor: _C.surfaceHi,
-                              activeColor: _C.accent,
-                              // Inactive (unfocused + filled)
-                              inactiveFillColor: _C.surfaceHi,
-                              inactiveColor: _C.border,
-                              // Selected (focused + empty)
-                              selectedFillColor: _C.surfaceHi,
-                              selectedColor: _C.accent,
-                            ),
-                            enableActiveFill: true,
-                            cursorColor: _C.accent,
-                            textStyle: const TextStyle(
-                              color: _C.textPrimary,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            onChanged: (value) {
-                              setState(() => _currentOTP = value);
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              final totalWidth = constraints.maxWidth;
+
+                              // 🔥 calculate responsive width
+                              final fieldWidth = (totalWidth - 40) / 6;
+                              // 40 = total spacing buffer
+
+                              return PinCodeTextField(
+                                appContext: context,
+                                length: 6,
+                                controller: _otpController,
+                                keyboardType: TextInputType.number,
+                                animationType: AnimationType.fade,
+                                animationDuration: const Duration(milliseconds: 180),
+
+                                pinTheme: PinTheme(
+                                  shape: PinCodeFieldShape.box,
+                                  borderRadius: BorderRadius.circular(10),
+
+                                  // ✅ dynamic sizing
+                                  fieldHeight: 52,
+                                  fieldWidth: fieldWidth.clamp(38.0, 52.0),
+
+                                  activeFillColor: _C.surfaceHi,
+                                  activeColor: _C.accent,
+                                  inactiveFillColor: _C.surfaceHi,
+                                  inactiveColor: _C.border,
+                                  selectedFillColor: _C.surfaceHi,
+                                  selectedColor: _C.accent,
+                                ),
+
+                                enableActiveFill: true,
+                                cursorColor: _C.accent,
+
+                                textStyle: const TextStyle(
+                                  color: _C.textPrimary,
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w600,
+                                ),
+
+                                onChanged: (value) {
+                                  setState(() => _currentOTP = value);
+                                },
+
+                                onCompleted: (_) => _verifyOTP(),
+                              );
                             },
-                            onCompleted: (_) => _verifyOTP(),
                           ),
 
                           const SizedBox(height: 24),
