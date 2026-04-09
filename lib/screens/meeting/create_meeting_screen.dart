@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:ixes.app/screens/meeting/share_meet_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/generate_link_provider.dart';
 import '../../providers/meeting_provider.dart';
 import 'meeting_rooom_screen.dart';
@@ -387,19 +389,26 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
   Future<void> _startMeeting(String linkId) async {
     final meetingProvider = context.read<MeetingProvider>();
 
-    final userId = 'user-${DateTime.now().millisecondsSinceEpoch}';
-    final userName = 'Host';
+    // ✅ Get real token from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+
+    // ✅ Get real user info from your auth provider
+    final authProvider = context.read<AuthProvider>(); // use your actual auth provider name
+    final userId = authProvider.user?.id ?? 'user-${DateTime.now().millisecondsSinceEpoch}';
+    final userName = authProvider.user?.username ?? 'Host';
 
     if (meetingProvider.currentUserId == null) {
       print('🎯 Initializing MeetingProvider');
       meetingProvider.initialize(
         userId: userId,
         userName: userName,
-        authToken: null,
+        authToken: authToken, // ✅ pass real token
       );
 
       await Future.delayed(const Duration(seconds: 2));
     }
+    // ... rest stays same
 
     meetingProvider.clearMessages();
 

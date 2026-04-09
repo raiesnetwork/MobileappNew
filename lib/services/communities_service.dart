@@ -2,30 +2,14 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:ixes.app/constants/apiConstants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:ixes.app/services/api_service.dart';
 
 class CommunityService {
   Future<Map<String, dynamic>> getAllCommunities({required int page}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        print("token $token");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'communities': []
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse(
-            '${apiBaseUrl}api/communities/defaultList?pageNo=$page'), // Add page parameter
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/defaultList?pageNo=$page');
+      ApiService.checkResponse(response);
 
       print('getAllCommunities - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -59,159 +43,64 @@ class CommunityService {
 
   Future<Map<String, dynamic>> getMyCommunities() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      print('Retrieved token: $token');
-
-      if (token == null || token.isEmpty) {
-        print('Token is missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      final url = '${apiBaseUrl}api/communities/my-communities';
-      print('Requesting URL: $url');
-
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
-
-      print('Response status code: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      final response = await ApiService.get('/api/communities/my-communities');
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        print('Decoded response: $decoded');
-
-        // Ensure decoded is a List
         if (decoded is! List) {
-          print('Expected List but got ${decoded.runtimeType}');
-          return {
-            'error': true,
-            'message': 'Invalid response format',
-            'data': []
-          };
+          return {'error': false, 'message': 'No communities', 'data': []};
         }
-
-        // Transform the response to match expected structure
-        final transformedData = decoded.map((community) {
-          final communityMap = community as Map<String, dynamic>;
-
-          // Debug: Print the raw community data to see what fields exist
-          print('Raw community data: $communityMap');
-
-          // Extract the ID - try both 'id' and '_id'
-          final id = communityMap['id']?.toString() ??
-              communityMap['_id']?.toString() ?? '';
-
-          // Extract profile image - try multiple possible field names
-          final profileImage = communityMap['profileImage'] ??
-              communityMap['profile_image'] ??
-              communityMap['image'] ??
-              communityMap['avatar'];
-
-          print('Community ID: $id, ProfileImage: $profileImage');
-
-          return {
-            // Use BOTH 'id' and '_id' to ensure compatibility
-            'id': id,
-            '_id': id,
-            'name': communityMap['name']?.toString() ?? 'Unnamed Community',
-            'isMember': true,
-            'isAdmin': communityMap['isAdmin'] ?? false,
-            'isPrivate': communityMap['isPrivate'] ?? false,
-            'profileImage': profileImage, // Use the extracted profile image
-            'description': communityMap['description'],
-            'memberCount': communityMap['memberCount'] ?? 0,
-            // Handle subcommunities recursively
-            'subCommunities': (communityMap['subCommunities'] as List?)?.map((sub) {
-              final subMap = sub as Map<String, dynamic>;
-              final subId = subMap['id']?.toString() ?? subMap['_id']?.toString() ?? '';
-              final subProfileImage = subMap['profileImage'] ??
-                  subMap['profile_image'] ??
-                  subMap['image'] ??
-                  subMap['avatar'];
-
-              return {
-                'id': subId,
-                '_id': subId,
-                'name': subMap['name']?.toString() ?? 'Unnamed Community',
-                'isMember': true,
-                'isAdmin': subMap['isAdmin'] ?? false,
-                'isPrivate': subMap['isPrivate'] ?? false,
-                'profileImage': subProfileImage,
-                'description': subMap['description'],
-                'memberCount': subMap['memberCount'] ?? 0,
-                'subCommunities': subMap['subCommunities'] ?? [],
-              };
-            }).toList() ?? [],
-          };
-        }).toList();
-
-        print('Transformed data: $transformedData');
-
         return {
           'error': false,
           'message': 'Communities fetched successfully',
-          'data': transformedData
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'error': true,
-          'message': 'Unauthorized - Please log in again',
-          'data': []
-        };
-      } else if (response.statusCode == 500) {
-        return {
-          'error': true,
-          'message': 'Server error - Please try again later',
-          'data': []
-        };
-      } else {
-        return {
-          'error': true,
-          'message': 'Failed to fetch communities (${response.statusCode})',
-          'data': []
+          'data': decoded.map((c) => _transformCommunity(c as Map<String, dynamic>)).toList(),
         };
       }
-    } catch (e) {
-      print('Exception caught: $e');
+
+      if (response.statusCode == 401 ||
+          response.statusCode == 404 ||
+          response.statusCode == 403) {
+        return {'error': false, 'message': 'No communities yet', 'data': []};
+      }
+
       return {
         'error': true,
-        'message': 'Network error: ${e.toString()}',
-        'data': []
+        'message': 'Failed to fetch communities (${response.statusCode})',
+        'data': [],
       };
+    } catch (e) {
+      return {'error': true, 'message': 'Network error: ${e.toString()}', 'data': []};
     }
+  }
+
+  Map<String, dynamic> _transformCommunity(Map<String, dynamic> c) {
+    final id = (c['id'] ?? c['_id'])?.toString() ?? '';
+    final profileImage = c['profileImage'] ?? c['profile_image'] ?? c['image'] ?? c['avatar'];
+    return {
+      'id': id,
+      '_id': id,
+      'name': c['name']?.toString() ?? 'Unnamed Community',
+      'isMember': true,
+      'isAdmin': c['isAdmin'] ?? false,
+      'isPrivate': c['isPrivate'] ?? false,
+      'profileImage': profileImage,
+      'description': c['description'],
+      'memberCount': c['memberCount'] ?? 0,
+      'subCommunities': (c['subCommunities'] as List?)
+          ?.map((s) => _transformCommunity(s as Map<String, dynamic>))
+          .toList() ??
+          [],
+    };
   }
 
   Future<Map<String, dynamic>> joinCommunity(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/communities/join'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'communityId': communityId}),
+      final response = await ApiService.post(
+        '/api/communities/join',
+        {'communityId': communityId},
       );
+      ApiService.checkResponse(response);
 
       print('joinCommunity - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -222,9 +111,8 @@ class CommunityService {
           'error': false,
           'message': decoded['message'] ?? 'Success',
           'data': decoded['data'] ?? true,
-          'isPrivate': decoded['isPrivate'] ?? false, // Include privacy info
-          'requestStatus': decoded[
-              'requestStatus'], // Include request status for private communities
+          'isPrivate': decoded['isPrivate'] ?? false,
+          'requestStatus': decoded['requestStatus'],
         };
       } else {
         final decoded = jsonDecode(response.body);
@@ -243,25 +131,12 @@ class CommunityService {
       };
     }
   }
+
   Future<Map<String, dynamic>> exitCommunity(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.delete(
-        Uri.parse('${apiBaseUrl}api/communities/$communityId/exit'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.delete(
+          '/api/communities/$communityId/exit');
+      ApiService.checkResponse(response);
 
       print('exitCommunity - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -294,20 +169,11 @@ class CommunityService {
   Future<Map<String, dynamic>> updateJoinRequest(
       String communityId, String userId, bool status) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/communities/updateJoinRequest/$communityId/$userId/${status.toString()}'),
-        headers: {
-          'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},);
+      final response = await ApiService.put(
+        '/api/communities/updateJoinRequest/$communityId/$userId/${status.toString()}',
+        {},
+      );
+      ApiService.checkResponse(response);
 
       print('updateJoinRequest - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -347,16 +213,6 @@ class CommunityService {
     String? profileImage,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
       final body = {
         'name': name,
         'description': description,
@@ -366,17 +222,11 @@ class CommunityService {
         if (profileImage != null) 'profileImage': profileImage,
       };
 
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/communities/'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/communities/', body);
+      ApiService.checkResponse(response);
 
       print('createCommunity - Status Code: ${response.statusCode}');
-      print('Create response body: ${response.body}'); // Debug line
+      print('Create response body: ${response.body}');
 
       if (response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
@@ -394,7 +244,7 @@ class CommunityService {
         };
       }
     } catch (e) {
-      print('Error in createCommunity: $e'); // Debug line
+      print('Error in createCommunity: $e');
       return {
         'error': true,
         'message': 'Error creating community: ${e.toString()}',
@@ -429,7 +279,6 @@ class CommunityService {
       request.fields['description'] = description;
       request.fields['isPrivate'] = isPrivate.toString();
 
-      // ✅ Send as file, not base64
       if (profileImage != null && profileImage.startsWith('/')) {
         request.files.add(await http.MultipartFile.fromPath(
             'profileImage', profileImage));
@@ -441,6 +290,7 @@ class CommunityService {
 
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
+      ApiService.checkResponse(response); // ✅ 401 check
       final body = jsonDecode(response.body);
       return {'error': response.statusCode != 200, ...body};
     } catch (e) {
@@ -450,17 +300,9 @@ class CommunityService {
 
   static Future<Map<String, dynamic>> deleteCommunity(
       String communityId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-
-    final response = await http.delete(
-      Uri.parse(
-          '${apiBaseUrl}api/communities/$communityId'), // Use your full delete endpoint URL here
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-    );
+    final response = await ApiService.delete(
+        '/api/communities/$communityId');
+    ApiService.checkResponse(response);
 
     if (response.statusCode == 200) {
       return json.decode(response.body);
@@ -474,24 +316,13 @@ class CommunityService {
 
   Future<Map<String, dynamic>> getCommunityInfo(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/info/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/info/$communityId');
+      ApiService.checkResponse(response);
+
       print('getCommunityInfo - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
+
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         return {
@@ -519,28 +350,12 @@ class CommunityService {
 
   Future<Map<String, dynamic>> getCommunityUsers(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/users/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/users/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCommunityUsers - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
-
-
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -566,33 +381,15 @@ class CommunityService {
       };
     }
   }
-  // Add these methods to your service class
 
-  /// Update admin status of a community member
-  /// PUT /updateAdmin/:communityId/:userId/:isAdmin
   Future<Map<String, dynamic>> updateAdminStatus(
-      String communityId,
-      String userId,
-      bool isAdmin
-      ) async {
+      String communityId, String userId, bool isAdmin) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/communities/updateAdmin/$communityId/$userId/$isAdmin'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
+      final response = await ApiService.put(
+        '/api/communities/updateAdmin/$communityId/$userId/$isAdmin',
+        {},
       );
+      ApiService.checkResponse(response);
 
       print('updateAdminStatus - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -622,30 +419,12 @@ class CommunityService {
     }
   }
 
-  /// Remove user from community
-  /// DELETE /removeUser/:communityId/:userId
   Future<Map<String, dynamic>> removeUserFromCommunity(
-      String communityId,
-      String userId
-      ) async {
+      String communityId, String userId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.delete(
-        Uri.parse('${apiBaseUrl}api/communities/removeUser/$communityId/$userId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.delete(
+          '/api/communities/removeUser/$communityId/$userId');
+      ApiService.checkResponse(response);
 
       print('removeUserFromCommunity - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -685,15 +464,6 @@ class CommunityService {
     String? userId,
   }) async {
     try {
-      // Get token
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null) {
-        return {'error': true, 'message': 'No token found'};
-      }
-
-      // Prepare data
       Map<String, dynamic> body = {
         'communityId': communityId,
         'memberType': memberType,
@@ -702,7 +472,6 @@ class CommunityService {
         'inheritSubCommunity': true,
       };
 
-      // Add data based on type
       if (memberType == 'New') {
         body.addAll({
           'name': name,
@@ -714,15 +483,8 @@ class CommunityService {
         body['userId'] = userId;
       }
 
-      // Make API call
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/communities/addUser'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/communities/addUser', body);
+      ApiService.checkResponse(response);
 
       print('Status: ${response.statusCode}');
       print('Response: ${response.body}');
@@ -752,28 +514,10 @@ class CommunityService {
   Future<Map<String, dynamic>> getCommunityCampaigns(String communityId,
       {String? timestamp}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        print("$token");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      final uri =
-          Uri.parse('${apiBaseUrl}api/communities/campaigns/$communityId').replace(queryParameters:
-          timestamp != null ? {'timestamp': timestamp} : null);
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final queryString = timestamp != null ? '?timestamp=$timestamp' : '';
+      final response = await ApiService.get(
+          '/api/communities/campaigns/$communityId$queryString');
+      ApiService.checkResponse(response);
 
       print('getCommunityCampaigns - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -801,28 +545,13 @@ class CommunityService {
         'data': []
       };
     }
-
   }
 
   Future<Map<String, dynamic>> getCommunityCoupons(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'coupons': []
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/coupons/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/coupons/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCommunityCoupons - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -854,23 +583,9 @@ class CommunityService {
 
   Future<Map<String, dynamic>> getCommunityServices(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'services': []
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/services/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/services/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCommunityServices - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -899,25 +614,12 @@ class CommunityService {
       };
     }
   }
+
   Future<Map<String, dynamic>> getCommunityHierarchyStats(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': {}
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/stats/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/stats/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCommunityHierarchyStats - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -946,37 +648,14 @@ class CommunityService {
       };
     }
   }
+
   Future<Map<String, dynamic>> checkCommunityInviteStatus(String communityName) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-          'status': null
-        };
-      }
-
-      // Enhanced URL construction with better debugging
-      final baseUrl = apiBaseUrl.endsWith('/') ? apiBaseUrl : '${apiBaseUrl}/';
-      final uri = Uri.parse('${baseUrl}api/communities/invite').replace(
-          queryParameters: {'name': communityName.trim()}
-      );
-
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/invite?name=${Uri.encodeComponent(communityName.trim())}');
+      ApiService.checkResponse(response);
 
       print('Response Status Code: ${response.statusCode}');
-      print('Response Headers: ${response.headers}');
       print('Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
@@ -988,7 +667,6 @@ class CommunityService {
           'status': decoded['status']
         };
       } else if (response.statusCode == 404) {
-        // Handle 404 specifically
         try {
           final decoded = jsonDecode(response.body);
           return {
@@ -1006,7 +684,6 @@ class CommunityService {
           };
         }
       } else {
-        // Handle other error status codes
         try {
           final decoded = jsonDecode(response.body);
           return {
@@ -1035,25 +712,12 @@ class CommunityService {
     }
   }
 
-
   Future<Map<String, dynamic>> sendInvitationLink({
     required String link,
-    required String type, // 'mail' or 'mobile'
-    required dynamic contact, // Can be String or List<String>
+    required String type,
+    required dynamic contact,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': false
-        };
-      }
-
-      // Ensure contact is always an array
       List<String> contactList;
       if (contact is String) {
         contactList = [contact];
@@ -1067,38 +731,26 @@ class CommunityService {
         };
       }
 
-      final baseUrl = apiBaseUrl.endsWith('/') ? apiBaseUrl : '${apiBaseUrl}/';
-      final uri = Uri.parse('${baseUrl}api/communities/invitelink');
-
       final requestBody = {
         'link': link,
         'type': type,
-        'contact': contactList, // Always send as array
+        'contact': contactList,
       };
 
       print('=== INVITATION REQUEST DEBUG ===');
-      print('URL: $uri');
       print('Request Body: ${jsonEncode(requestBody)}');
-      print('Token present: ${token.isNotEmpty}');
       print('Contact count: ${contactList.length}');
       print('===============================');
 
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post(
+          '/api/communities/invitelink', requestBody);
+      ApiService.checkResponse(response);
 
       print('sendInvitationLink - Status Code: ${response.statusCode}');
-      print('Response Headers: ${response.headers}');
       print('Response Body: ${response.body}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-
         return {
           'error': false,
           'message': decoded['message'] ?? 'Invitation(s) sent successfully',
@@ -1113,11 +765,7 @@ class CommunityService {
             'data': false
           };
         } catch (e) {
-          return {
-            'error': true,
-            'message': 'Internal server error (500)',
-            'data': false
-          };
+          return {'error': true, 'message': 'Internal server error (500)', 'data': false};
         }
       } else if (response.statusCode == 400) {
         try {
@@ -1128,18 +776,8 @@ class CommunityService {
             'data': false
           };
         } catch (e) {
-          return {
-            'error': true,
-            'message': 'Bad request (400) - Invalid data format',
-            'data': false
-          };
+          return {'error': true, 'message': 'Bad request (400) - Invalid data format', 'data': false};
         }
-      } else if (response.statusCode == 401) {
-        return {
-          'error': true,
-          'message': 'Authentication failed. Please login again.',
-          'data': false
-        };
       } else if (response.statusCode == 403) {
         return {
           'error': true,
@@ -1161,11 +799,7 @@ class CommunityService {
             'data': false
           };
         } catch (e) {
-          return {
-            'error': true,
-            'message': 'Server error: ${response.statusCode}',
-            'data': false
-          };
+          return {'error': true, 'message': 'Server error: ${response.statusCode}', 'data': false};
         }
       }
     } catch (e) {
@@ -1177,30 +811,12 @@ class CommunityService {
       };
     }
   }
-  // Add this method to your CommunityService class
 
   Future<Map<String, dynamic>> getCommunityEvents(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': [],
-          'email': null,
-          'password': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/event/fetch/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/event/fetch/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCommunityEvents - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');

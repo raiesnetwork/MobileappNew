@@ -44,6 +44,7 @@ bool _sameDay(DateTime a, DateTime b) {
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
   File? _selectedFile;
   bool _isSending = false;
   String? _userId;
@@ -57,6 +58,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Duration _recordingDuration = Duration.zero;
   final ImagePicker _imagePicker = ImagePicker();
   Timer? _recordingTimer;
+
+
 
   late PersonalChatProvider _chatProvider;
   Map<String, dynamic>? _replyingToMessage;
@@ -839,11 +842,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemBuilder: (context, index) {
                       final message = messages[index];
+                      final resolvedPost = _resolveSharedPostData(message);
+                      final forwardedPostId = resolvedPost?['_id']?.toString() ?? '';
+
+                      final hasValidPostId = forwardedPostId.length == 24 &&
+                          RegExp(r'^[a-f0-9]{24}$').hasMatch(forwardedPostId);
+                      if (message['forwerd'] == true) {
+                        print('🔥 FORWARDED MESSAGE FIELDS: ${jsonEncode(message)}');
+                      }
+                      if (message['forwerd'] == true) {
+                        print('🔥 FULL FORWARDED MESSAGE: ${jsonEncode(message)}');
+                      }
 
 // ✅ Debug shared post
                       if (message['isSharedPost'] == true || message['sharedPost'] != null ||
                           (message['text']?.toString() ?? '').contains('Forwarded')) {
                         print('🔍 SHARED POST MESSAGE: ${jsonEncode(message)}');
+                      }
+                      // ✅ Helper to check valid ObjectId
+                      bool _isValidObjectId(String? id) {
+                        if (id == null || id.isEmpty) return false;
+                        return id.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(id);
                       }
 
                       if (message['isDelete'] == true)
@@ -890,12 +909,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               receiverId: isMe ? message['receiverId'] : message['senderId'],
                               isAudio: message['isAudio'] ?? false,
                               audioUrl: message['audioUrl'],
-                              // ✅ Pass shared post data
-                              isSharedPost: message['forwerd'] == true ||
-                                  message['forwerdMessage'] != null ||
-                                  message['isSharedPost'] == true ||
-                                  message['sharedPost'] != null,
+                              isForwarded: message['forwerd'] == true && !hasValidPostId,
+
+                              isSharedPost: (message['forwerdUrl'] != null &&
+                                  (message['forwerdUrl']?.toString() ?? '').isNotEmpty) ||
+                                  (message['forwerd'] == true &&
+                                      message['image'] != null &&
+                                      (message['image']?.toString() ?? '').isNotEmpty &&
+                                      message['isAudio'] != true &&
+                                      message['isFile'] != true),
+
                               sharedPostData: _resolveSharedPostData(message),
+
                             ),
                           ),
                         ],
@@ -944,42 +969,46 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
   Map<String, dynamic>? _resolveSharedPostData(Map<String, dynamic> message) {
-    final direct = message['sharedPost'];
-    if (direct is Map<String, dynamic>) return direct;
+    if (message['sharedPost'] is Map && message['sharedPost']['_id'] != null) {
+      final post = Map<String, dynamic>.from(message['sharedPost']);
+      // ✅ validate the _id
+      final id = post['_id']?.toString() ?? '';
+      if (id.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
+        post['_id'] = ''; // invalidate so _navigateToPost blocks it
+      }
+      // existing image resolve...
+      return post;
+    }
 
-    final isForwarded = message['forwerd'] == true ||
-        message['forwerdMessage'] != null;
-
-    if (isForwarded) {
-      final image = message['image']?.toString() ?? '';
-      final text = message['text']?.toString() ?? '';
-      final forwardLabel = message['forwerdMessage']?.toString() ?? '';
-
-      // ✅ Extract actual postId from forwerdUrl
-      // forwerdUrl format: "https://ixes.ai/feeds/6954b0fcfb282e4eb94cee1a"
-      String actualPostId = '';
+    if (message['forwerd'] == true) {
       final forwerdUrl = message['forwerdUrl']?.toString() ?? '';
+      String postId = '';
       if (forwerdUrl.isNotEmpty) {
-        actualPostId = forwerdUrl.split('/').last;
+        final segment = forwerdUrl.split('/').last.trim();
+        // ✅ only accept valid ObjectId
+        if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+          postId = segment;
+        }
       }
-      // Fallback to sharedPostId if forwerdUrl not available
-      if (actualPostId.isEmpty) {
-        actualPostId = message['sharedPostId']?.toString() ?? '';
+      if (postId.isEmpty) {
+        postId = message['sharedPostId']?.toString() ?? '';
+        // validate fallback too
+        if (postId.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
+          postId = '';
+        }
       }
 
-      print('✅ Resolved postId: $actualPostId from forwerdUrl: $forwerdUrl');
-
+      final image = message['image']?.toString() ?? '';
       return {
-        '_id': actualPostId,
-        'text': text,
+        '_id': postId,
+        'text': message['text']?.toString() ?? '',
         'images': image.isNotEmpty ? [image] : [],
-        'authorName': forwardLabel,
+        'authorName': message['forwerdMessage']?.toString() ?? 'Forwarded',
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
       };
     }
-
     return null;
   }
 

@@ -4,11 +4,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import '../constants/apiConstants.dart';
+import 'api_service.dart';
 
 class NotificationService {
   IO.Socket? _socket;
 
-  // Stream controllers for different notification types
   final _notificationController = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<Map<String, dynamic>> get onNotification => _notificationController.stream;
@@ -16,24 +16,8 @@ class NotificationService {
   // ✅ 1. Fetch all notifications
   Future<List<Map<String, dynamic>>?> fetchNotifications() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      if (token == null) {
-        print('❌ No auth token found');
-        return null;
-      }
-
-      final url = Uri.parse('${apiBaseUrl}api/notifications');
-      print("📬 Fetching notifications from: $url");
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await ApiService.get('/api/notifications');
+      ApiService.checkResponse(response);
 
       print("📡 Status: ${response.statusCode}");
 
@@ -41,14 +25,12 @@ class NotificationService {
         final json = jsonDecode(response.body);
         final List notifications = json['notifications'] ?? [];
 
-        // Count unread notifications
         final unreadCount = notifications.where((n) => n['read'] == false).length;
         print("📊 Total: ${notifications.length}, Unread: $unreadCount");
 
         return notifications.cast<Map<String, dynamic>>();
       } else {
         print("❌ Error: ${response.statusCode} - ${response.reasonPhrase}");
-        print("📦 Response: ${response.body}");
         return null;
       }
     } catch (e) {
@@ -63,32 +45,16 @@ class NotificationService {
     required String communityId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      if (token == null) {
-        print('❌ No auth token found');
-        return false;
-      }
-
-      final url = Uri.parse('${apiBaseUrl}api/notifications/mark-read');
       final requestBody = {
         'type': type,
         'communityId': communityId,
       };
 
-      print("✅ Marking notifications as read:");
-      print("   URL: $url");
-      print("   Body: ${jsonEncode(requestBody)}");
+      print("✅ Marking notifications as read: ${jsonEncode(requestBody)}");
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post(
+          '/api/notifications/mark-read', requestBody);
+      ApiService.checkResponse(response);
 
       print("📡 Response Status: ${response.statusCode}");
       print("📦 Response Body: ${response.body}");
@@ -106,39 +72,22 @@ class NotificationService {
     }
   }
 
-  // ✅ NEW: Mark chat notifications as read by chatId
+  // ✅ 3. Mark chat notifications as read
   Future<bool> markChatNotificationsAsRead({
     required String chatId,
     required String type,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      if (token == null) {
-        print('❌ No auth token found');
-        return false;
-      }
-
-      // FIXED: Use standard endpoint since mark-chat-read doesn't exist in docs
-      final url = Uri.parse('${apiBaseUrl}api/notifications/mark-read');
       final requestBody = {
         'type': type,
-        'communityId': chatId, // Send chatId as communityId parameter
+        'communityId': chatId,
       };
 
-      print("✅ Marking chat notifications as read:");
-      print("   URL: $url");
-      print("   Body: ${jsonEncode(requestBody)}");
+      print("✅ Marking chat notifications as read: ${jsonEncode(requestBody)}");
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post(
+          '/api/notifications/mark-read', requestBody);
+      ApiService.checkResponse(response);
 
       print("📡 Response Status: ${response.statusCode}");
       print("📦 Response Body: ${response.body}");
@@ -156,31 +105,19 @@ class NotificationService {
     }
   }
 
-  // ✅ 3. Clear specific notifications
+  // ✅ 4. Clear specific notifications
   Future<bool> clearNotifications({
     required String type,
     required String communityId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      if (token == null) return false;
-
-      final url = Uri.parse('${apiBaseUrl}api/notifications/clear');
       print("🗑️ Clearing notifications: type=$type, communityId=$communityId");
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          'type': type,
-          'communityId': communityId,
-        }),
-      );
+      final response = await ApiService.post('/api/notifications/clear', {
+        'type': type,
+        'communityId': communityId,
+      });
+      ApiService.checkResponse(response);
 
       print("📡 Status: ${response.statusCode}");
       return response.statusCode == 200;
@@ -190,7 +127,7 @@ class NotificationService {
     }
   }
 
-  // ✅ 4. Initialize socket connection
+  // ✅ 5. Initialize socket connection
   Future<void> initializeSocket() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -221,7 +158,6 @@ class NotificationService {
         print('❌ Notification socket disconnected');
       });
 
-      // Listen for notifications
       _socket?.on('notification', (data) {
         print('📬 New notification received: $data');
         _notificationController.add(Map<String, dynamic>.from(data));
@@ -233,7 +169,7 @@ class NotificationService {
     }
   }
 
-  // ✅ 5. Mark chat as active (suppress notifications when user is viewing chat)
+  // ✅ 6. Mark chat as active
   void markChatAsActive({
     required String userId,
     required String type,
@@ -253,7 +189,7 @@ class NotificationService {
     print('👁️ Marked chat as active: chatId=$chatId, type=$type');
   }
 
-  // ✅ 6. Mark chat as inactive (resume notifications when user leaves chat)
+  // ✅ 7. Mark chat as inactive
   void markChatAsInactive({
     required String userId,
     required String type,
@@ -273,7 +209,7 @@ class NotificationService {
     print('👋 Marked chat as inactive: chatId=$chatId, type=$type');
   }
 
-  // ✅ 7. Clear all notifications
+  // ✅ 8. Clear all notifications
   void clearAllNotifications(String userId) {
     if (_socket == null || !_socket!.connected) {
       print('⚠️ Socket not connected');
@@ -284,7 +220,6 @@ class NotificationService {
     print('🗑️ Cleared all notifications for userId: $userId');
   }
 
-  // Cleanup
   void dispose() {
     _notificationController.close();
     _socket?.disconnect();

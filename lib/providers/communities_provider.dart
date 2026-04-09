@@ -323,67 +323,40 @@ class CommunityProvider with ChangeNotifier {
 
 // Updated fetchMyCommunities method with better error handling and data transformation
   Future<void> fetchMyCommunities() async {
-    print('=== fetchMyCommunities CALLED ===');
     _isLoadingMy = true;
     _myCommunitiesError = null;
     notifyListeners();
 
     try {
       final response = await _communityService.getMyCommunities();
-      print('fetchMyCommunities response: $response');
 
       if (!response['error']) {
-        final rawData = response['data'] ?? [];
-        print('Raw my communities data: $rawData');
-
-        // Ensure we have a valid list
-        List<dynamic> communitiesData = [];
-        if (rawData is List) {
-          communitiesData = rawData;
-
-          // Debug: Log each community's profile image
-          for (var community in communitiesData) {
-            if (community is Map<String, dynamic>) {
-              print('Community: ${community['name']}, ProfileImage: ${community['profileImage']}');
-            }
-          }
-        } else {
-          print('Warning: Expected List but got ${rawData.runtimeType}');
-          communitiesData = [];
-        }
-
-        // Update ONLY my communities data
+        final data = response['data'];
         _myCommunities = {
           'error': false,
           'message': response['message'] ?? 'Communities fetched successfully',
-          'data': communitiesData
+          'data': data is List ? data : [],
         };
-
-        print('Updated _myCommunities with ${communitiesData.length} communities');
         _myCommunitiesError = null;
       } else {
         _myCommunities = {
           'error': true,
           'message': response['message'] ?? 'Failed to fetch communities',
-          'data': []
+          'data': [],
         };
         _myCommunitiesError = response['message'] ?? 'Failed to fetch communities';
-        print('Error in response: ${response['message']}');
       }
     } catch (e) {
-      print('Exception in fetchMyCommunities: $e');
-      print('Stack trace: ${StackTrace.current}');
       _myCommunities = {
         'error': true,
         'message': 'Error fetching communities: ${e.toString()}',
-        'data': []
+        'data': [],
       };
       _myCommunitiesError = 'Error fetching communities: ${e.toString()}';
+    } finally {
+      _isLoadingMy = false;
+      notifyListeners();
     }
-
-    _isLoadingMy = false;
-    print('fetchMyCommunities completed. Loading: $_isLoadingMy, Error: $_myCommunitiesError');
-    notifyListeners();
   }
 
   Future<Map<String, dynamic>> updateJoinRequest(

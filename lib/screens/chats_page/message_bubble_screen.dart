@@ -18,6 +18,7 @@ import 'package:cached_network_image/cached_network_image.dart';  // For network
 
 import '../../providers/personal_chat_provider.dart';
 import '../home/feedpage/feed_screen.dart';
+import 'group_chat/forwarded_message_screen.dart';
 
 class MessageBubble extends StatefulWidget {
   final String? content;
@@ -35,6 +36,7 @@ class MessageBubble extends StatefulWidget {
   final String? receiverId;
   final bool isSharedPost;
   final Map<String, dynamic>? sharedPostData;
+  final bool isForwarded;
 
   // Voice message properties
   final bool isAudio;
@@ -67,6 +69,8 @@ class MessageBubble extends StatefulWidget {
     this.onReply,
     this.isSharedPost = false,
     this.sharedPostData,
+    this.isForwarded = false,
+
   }) : super(key: key);
 
   @override
@@ -118,6 +122,31 @@ class _MessageBubbleState extends State<MessageBubble> {
     } catch (e) {
       print('Error initializing audio player: $e');
     }
+  }
+  Widget _buildForwardedLabel() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.reply_rounded,   // looks like a forward arrow
+            size: 13,
+            color: widget.isMe ? Colors.white60 : Colors.grey[500],
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Forwarded',
+            style: TextStyle(
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.w500,
+              color: widget.isMe ? Colors.white60 : Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
 // In message_bubble_screen.dart
@@ -478,6 +507,13 @@ class _MessageBubbleState extends State<MessageBubble> {
       return _buildImageError();
     }
 
+    // Resolve ONCE here — never pre-resolve before passing to this method
+    if (!imageUrl.startsWith('http://') &&
+        !imageUrl.startsWith('https://') &&
+        !imageUrl.startsWith('data:image/')) {
+      imageUrl = 'https://api.ixes.ai/$imageUrl';
+    }
+
     if (imageUrl.startsWith('data:image/')) {
       try {
         return Image.memory(
@@ -490,23 +526,12 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     }
 
-    if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) {
-      imageUrl = 'https://api.ixes.ai/$imageUrl';
-    }
-
     return Image.network(
       imageUrl,
       fit: BoxFit.cover,
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
-        return Center(
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            value: progress.expectedTotalBytes != null
-                ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
-                : null,
-          ),
-        );
+        return Center(child: CircularProgressIndicator(strokeWidth: 2));
       },
       errorBuilder: (_, __, ___) => _buildImageError(),
     );
@@ -541,12 +566,15 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   void _navigateToPost(Map<String, dynamic> postData) {
-    // ✅ Guard against unmounted widget
     if (!mounted) return;
 
-    final postId = postData['_id']?.toString();
-    if (postId == null || postId.isEmpty) {
-      if (!mounted) return;
+    final postId = postData['_id']?.toString() ?? '';
+
+    // ✅ Only navigate if postId looks like a valid MongoDB ObjectId (24 hex chars)
+    final isValidPostId = postId.length == 24 &&
+        RegExp(r'^[a-f0-9]{24}$').hasMatch(postId);
+
+    if (!isValidPostId) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Post link not available'),
@@ -556,10 +584,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       return;
     }
 
-    // ✅ Capture context before async gap
     final ctx = context;
-    if (!mounted) return;
-
     Navigator.push(
       ctx,
       MaterialPageRoute(
@@ -571,14 +596,11 @@ class _MessageBubbleState extends State<MessageBubble> {
               icon: const Icon(Icons.arrow_back, color: Colors.black),
               onPressed: () => Navigator.pop(context),
             ),
-            title: const Text(
-              'Post',
-              style: TextStyle(
-                color: Colors.black,
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            title: const Text('Post',
+                style: TextStyle(
+                    color: Colors.black,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600)),
           ),
           body: FeedScreen(postId: postId),
         ),
@@ -890,6 +912,8 @@ class _MessageBubbleState extends State<MessageBubble> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Show label only when it's a forwarded post card
+                if (widget.isForwarded == true) _buildForwardedLabel(),
                 // Reply preview
                 if (widget.replyToMessage != null) ...[
                   Container(
@@ -942,7 +966,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                 ],
 
                 // ✅ ADD SHARED POST CONTENT (CHECK THIS FIRST!)
-                if (widget.isSharedPost)
+                if (widget.isSharedPost && widget.sharedPostData != null)
                   _buildSharedPost()
 
                 // Voice message content
@@ -1089,6 +1113,33 @@ class _MessageBubbleState extends State<MessageBubble> {
         },
       ),
     );
+    options.add(ListTile(
+      leading: Icon(Icons.reply_rounded, color: Theme.of(context).colorScheme.primary),
+      title: const Text('Forward'),
+      onTap: () {
+        Navigator.pop(context);
+        final msgMap = {
+          '_id'          : widget.messageId,
+          'text'         : widget.content ?? '',
+          'isFile'       : widget.isFile,
+          'fileName'     : widget.fileName ?? '',
+          'fileUrl'      : widget.fileUrl ?? '',
+          'isAudio'      : widget.isAudio,
+          'audioUrl'     : widget.audioUrl ?? '',
+
+          // ✅ Only include if it's actually a shared post
+          'isSharedPost' : widget.isSharedPost,
+          if (widget.isSharedPost)
+            'sharedPost' : widget.sharedPostData,
+        };
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ForwardMessageScreen(message: msgMap),
+          ),
+        );
+      },
+    ));
 
     // EDIT option - only for MY TEXT messages
     if (widget.isMe &&

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:ixes.app/services/api_service.dart';
 
 class ServiceRequestService {
   Future<Map<String, dynamic>> getAllServiceRequests({
@@ -10,31 +11,22 @@ class ServiceRequestService {
     String? userId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
-      final queryParams = {
+      final queryParams = <String, String>{
         if (status != null) 'status': status,
         if (communityId != null) 'communityId': communityId,
         if (userId != null) 'userId': userId,
       };
 
-      final uri = Uri.parse('${apiBaseUrl}api/service-requests').replace(queryParameters: queryParams);
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final queryString = queryParams.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
+
+      final endpoint = queryString.isEmpty
+          ? '/api/service-requests'
+          : '/api/service-requests?$queryString';
+
+      final response = await ApiService.get(endpoint);
+      ApiService.checkResponse(response);
 
       print('getAllServiceRequests - Status Code: ${response.statusCode}');
       print('Response Body: ${response.body}');
@@ -70,38 +62,20 @@ class ServiceRequestService {
     required String category,
     required String priority,
     String? communityId,
-    String? assignedTo, // Add this parameter
+    String? assignedTo,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
       final body = {
         'subject': subject,
         'description': description,
         'category': category,
         'priority': priority,
         if (communityId != null) 'communityId': communityId,
-        if (assignedTo != null && assignedTo.isNotEmpty) 'assignedTo': assignedTo, // Add this
+        if (assignedTo != null && assignedTo.isNotEmpty) 'assignedTo': assignedTo,
       };
 
-      final uri = Uri.parse('${apiBaseUrl}api/service-requests');
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/service-requests', body);
+      ApiService.checkResponse(response);
 
       print('createServiceRequest - Status Code: ${response.statusCode}');
       print('Response Body: ${response.body}');
@@ -133,25 +107,8 @@ class ServiceRequestService {
 
   Future<Map<String, dynamic>> getServiceRequestById(String requestId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service-requests/$requestId');
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/service-requests/$requestId');
+      ApiService.checkResponse(response);
 
       print('getServiceRequestById - Status Code: ${response.statusCode}');
       print('Response Body: ${response.body}');
@@ -192,17 +149,6 @@ class ServiceRequestService {
     String? completedBy,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
       final body = {
         if (subject != null) 'subject': subject,
         if (description != null) 'description': description,
@@ -213,15 +159,9 @@ class ServiceRequestService {
         if (completedBy != null) 'completedBy': completedBy,
       };
 
-      final uri = Uri.parse('${apiBaseUrl}api/service-requests/$requestId');
-      final response = await http.put(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.put(
+          '/api/service-requests/$requestId', body);
+      ApiService.checkResponse(response);
 
       print('updateServiceRequest - Status Code: ${response.statusCode}');
       print('Response Body: ${response.body}');
@@ -253,25 +193,9 @@ class ServiceRequestService {
 
   Future<Map<String, dynamic>> deleteServiceRequest(String requestId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service-requests/$requestId');
-      final response = await http.delete(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.delete(
+          '/api/service-requests/$requestId');
+      ApiService.checkResponse(response);
 
       print('deleteServiceRequest - Status Code: ${response.statusCode}');
       print('Response Body: ${response.body}');

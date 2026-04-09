@@ -4,33 +4,24 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/apiConstants.dart';
+import 'api_service.dart';
 
 class CampaignService {
+  Map<String, dynamic> _safeJsonDecode(String body) {
+    try {
+      return jsonDecode(body);
+    } catch (e) {
+      return {'message': 'Invalid response format'};
+    }
+  }
+
   Future<Map<String, dynamic>> getAllCampaigns({
     required int page,
     int limit = 10,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("Token missing");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'campaigns': [],
-        };
-      }
-
-      // Fetch all campaigns (backend doesn't support pagination yet)
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/campaigns/');
+      ApiService.checkResponse(response);
 
       print('getAllCampaigns - Status: ${response.statusCode}');
 
@@ -38,7 +29,6 @@ class CampaignService {
         final decoded = jsonDecode(response.body);
         List<dynamic> campaignsList = [];
 
-        // Handle different response structures
         if (decoded is List) {
           campaignsList = decoded;
         } else if (decoded is Map) {
@@ -70,14 +60,6 @@ class CampaignService {
         'message': 'Error fetching campaigns: ${e.toString()}',
         'campaigns': [],
       };
-    }
-  }
-
-  Map<String, dynamic> _safeJsonDecode(String body) {
-    try {
-      return jsonDecode(body);
-    } catch (e) {
-      return {'message': 'Invalid response format'};
     }
   }
 
@@ -126,6 +108,7 @@ class CampaignService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print('createCampaign - Status Code: ${response.statusCode}');
       print('createCampaign - Response Body: ${response.body}');
@@ -157,28 +140,11 @@ class CampaignService {
 
   Future<Map<String, dynamic>> getCampaignDetails(String campaignId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        print("token $token");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'campaign': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/detail/$campaignId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/campaigns/detail/$campaignId');
+      ApiService.checkResponse(response);
 
       print('getCampaignDetails - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
-      print("Campaign ID: $campaignId");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
@@ -208,25 +174,9 @@ class CampaignService {
   Future<Map<String, dynamic>> editCampaign(
       String campaignId, Map<String, dynamic> campaignData) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        print("token $token");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'campaign': null
-        };
-      }
-
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/campaigns/edit/$campaignId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(campaignData),
-      );
+      final response = await ApiService.put(
+          '/api/campaigns/edit/$campaignId', campaignData);
+      ApiService.checkResponse(response);
 
       print('editCampaign - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -258,24 +208,9 @@ class CampaignService {
 
   Future<Map<String, dynamic>> deleteCampaign(String campaignId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'campaign': null
-        };
-      }
-
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/campaigns/delete'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'campaignId': campaignId}),
-      );
+      final response = await ApiService.post(
+          '/api/campaigns/delete', {'campaignId': campaignId});
+      ApiService.checkResponse(response);
 
       print('deleteCampaign - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -306,24 +241,9 @@ class CampaignService {
 
   Future<Map<String, dynamic>> getCampaignMembers(String campaignId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Please log in again to continue',
-          'data': null,
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/members/$campaignId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/campaigns/members/$campaignId');
+      ApiService.checkResponse(response);
 
       print('getCampaignMembers - Status: ${response.statusCode}');
       print('Response: ${response.body}');
@@ -340,14 +260,6 @@ class CampaignService {
         return {
           'error': true,
           'message': decoded['message'] ?? 'You do not have permission to view campaign members',
-          'data': null,
-        };
-      } else if (response.statusCode == 401) {
-        // Token expired or invalid
-        await prefs.remove('auth_token'); // Clear invalid token
-        return {
-          'error': true,
-          'message': 'Session expired. Please log in again',
           'data': null,
         };
       } else {
@@ -371,28 +283,12 @@ class CampaignService {
   Future<Map<String, dynamic>> getUnpaidCommunityMembers(
       String communityId, String campaignId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        print("token $token");
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/campaigns/communitymembers/$communityId/$campaignId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/campaigns/communitymembers/$communityId/$campaignId');
+      ApiService.checkResponse(response);
 
       print('getUnpaidCommunityMembers - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
-      print("Community ID: $communityId, Campaign ID: $campaignId");
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -405,8 +301,7 @@ class CampaignService {
         final decoded = jsonDecode(response.body);
         return {
           'error': true,
-          'message':
-          decoded['message'] ?? 'Failed to fetch unpaid community members',
+          'message': decoded['message'] ?? 'Failed to fetch unpaid community members',
           'data': null,
         };
       }

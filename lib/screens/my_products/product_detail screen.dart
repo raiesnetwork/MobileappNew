@@ -1,6 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../constants/constants.dart';
 import 'addres_selection.dart';
 import 'buying_product_screen.dart';
 
@@ -15,7 +20,7 @@ class ProductDetailScreen extends StatefulWidget {
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   int _currentImageIndex = 0;
-  PageController _pageController = PageController();
+  final PageController _pageController = PageController();
   bool _isDescriptionExpanded = false;
   String? selectedAddressId;
   int selectedQuantity = 1;
@@ -24,8 +29,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   void initState() {
     super.initState();
     print('📦 Product Data: ${widget.product}');
-    print('🏪 Dealer ID: ${widget.product['user']}');
-    print('🆔 Product ID: ${widget.product['_id']}');
   }
 
   @override
@@ -81,193 +84,154 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         backgroundColor: const Color(0xFFEF4444),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         duration: const Duration(seconds: 3),
       ),
     );
   }
 
   Future<void> _handleBuyNow() async {
-    print('🛒 Buy Now button pressed');
+    String? redirectLink = widget.product['redirectLink']?.toString();
 
-    // FIXED: Dealer ID is in the 'user' field
-    final dealerId = widget.product['user'] ??
-        widget.product['userId'] ??
-        widget.product['dealerId'];
-
-    final productId = widget.product['_id'];
-    final productName = widget.product['productName'];
-    final productPrice = widget.product['price'];
-
-    print('🔍 Extracted Data:');
-    print('   Dealer ID: $dealerId');
-    print('   Product ID: $productId');
-    print('   Product Name: $productName');
-    print('   Product Price: $productPrice');
-
-    // Validate dealerId exists and is not empty
-    if (dealerId == null || dealerId.toString().isEmpty) {
-      print('❌ Dealer ID is missing!');
-      print('📋 Available product fields: ${widget.product.keys.toList()}');
-      _showError('Dealer information is missing. Cannot proceed with purchase.');
-      return;
-    }
-
-    // Validate product ID
-    if (productId == null || productId.toString().isEmpty) {
-      print('❌ Product ID is missing!');
-      _showError('Product information is incomplete');
-      return;
-    }
-
-    // Validate price
-    if (productPrice == null) {
-      print('❌ Product price is missing!');
-      _showError('Product price is not available');
-      return;
-    }
-
-    // Check if address is selected
-    if (selectedAddressId == null || selectedAddressId!.isEmpty) {
-      print('⚠️ No address selected');
-
-      // Navigate to address selection
-      final selectedAddress = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const AddressSelectionScreen(),
-        ),
-      );
-
-      if (selectedAddress != null) {
-        setState(() {
-          selectedAddressId = selectedAddress['_id'];
-        });
-
-        // Retry buy now after address selection
-        _handleBuyNow();
-        return;
-      } else {
-        _showError('Please select a delivery address to continue');
-        return;
+    if (redirectLink == null || redirectLink.isEmpty) {
+      final productId = widget.product['_id']?.toString();
+      if (productId != null && productId.isNotEmpty) {
+        redirectLink = 'https://mystore.ixes.ai/details/$productId';
       }
-    } // FIXED: Added missing closing brace
+    }
+
+    if (redirectLink == null || redirectLink.isEmpty) {
+      _showError('No purchase link available for this product.');
+      return;
+    }
+
+    final uri = Uri.tryParse(redirectLink);
+    if (uri == null) {
+      _showError('Invalid product link.');
+      return;
+    }
 
     try {
-      // Get user details from SharedPreferences
-      final prefs = await SharedPreferences.getInstance();
-      final userName = prefs.getString('user_name') ??
-          prefs.getString('name') ??
-          'Customer';
-      final userEmail = prefs.getString('user_email') ??
-          prefs.getString('email') ??
-          '';
-      final userPhone = prefs.getString('user_phone') ??
-          prefs.getString('phone') ??
-          '9999999999';
-
-      print('👤 User Details:');
-      print('   Name: $userName');
-      print('   Email: $userEmail');
-      print('   Phone: $userPhone');
-
-      // Calculate total amount
-      final price = productPrice is String
-          ? double.tryParse(productPrice) ?? 0
-          : (productPrice is num ? productPrice.toDouble() : 0.0);
-
-      final totalAmount = price * selectedQuantity;
-
-      print('💰 Payment Details:');
-      print('   Price per item: $price');
-      print('   Quantity: $selectedQuantity');
-      print('   Total Amount: $totalAmount');
-
-      // Validate minimum amount
-      if (totalAmount <= 0) {
-        _showError('Product price must be greater than 0');
-        return;
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        _showError('Could not open the purchase page.');
       }
-
-      print('✅ All validations passed. Navigating to purchase screen...');
-
-      // Navigate to purchase screen
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ProductPurchaseScreen(
-            dealerId: dealerId.toString(),
-            productDetails: [
-              {
-                '_id': productId.toString(),
-                'name': productName ?? 'Product',
-                'price': price,
-                'quantity': selectedQuantity,
-              }
-            ],
-            totalAmount: totalAmount,
-            addressId: selectedAddressId!,
-            customerDetails: {
-              'name': userName,
-              'email': userEmail.isNotEmpty ? userEmail : 'customer@example.com',
-              'phone': userPhone,
-            },
-            couponData: null,
-            type: 'normal',
-            courierId: 'shiprocket',
-          ),
-        ),
-      );
     } catch (e) {
-      print('💥 Error in _handleBuyNow: $e');
-      _showError('Error: ${e.toString()}');
+      _showError('Error opening link: ${e.toString()}');
     }
   }
 
   Future<void> _selectAddress() async {
     final selectedAddress = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => const AddressSelectionScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const AddressSelectionScreen()),
     );
 
     if (selectedAddress != null) {
-      setState(() {
-        selectedAddressId = selectedAddress['_id'];
-      });
-
+      setState(() => selectedAddressId = selectedAddress['_id']);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: const [
-              Icon(Icons.check_circle_outline, color: Colors.white),
-              SizedBox(width: 12),
-              Text('Address selected successfully'),
-            ],
-          ),
-          backgroundColor: const Color(0xFF10B981),
+        const SnackBar(
+          content: Text('Address selected successfully'),
+          backgroundColor: Color(0xFF10B981),
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
         ),
       );
     }
   }
 
+  // ====================== IMAGE HANDLING ======================
+
+  bool _isSvg(String imageStr) {
+    if (imageStr.isEmpty) return false;
+    final lower = imageStr.toLowerCase();
+    return lower.contains('svg+xml') ||
+        lower.contains('<svg') ||
+        imageStr.startsWith('PD94bWwgdmVyc2lvbj0iMS4w');
+  }
+
+  Uint8List? _decodeRasterImage(String imageStr) {
+    try {
+      String base64Data = imageStr;
+      if (imageStr.contains(',')) {
+        base64Data = imageStr.split(',').last.trim();
+      }
+      base64Data = base64Data.replaceAll(RegExp(r'\s+'), ''); // clean whitespace
+      return base64Decode(base64Data);
+    } catch (e) {
+      print("❌ Raster decode error: $e");
+      return null;
+    }
+  }
+
+  String? _decodeSvg(String imageStr) {
+    try {
+      String base64Data = imageStr;
+      if (imageStr.contains(',')) {
+        base64Data = imageStr.split(',').last.trim();
+      }
+      base64Data = base64Data.replaceAll(RegExp(r'\s+'), '');
+      return utf8.decode(base64Decode(base64Data));
+    } catch (e) {
+      print("❌ SVG decode error: $e");
+      return null;
+    }
+  }
+
+  Widget _buildImageWidget(dynamic imageData) {
+    if (imageData == null) {
+      return const Center(
+        child: Icon(Icons.image_not_supported, size: 50, color: Colors.grey),
+      );
+    }
+
+    final String imageStr = imageData.toString().trim();
+
+    if (_isSvg(imageStr)) {
+      final svgString = _decodeSvg(imageStr);
+      if (svgString != null) {
+        return SvgPicture.string(
+          svgString,
+          fit: BoxFit.cover,
+          placeholderBuilder: (context) => const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      }
+    } else {
+      final bytes = _decodeRasterImage(imageStr);
+      if (bytes != null) {
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            print("❌ Image.memory error: $error");
+            return const Center(
+              child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+            );
+          },
+        );
+      }
+    }
+
+    return const Center(
+      child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Decode images
-    final mainImage = widget.product['mainImage'] != null
-        ? base64Decode(widget.product['mainImage'].split(',').last)
-        : null;
-    final subImages = (widget.product['subImages'] as List<dynamic>?)
-        ?.map((img) => base64Decode(img.split(',').last))
-        .toList() ??
-        [];
+    // Collect all images (mainImage + subImages)
+    final List<dynamic> allImages = [];
 
-    final images = mainImage != null ? [mainImage, ...subImages] : subImages;
+    final mainImage = widget.product['mainImage'];
+    if (mainImage != null && mainImage.toString().isNotEmpty) {
+      allImages.add(mainImage);
+    }
+
+    final subImages = widget.product['subImages'] as List<dynamic>? ?? [];
+    allImages.addAll(subImages);
+
     final priceOptionInfo = _getPriceOptionInfo(widget.product['priceOption']);
 
     return Scaffold(
@@ -275,21 +239,21 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         title: const Text(
           'Product Details',
           style: TextStyle(
+            fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Colors.white,
-            fontSize: 18,
+            color: Primary,
           ),
         ),
-        backgroundColor: Theme.of(context).primaryColor,
+        backgroundColor: Colors.white,
         elevation: 2,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: Primary),
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Main Image
-            if (images.isNotEmpty)
+            // Main Image with PageView
+            if (allImages.isNotEmpty)
               Container(
                 height: 280,
                 width: double.infinity,
@@ -298,20 +262,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 ),
                 child: PageView.builder(
                   controller: _pageController,
-                  itemCount: images.length,
+                  itemCount: allImages.length,
                   onPageChanged: (index) {
-                    setState(() {
-                      _currentImageIndex = index;
-                    });
+                    setState(() => _currentImageIndex = index);
                   },
                   itemBuilder: (context, index) {
-                    return Image.memory(
-                      images[index],
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => const Center(
-                        child: Icon(Icons.broken_image, size: 40, color: Colors.grey),
-                      ),
-                    );
+                    return _buildImageWidget(allImages[index]);
                   },
                 ),
               )
@@ -329,19 +285,20 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     children: [
                       Icon(Icons.image_not_supported, size: 50, color: Colors.grey),
                       SizedBox(height: 6),
-                      Text('No images available', style: TextStyle(color: Colors.grey, fontSize: 14)),
+                      Text('No images available',
+                          style: TextStyle(color: Colors.grey, fontSize: 14)),
                     ],
                   ),
                 ),
               ),
 
             // Image indicator dots
-            if (images.length > 1)
+            if (allImages.length > 1)
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  children: images.asMap().entries.map((entry) {
+                  children: allImages.asMap().entries.map((entry) {
                     return Container(
                       width: 6,
                       height: 6,
@@ -357,14 +314,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 ),
               ),
 
-            // Sub-images thumbnail row
-            if (images.length > 1)
+            // Sub-images thumbnails
+            if (allImages.length > 1)
               Container(
                 height: 70,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  itemCount: images.length,
+                  itemCount: allImages.length,
                   itemBuilder: (context, index) {
                     return GestureDetector(
                       onTap: () {
@@ -389,13 +346,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(4),
-                          child: Image.memory(
-                            images[index],
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => const Center(
-                              child: Icon(Icons.broken_image, size: 16, color: Colors.grey),
-                            ),
-                          ),
+                          child: _buildImageWidget(allImages[index]),
                         ),
                       ),
                     );
@@ -403,13 +354,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 ),
               ),
 
-            // Product Details
+            // ================== Product Details Section (Unchanged) ==================
             Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Product Name and Price Option Badge
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -447,7 +397,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ],
                   ),
 
-                  // Brand Name
                   if (widget.product['brandName'] != null &&
                       widget.product['brandName'].toString().isNotEmpty) ...[
                     const SizedBox(height: 6),
@@ -459,7 +408,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 12),
 
-                  // Price
                   Text(
                     widget.product['priceOption'] == 'free'
                         ? 'Free'
@@ -477,7 +425,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 12),
 
-                  // Product Count
                   Row(
                     children: [
                       Icon(Icons.inventory, size: 18, color: Colors.grey[600]),
@@ -491,7 +438,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Quantity Selector
                   Row(
                     children: [
                       const Text('Quantity: ', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
@@ -509,7 +455,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           border: Border.all(color: Colors.grey[300]!),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Text('$selectedQuantity', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        child: Text('$selectedQuantity',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       ),
                       IconButton(
                         onPressed: () => setState(() => selectedQuantity++),
@@ -522,7 +469,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Description
                   const Text('Description', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   LayoutBuilder(
@@ -564,7 +510,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Address Selection Card
                   Card(
                     elevation: 2,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -619,7 +564,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
                   const SizedBox(height: 16),
 
-                  // Action Buttons
                   Row(
                     children: [
                       Expanded(
@@ -657,8 +601,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   ),
 
                   const SizedBox(height: 12),
-
-                  // Privacy Policy
                   GestureDetector(
                     onTap: () {
                       showDialog(
@@ -689,8 +631,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   ),
 
                   const SizedBox(height: 6),
-
-                  // Copyright
                   Center(
                     child: Text(
                       '© 2023 GES Global Solutions private limited. All rights reserved.',
@@ -698,7 +638,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-
                   const SizedBox(height: 16),
                 ],
               ),

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import '../constants/apiConstants.dart';
+import 'api_service.dart';
 import 'socket_service.dart';
 
 class PersonalChatService {
@@ -18,7 +19,6 @@ class PersonalChatService {
   //  HELPERS
   // ════════════════════════════════════════════════════════════════════════
 
-  /// Returns the correct MIME type string for a given file path
   String _mimeTypeForFile(String filePath) {
     final ext = p.extension(filePath).toLowerCase();
     const map = {
@@ -41,7 +41,6 @@ class PersonalChatService {
     return map[ext] ?? 'application/octet-stream';
   }
 
-  /// Safely decodes a JSON response — never throws on HTML error pages
   Map<String, dynamic> _safeJsonDecode(http.Response response) {
     try {
       return jsonDecode(response.body) as Map<String, dynamic>;
@@ -96,18 +95,8 @@ class PersonalChatService {
 
   Future<Map<String, dynamic>> getPersonalChats() async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) {
-        return {'error': true, 'message': 'Authentication token is missing', 'data': []};
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/friends');
-      print('🔍 Fetching personal chats from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-      );
+      final response = await ApiService.get('/api/chat/friends');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -140,14 +129,6 @@ class PersonalChatService {
     String? replyTo,
   }) async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) {
-        return {'error': true, 'message': 'Authentication token is missing', 'data': null};
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/message');
-      print('📤 Sending message to: $uri');
-
       final requestBody = <String, dynamic>{
         'receiverId': receiverId,
         'text': text,
@@ -158,11 +139,8 @@ class PersonalChatService {
 
       print('📦 Request Body: ${jsonEncode(requestBody)}');
 
-      final response = await http.post(
-        uri,
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post('/api/chat/message', requestBody);
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -189,18 +167,8 @@ class PersonalChatService {
 
   Future<Map<String, dynamic>> getMessages({required String userId}) async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) {
-        return {'error': true, 'message': 'Authentication token is missing', 'data': null};
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/message/$userId');
-      print('📤 Fetching messages from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-      );
+      final response = await ApiService.get('/api/chat/message/$userId');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -222,7 +190,7 @@ class PersonalChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  SEND FILE MESSAGE  ← FIXED: correct MIME type + safe JSON decode
+  //  SEND FILE MESSAGE
   // ════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> sendFileMessage({
@@ -265,7 +233,6 @@ class PersonalChatService {
         request.fields['replyTo'] = replyTo;
       }
 
-      // ✅ FIX: explicit MIME type so server knows it's an image, not binary blob
       request.files.add(
         await http.MultipartFile.fromPath(
           'file',
@@ -280,11 +247,11 @@ class PersonalChatService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
 
-      // ✅ FIX: safe decode — won't crash on HTML 500 pages
       final decoded = _safeJsonDecode(response);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -307,7 +274,7 @@ class PersonalChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  SEND VOICE MESSAGE  ← FIXED: correct MIME type + safe JSON decode
+  //  SEND VOICE MESSAGE
   // ════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> sendVoiceMessage({
@@ -359,7 +326,6 @@ class PersonalChatService {
         print('📦 Including audio duration: $audioDurationMs ms');
       }
 
-      // ✅ FIX: explicit MIME type for audio
       request.files.add(
         await http.MultipartFile.fromPath(
           'audio',
@@ -374,11 +340,11 @@ class PersonalChatService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
 
-      // ✅ FIX: safe decode
       final decoded = _safeJsonDecode(response);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -435,19 +401,11 @@ class PersonalChatService {
     required String receiverId,
   }) async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) {
-        return {'error': true, 'message': 'Authentication token is missing', 'data': null};
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/chat/updatereadBy');
-      print('📤 Updating read status to: $uri');
-
-      final response = await http.post(
-        uri,
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-        body: jsonEncode({'senderId': senderId, 'receiverId': receiverId}),
+      final response = await ApiService.post(
+        '/api/chat/updatereadBy',
+        {'senderId': senderId, 'receiverId': receiverId},
       );
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -494,14 +452,11 @@ class PersonalChatService {
     required String receiverId,
   }) async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) return {'error': true, 'message': 'Authentication token missing'};
-
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/deleteMessage'),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-        body: jsonEncode({'messageId': messageId, 'receiverId': receiverId}),
+      final response = await ApiService.post(
+        '/api/chat/deleteMessage',
+        {'messageId': messageId, 'receiverId': receiverId},
       );
+      ApiService.checkResponse(response);
 
       final body = _safeJsonDecode(response);
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -544,14 +499,11 @@ class PersonalChatService {
     required String receiverId,
   }) async {
     try {
-      final token = await _getAuthToken();
-      if (token == null) return {'error': true, 'message': 'Authentication token missing'};
-
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/editMessage'),
-        headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
-        body: jsonEncode({'messageId': messageId, 'newText': newText, 'receiverId': receiverId}),
+      final response = await ApiService.post(
+        '/api/chat/editMessage',
+        {'messageId': messageId, 'newText': newText, 'receiverId': receiverId},
       );
+      ApiService.checkResponse(response);
 
       final body = _safeJsonDecode(response);
       if (response.statusCode == 200) {

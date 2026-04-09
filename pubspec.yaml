@@ -62,6 +62,9 @@ dependencies:
   flutter_callkit_incoming: ^2.0.0
   flutter_local_notifications: ^17.0.0
   uuid: ^4.3.3
+  flutter_background: ^1.2.0
+
+
 
 
 
@@ -78,6 +81,7 @@ dependencies:
     sdk: flutter
   easy_localization: ^3.0.7+1
   introduction_screen: ^3.1.17
+  uni_links: ^0.5.1
   carousel_slider: ^4.2.1
   smooth_page_indicator: ^1.1.0
   visibility_detector: ^0.4.0

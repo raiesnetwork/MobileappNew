@@ -5,37 +5,17 @@ import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/apiConstants.dart';
-
+import 'api_service.dart';
 
 class CouponService {
-  // ─────────────────────────────────────────────────────────────────────────────
-  // HELPER: returns auth headers
-  // ─────────────────────────────────────────────────────────────────────────────
-  Future<Map<String, String>?> _authHeaders() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-    if (token == null || token.isEmpty) return null;
-    return {
-      'Authorization': 'Bearer $token',
-      'Content-Type': 'application/json',
-    };
-  }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 1. GET ALL COUPONS  →  GET /api/coupon/getAll-coupon
-  // Returns { createdCoupons: [], receivedCoupons: [] }
+  // 1. GET ALL COUPONS
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getUserCoupons() async {
     try {
-      final headers = await _authHeaders();
-      if (headers == null) {
-        return _authError(['createdCoupons', 'receivedCoupons']);
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/coupon/getAll-coupon'),
-        headers: headers,
-      );
+      final response = await ApiService.get('/api/coupon/getAll-coupon');
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -52,7 +32,7 @@ class CouponService {
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 2. CREATE COUPON  →  POST /api/coupon/create-coupon  (multipart, supports image)
+  // 2. CREATE COUPON (multipart)
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> createCoupon({
     required String name,
@@ -92,7 +72,6 @@ class CouponService {
       if (couponType != null) request.fields['couponType'] = couponType;
       request.fields['link'] = (link != null && link.isNotEmpty) ? link : '';
 
-      // ✅ Type-specific fields
       if (type == 'coupon') {
         if (couponType == 'discount-amount' && discountAmount != null) {
           request.fields['discountAmount'] = jsonEncode(discountAmount);
@@ -107,7 +86,6 @@ class CouponService {
 
       print("📦 [createCoupon] Fields: ${request.fields}");
 
-      // ✅ Attach image if provided
       if (imageFile != null) {
         print("🖼️ [createCoupon] Attaching image: ${imageFile.path}");
         request.files.add(await http.MultipartFile.fromPath(
@@ -119,6 +97,7 @@ class CouponService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print("📥 [createCoupon] Status Code: ${response.statusCode}");
       print("📥 [createCoupon] Response: ${response.body}");
@@ -132,53 +111,48 @@ class CouponService {
         };
       }
 
-      print("❌ [createCoupon] API Error");
       return _parseError(response.body, {'coupon': null});
     } catch (e) {
       print("🔥 [createCoupon] Exception: $e");
       return _exception(e, {'coupon': null});
     }
   }
+
   // ─────────────────────────────────────────────────────────────────────────────
-  // 3. SEND COUPON TO USER  →  POST /api/coupon/send-coupon
-  // Body: { couponId, receiverId }
+  // 3. SEND COUPON TO USER
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> sendCouponToUser({
     required String couponId,
     required String receiverId,
   }) async {
-    return _post('api/coupon/send-coupon', {'couponId': couponId, 'receiverId': receiverId});
+    return _post('/api/coupon/send-coupon', {'couponId': couponId, 'receiverId': receiverId});
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 4. SEND COUPON TO GROUP/COMMUNITY  →  POST /api/coupon/send-community
-  // Body: { couponId, groupId }
+  // 4. SEND COUPON TO GROUP/COMMUNITY
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> sendCouponToGroup({
     required String couponId,
     required String groupId,
   }) async {
-    return _post('api/coupon/send-community', {
+    return _post('/api/coupon/send-community', {
       'couponId': couponId,
-      'communityId': groupId, // ← changed from 'groupId' to 'communityId'
+      'communityId': groupId,
     });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 5. ADD COUPON CODE TO SERVICE  →  POST /api/coupon/add-to-service
-  // Body: { couponCode, serviceId }
+  // 5. ADD COUPON CODE TO SERVICE
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> addCouponToService({
     required String couponCode,
     required String serviceId,
   }) async {
-    return _post('api/coupon/add-to-service', {'couponCode': couponCode, 'serviceId': serviceId});
+    return _post('/api/coupon/add-to-service', {'couponCode': couponCode, 'serviceId': serviceId});
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 6. VERIFY COUPON  →  POST /api/coupon/verify
-  // Body: { code, store? }
-  // Returns: { error, message, coupon }
+  // 6. VERIFY COUPON
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> verifyCoupon({
     required String code,
@@ -186,30 +160,23 @@ class CouponService {
   }) async {
     final body = <String, dynamic>{'code': code};
     if (store != null) body['store'] = store;
-    return _post('api/coupon/verify', body);
+    return _post('/api/coupon/verify', body);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 7. VERIFY iXES SUBSCRIPTION COUPON  →  POST /api/coupon/verify-ixes-coupon
-  // Body: { code }
+  // 7. VERIFY iXES SUBSCRIPTION COUPON
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> verifyIxesCoupon({required String code}) async {
-    return _post('api/coupon/verify-ixes-coupon', {'code': code});
+    return _post('/api/coupon/verify-ixes-coupon', {'code': code});
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // 8. GET USER LIST  →  GET /api/coupon/get-users
-  // Returns up to 10 users
+  // 8. GET USER LIST
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getUserList() async {
     try {
-      final headers = await _authHeaders();
-      if (headers == null) return _authError(['users']);
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/coupon/get-users'),
-        headers: headers,
-      );
+      final response = await ApiService.get('/api/coupon/get-users');
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -226,14 +193,8 @@ class CouponService {
   // ─────────────────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
     try {
-      final headers = await _authHeaders();
-      if (headers == null) return _authError([]);
-
-      final response = await http.post(
-        Uri.parse('$apiBaseUrl$path'),
-        headers: headers,
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post(path, body);
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         return {'error': false, ...jsonDecode(response.body) as Map<String, dynamic>};

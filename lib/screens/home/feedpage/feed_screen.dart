@@ -175,8 +175,13 @@ class _FeedScreenState extends State<FeedScreen> {
       _currentSearchQuery = '';
     });
 
-    if (widget.postId != null && widget.postId!.isNotEmpty) {
-      await _loadSinglePost(widget.postId!);
+    // ✅ FIX: only treat as single-post if it's a valid 24-char MongoDB ObjectId
+    final rawPostId = widget.postId ?? '';
+    final isValidPostId = rawPostId.length == 24 &&
+        RegExp(r'^[a-f0-9]{24}$').hasMatch(rawPostId);
+
+    if (isValidPostId) {
+      await _loadSinglePost(rawPostId);
       if (mounted) setState(() => _isInitialized = true);
       return;
     }
@@ -217,7 +222,6 @@ class _FeedScreenState extends State<FeedScreen> {
       print('📡 getPostById response: $response');
 
       if (response != null && response['success'] == true) {
-        // New API: response shape is { success: true, data: { ... } }
         final postJson = response['data'] as Map<String, dynamic>?;
         if (postJson != null) {
           try {
@@ -236,24 +240,21 @@ class _FeedScreenState extends State<FeedScreen> {
         }
       }
 
-      // Fallback: show normal feed if post not found
-      final provider = context.read<CommentProvider>();
-      await provider.fetchAllPosts(
-        offset: 0,
-        limit: _postsPerPage,
-        isRefresh: true,
-      );
+      // ✅ FIX: show empty state instead of loading ALL posts
       setState(() {
-        posts = List.from(provider.posts);
-        _originalPosts = List.from(provider.posts);
-        _allPostsCache = List.from(provider.posts);
-        _currentPage = 1;
-        _hasMorePosts = provider.posts.length == _postsPerPage;
+        posts = [];
+        _originalPosts = [];
+        _allPostsCache = [];
+        _hasMorePosts = false;
         isLoading = false;
       });
     } catch (e) {
       print('_loadSinglePost error: $e');
-      setState(() => isLoading = false);
+      setState(() {
+        posts = [];
+        _hasMorePosts = false;
+        isLoading = false;
+      });
     }
   }
 

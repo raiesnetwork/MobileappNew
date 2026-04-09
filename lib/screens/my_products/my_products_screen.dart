@@ -1,11 +1,12 @@
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/my_products/product_detail%20screen.dart';
 import 'package:provider/provider.dart';
-
 import '../../providers/service_provider.dart';
-
 
 class MyProductsScreen extends StatefulWidget {
   const MyProductsScreen({Key? key}) : super(key: key);
@@ -20,21 +21,31 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<ServicesProvider>();
+      if (!provider.isMyProductsLoading) {
+        provider.fetchMyProducts();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
 
-  // Filter products based on price option and search query
   List<Map<String, dynamic>> _filterProducts(List<dynamic> products) {
     return products.where((product) {
-      // Price option filter
-      final productPriceOption = product['priceOption']?.toString().toLowerCase() ?? '';
+      final productPriceOption =
+          product['priceOption']?.toString().toLowerCase() ?? '';
       final matchesPriceFilter = _selectedPriceOption == 'all' ||
           productPriceOption == _selectedPriceOption.toLowerCase();
 
-      // Search filter
-      final productName = product['productName']?.toString().toLowerCase() ?? '';
+      final productName =
+          product['productName']?.toString().toLowerCase() ?? '';
       final matchesSearch = _searchQuery.isEmpty ||
           productName.contains(_searchQuery.toLowerCase());
 
@@ -44,15 +55,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final servicesProvider = Provider.of<ServicesProvider>(context);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (servicesProvider.myProducts.isEmpty &&
-          !servicesProvider.isMyProductsLoading) {
-        servicesProvider.fetchMyProducts();
-      }
-    });
-
+    final servicesProvider = context.watch<ServicesProvider>();
     final filteredProducts = _filterProducts(servicesProvider.myProducts);
 
     return Scaffold(
@@ -60,8 +63,9 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
         title: const Text(
           'My Products',
           style: TextStyle(
+            fontSize: 16,
             fontWeight: FontWeight.bold,
-            color:Primary,
+            color: Primary,
           ),
         ),
         backgroundColor: Colors.white,
@@ -72,17 +76,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
           // Search and Filter Section
           Container(
             padding: const EdgeInsets.all(16.0),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.white.withOpacity(0.1),
-                  spreadRadius: 1,
-                  blurRadius: 3,
-                  offset: const Offset(0, 1),
-                ),
-              ],
-            ),
+            color: Colors.white,
             child: Column(
               children: [
                 // Search Bar
@@ -108,14 +102,13 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Theme.of(context).primaryColor),
+                      borderSide:
+                      BorderSide(color: Theme.of(context).primaryColor),
                     ),
                     filled: true,
                     fillColor: Colors.grey[50],
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                        horizontal: 16, vertical: 12),
                   ),
                   onChanged: (value) {
                     setState(() {
@@ -124,10 +117,11 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                   },
                 ),
                 const SizedBox(height: 12),
-                // Price Option Filter Dropdown
+                // Price Option Filter
                 Row(
                   children: [
-                    const Icon(Icons.filter_list, color: Colors.grey, size: 20),
+                    const Icon(Icons.filter_list,
+                        color: Colors.grey, size: 20),
                     const SizedBox(width: 8),
                     const Text(
                       'Filter by:',
@@ -140,7 +134,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal:20),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
                         decoration: BoxDecoration(
                           border: Border.all(color: Colors.grey[300]!),
                           borderRadius: BorderRadius.circular(8),
@@ -150,21 +144,22 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                           child: DropdownButton<String>(
                             value: _selectedPriceOption,
                             isExpanded: true,
-                            icon: const Icon(Icons.keyboard_arrow_down, size: 18),
-                            style: const TextStyle(fontSize: 12, color: Colors.black), // fallback style
-                            items: [
+                            icon: const Icon(Icons.keyboard_arrow_down,
+                                size: 18),
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.black),
+                            items: const [
                               DropdownMenuItem(
                                 value: 'all',
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.all_inclusive, size: 16, color: Colors.blue),
+                                  children: [
+                                    Icon(Icons.all_inclusive,
+                                        size: 16, color: Colors.blue),
                                     SizedBox(width: 6),
                                     Expanded(
-                                      child: Text(
-                                        'All Products',
-                                        style: TextStyle(fontSize: 12),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: Text('All Products',
+                                          style: TextStyle(fontSize: 12),
+                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -172,15 +167,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                               DropdownMenuItem(
                                 value: 'normal',
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.attach_money, size: 16, color: Colors.green),
+                                  children: [
+                                    Icon(Icons.attach_money,
+                                        size: 16, color: Colors.green),
                                     SizedBox(width: 6),
                                     Expanded(
-                                      child: Text(
-                                        'Priced Products',
-                                        style: TextStyle(fontSize: 12),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: Text('Priced Products',
+                                          style: TextStyle(fontSize: 12),
+                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -188,15 +182,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                               DropdownMenuItem(
                                 value: 'free',
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.card_giftcard, size: 16, color: Colors.orange),
+                                  children: [
+                                    Icon(Icons.card_giftcard,
+                                        size: 16, color: Colors.orange),
                                     SizedBox(width: 6),
                                     Expanded(
-                                      child: Text(
-                                        'Free Products',
-                                        style: TextStyle(fontSize: 12),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: Text('Free Products',
+                                          style: TextStyle(fontSize: 12),
+                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -204,15 +197,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                               DropdownMenuItem(
                                 value: 'auctions',
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.gavel, size: 16, color: Colors.purple),
+                                  children: [
+                                    Icon(Icons.gavel,
+                                        size: 16, color: Colors.purple),
                                     SizedBox(width: 6),
                                     Expanded(
-                                      child: Text(
-                                        'Auctions',
-                                        style: TextStyle(fontSize: 12),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: Text('Auctions',
+                                          style: TextStyle(fontSize: 12),
+                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -220,15 +212,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                               DropdownMenuItem(
                                 value: 'exchange',
                                 child: Row(
-                                  children: const [
-                                    Icon(Icons.swap_horiz, size: 16, color: Colors.teal),
+                                  children: [
+                                    Icon(Icons.swap_horiz,
+                                        size: 16, color: Colors.teal),
                                     SizedBox(width: 6),
                                     Expanded(
-                                      child: Text(
-                                        'Exchange',
-                                        style: TextStyle(fontSize: 12),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
+                                      child: Text('Exchange',
+                                          style: TextStyle(fontSize: 12),
+                                          overflow: TextOverflow.ellipsis),
                                     ),
                                   ],
                                 ),
@@ -243,7 +234,6 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                             },
                           ),
                         ),
-
                       ),
                     ),
                   ],
@@ -251,11 +241,14 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
               ],
             ),
           ),
+
           // Results Counter
-          if (!servicesProvider.isMyProductsLoading && !servicesProvider.hasMyProductsError)
+          if (!servicesProvider.isMyProductsLoading &&
+              !servicesProvider.hasMyProductsError)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               color: Colors.grey[50],
               child: Text(
                 'Showing ${filteredProducts.length} of ${servicesProvider.myProducts.length} products',
@@ -266,6 +259,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                 ),
               ),
             ),
+
           // Products Grid
           Expanded(
             child: RefreshIndicator(
@@ -285,18 +279,13 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 48,
-                      color: Colors.red[400],
-                    ),
+                    Icon(Icons.error_outline,
+                        size: 48, color: Colors.red[400]),
                     const SizedBox(height: 12),
                     Text(
                       servicesProvider.myProductsMessage,
                       style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 16,
-                      ),
+                          color: Colors.red, fontSize: 16),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 16),
@@ -305,7 +294,8 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                       icon: const Icon(Icons.refresh),
                       label: const Text('Retry'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).primaryColor,
+                        backgroundColor:
+                        Theme.of(context).primaryColor,
                         foregroundColor: Colors.white,
                       ),
                     ),
@@ -338,11 +328,10 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                     if (servicesProvider.myProducts.isNotEmpty) ...[
                       const SizedBox(height: 8),
                       Text(
-                        'Try adjusting your search or filter options.',
+                        'Try adjusting your search or filter.',
                         style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
+                            fontSize: 14,
+                            color: Colors.grey[600]),
                       ),
                       const SizedBox(height: 16),
                       ElevatedButton.icon(
@@ -356,7 +345,8 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                         icon: const Icon(Icons.clear_all),
                         label: const Text('Clear Filters'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).primaryColor,
+                          backgroundColor: Theme.of(context)
+                              .primaryColor,
                           foregroundColor: Colors.white,
                         ),
                       ),
@@ -366,11 +356,12 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
               )
                   : GridView.builder(
                 padding: const EdgeInsets.all(16.0),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
-                  childAspectRatio: 0.75, // Adjust this to control card height
+                  childAspectRatio: 0.75,
                 ),
                 itemCount: filteredProducts.length,
                 itemBuilder: (context, index) {
@@ -385,7 +376,6 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
           ),
         ],
       ),
-
     );
   }
 }
@@ -400,7 +390,6 @@ class ProductGridCard extends StatelessWidget {
     this.searchQuery = '',
   }) : super(key: key);
 
-  // Helper method to get price option display info
   Map<String, dynamic> _getPriceOptionInfo(String? priceOption) {
     switch (priceOption?.toLowerCase()) {
       case 'free':
@@ -435,14 +424,102 @@ class ProductGridCard extends StatelessWidget {
     }
   }
 
+  // Safe image decoding function for raster images (PNG/JPG)
+  Uint8List? _getImageBytes() {
+    final String imageStr = product['mainImage']?.toString() ?? '';
+    if (imageStr.isEmpty) return null;
+
+    try {
+      String base64Data = imageStr;
+      if (imageStr.contains(',')) {
+        base64Data = imageStr.split(',').last.trim();
+      }
+      return base64Decode(base64Data);
+    } catch (e) {
+      print("❌ Base64 decode error for '${product['productName']}': $e");
+      return null;
+    }
+  }
+
+  // New method to handle both SVG and normal images
+  Widget _buildProductImage() {
+    final String imageStr = product['mainImage']?.toString() ?? '';
+    if (imageStr.isEmpty) {
+      return _noImageWidget();
+    }
+
+    // Detect if it's an SVG
+    final bool isSvg = imageStr.contains('svg+xml') ||
+        imageStr.toLowerCase().contains('<svg') ||
+        imageStr.startsWith('PD94bWwgdmVyc2lvbj0iMS4w');
+
+    if (isSvg) {
+      try {
+        String svgBase64 = imageStr;
+        if (imageStr.contains(',')) {
+          svgBase64 = imageStr.split(',').last.trim();
+        }
+        final String svgString = utf8.decode(base64Decode(svgBase64));
+
+        return SvgPicture.string(
+          svgString,
+          fit: BoxFit.cover,
+          placeholderBuilder: (context) => const Center(
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      } catch (e) {
+        print("❌ SVG decode error for '${product['productName']}': $e");
+        return _errorWidget();
+      }
+    } else {
+      // Normal raster image
+      final imageBytes = _getImageBytes();
+      if (imageBytes != null) {
+        return Image.memory(
+          imageBytes,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            print("❌ Image decode failed for ${product['productName']}");
+            return _errorWidget();
+          },
+        );
+      }
+    }
+
+    return _noImageWidget();
+  }
+
+  Widget _errorWidget() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.broken_image, size: 40, color: Colors.grey),
+          SizedBox(height: 6),
+          Text('Image error',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _noImageWidget() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.image_not_supported, size: 36, color: Colors.grey),
+          SizedBox(height: 8),
+          Text('No image',
+              style: TextStyle(fontSize: 11, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Decode main image
-    final mainImage = product['mainImage'] != null
-        ? base64Decode(product['mainImage'].split(',').last)
-        : null;
-
-    // Get price option info
     final priceOptionInfo = _getPriceOptionInfo(product['priceOption']);
 
     return GestureDetector(
@@ -462,57 +539,23 @@ class ProductGridCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Product Image
+            // Product Image - Now supports SVG + Normal images
             Expanded(
               flex: 3,
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    topRight: Radius.circular(12),
-                  ),
-                  border: Border.all(color: Colors.grey[300]!),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.circular(12),
                 ),
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(12),
-                    topRight: Radius.circular(12),
-                  ),
-                  child: mainImage != null
-                      ? Image.memory(
-                    mainImage,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                    const Center(
-                      child: Icon(Icons.broken_image,
-                          size: 40, color: Colors.grey),
-                    ),
-                  )
-                      : Container(
-                    color: Colors.grey[100],
-                    child: const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.image_not_supported,
-                              size: 30, color: Colors.grey),
-                          SizedBox(height: 4),
-                          Text(
-                            'No image',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 10,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                child: Container(
+                  width: double.infinity,
+                  color: Colors.grey[100],
+                  child: _buildProductImage(),
                 ),
               ),
             ),
-            // Product Details
+
+            // Product Details (unchanged)
             Expanded(
               flex: 2,
               child: Padding(
@@ -521,28 +564,23 @@ class ProductGridCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Product Name
                     Text(
                       product['productName'] ?? 'Unnamed Product',
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 14,
+                        fontSize: 13,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    // Price and Price Option Badge
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        // Price
                         Flexible(
                           child: Text(
                             product['priceOption'] == 'free'
                                 ? 'Free'
-                                : product['priceOption'] == 'auctions'
-                                ? '${product['currency'] ?? ''}${product['price'] ?? 'N/A'}'
                                 : product['priceOption'] == 'exchange'
                                 ? 'Exchange'
                                 : '${product['currency'] ?? ''}${product['price'] ?? 'N/A'}',
@@ -556,9 +594,11 @@ class ProductGridCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 4),
-                        // Price Option Badge (smaller)
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: priceOptionInfo['bgColor'],
                             borderRadius: BorderRadius.circular(6),

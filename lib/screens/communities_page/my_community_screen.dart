@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/providers/communities_provider.dart';
 import 'package:ixes.app/screens/communities_page/community_info_screen.dart';
 import 'package:provider/provider.dart';
@@ -22,60 +21,42 @@ class CommunitiesListWidget extends StatefulWidget {
 }
 
 class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
-  Set<String> expandedCommunities = {};
+  final Set<String> _expandedCommunities = {};
 
   Widget _buildImageWidget(String? imageData, {bool isProfileImage = false}) {
-    if (imageData == null || imageData.isEmpty) {
-      return isProfileImage
-          ? const Icon(Icons.person, color: Colors.white, size: 24)
-          : Container();
-    }
+    final fallback = isProfileImage
+        ? const Icon(Icons.person, color: Colors.white, size: 20)
+        : const SizedBox.shrink();
+
+    if (imageData == null || imageData.isEmpty) return fallback;
 
     try {
-      // Handle base64 data with or without prefix
-      String base64String;
-      if (imageData.startsWith('data:')) {
-        base64String = imageData.split(',')[1];
-      } else if (imageData.contains('base64,')) {
-        base64String = imageData.split('base64,')[1];
-      } else {
-        // Assume it's already base64 or a URL
-        if (imageData.startsWith('http') || imageData.startsWith('/')) {
-          final processedImage = imageData.startsWith('/')
-              ? 'https://api.ixes.ai$imageData'
-              : imageData;
-          return Image.network(
-            processedImage,
-            fit: BoxFit.cover,
-            width: isProfileImage ? double.infinity : double.infinity,
-            height: isProfileImage ? double.infinity : 300,
-            errorBuilder: (context, error, stackTrace) {
-              return isProfileImage
-                  ? const Icon(Icons.person, color: Colors.white, size: 24)
-                  : Container();
-            },
-          );
-        }
-        base64String = imageData;
+      if (imageData.startsWith('http') || imageData.startsWith('/')) {
+        final url = imageData.startsWith('/')
+            ? 'https://api.ixes.ai$imageData'
+            : imageData;
+        return Image.network(
+          url,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) => fallback,
+        );
       }
+
+      final base64String = imageData.contains(',')
+          ? imageData.split(',').last
+          : imageData;
 
       return Image.memory(
         base64Decode(base64String),
         fit: BoxFit.cover,
-        width: isProfileImage ? double.infinity : double.infinity,
-        height: isProfileImage ? double.infinity : 300,
-        errorBuilder: (context, error, stackTrace) {
-          print('Image decode error: $error');
-          return isProfileImage
-              ? const Icon(Icons.person, color: Colors.white, size: 24)
-              : Container();
-        },
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) => fallback,
       );
-    } catch (e) {
-      print('Error processing image: $e');
-      return isProfileImage
-          ? const Icon(Icons.person, color: Colors.white, size: 24)
-          : Container();
+    } catch (_) {
+      return fallback;
     }
   }
 
@@ -84,35 +65,36 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
     required int level,
     bool isLastInGroup = false,
   }) {
+    final screenWidth = MediaQuery.of(context).size.width;
     final communityId = (community['_id'] ?? community['id'])?.toString() ?? '';
     final communityName = community['name']?.toString() ?? 'Unnamed Community';
     final subCommunities = community['subCommunities'] as List? ?? [];
     final hasSubCommunities = subCommunities.isNotEmpty;
-    final isExpanded = expandedCommunities.contains(communityId);
+    final isExpanded = _expandedCommunities.contains(communityId);
 
-    final double leftPadding = level == 0 ? 16.0 : 16.0 + (level * 24.0);
-    final double avatarSize = level == 0 ? 24.0 : 20.0;
-    final double fontSize = level == 0 ? 14.0 : 13.0;
+    final double leftPadding =
+    (level == 0 ? 16.0 : 16.0 + (level * 20.0)).clamp(16.0, screenWidth * 0.4);
+    final double avatarRadius = screenWidth < 360 ? 18.0 : (level == 0 ? 22.0 : 18.0);
+    final double fontSize = screenWidth < 360 ? 12.0 : (level == 0 ? 14.0 : 13.0);
 
     return Column(
       children: [
         ListTile(
           contentPadding: EdgeInsets.only(
             left: leftPadding,
-            right: 16,
-            top: level == 0 ? 8 : 6,
-            bottom: level == 0 ? 8 : 6,
+            right: 4, // reduced so trailing has room
+            top: level == 0 ? 6 : 4,
+            bottom: level == 0 ? 6 : 4,
           ),
-          leading: level == 0
-              ? CircleAvatar(
-            radius: avatarSize,
+          leading: CircleAvatar(
+            radius: avatarRadius,
             backgroundColor: Colors.grey[800],
             child: ClipOval(
               child: community['profileImage'] != null &&
                   community['profileImage'].toString().isNotEmpty
                   ? SizedBox(
-                width: avatarSize * 2,
-                height: avatarSize * 2,
+                width: avatarRadius * 2,
+                height: avatarRadius * 2,
                 child: _buildImageWidget(
                   community['profileImage'].toString(),
                   isProfileImage: true,
@@ -120,24 +102,10 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
               )
                   : Text(
                 communityName[0].toUpperCase(),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          )
-              : SizedBox(
-            width: avatarSize * 2,
-            height: avatarSize * 2,
-            child: Center(
-              child: Text(
-                communityName[0].toUpperCase(),
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
-                  fontSize: 11,
+                  fontSize: level == 0 ? 13.0 : 11.0,
                 ),
               ),
             ),
@@ -152,90 +120,44 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
               fontSize: fontSize,
             ),
           ),
-          subtitle: level == 0
-              ? Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                community['isPrivate'] == true ? Icons.lock : Icons.public,
-                color: Colors.grey[500],
-                size: 14,
-              ),
-              SizedBox(width: 4),
-              Flexible(
-                child: Text(
-                  community['isPrivate'] == true ? 'Private' : 'Public',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 12,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (hasSubCommunities) ...[
-                SizedBox(width: 8),
-                Icon(
-                  Icons.folder,
-                  color: Colors.grey[500],
-                  size: 14,
-                ),
-                SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                    '${subCommunities.length} sub${subCommunities.length == 1 ? '' : 's'}',
-                    style: TextStyle(
-                      color: Colors.grey[500],
-                      fontSize: 12,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ],
-          )
-              : Text(
-            'Subcommunity',
-            style: TextStyle(
-              color: Colors.grey[500],
-              fontSize: 11,
-            ),
-          ),
-          trailing: hasSubCommunities
-              ? InkWell(
-            onTap: () {
-              setState(() {
-                if (isExpanded) {
-                  expandedCommunities.remove(communityId);
-                } else {
-                  expandedCommunities.add(communityId);
-                }
-              });
-            },
-            borderRadius: BorderRadius.circular(20),
-            child: Container(
-              padding: EdgeInsets.all(8),
+          subtitle: _buildSubtitle(community, level, hasSubCommunities, subCommunities),
+          // Large 48×48 tap target for expand/collapse and forward arrow
+          trailing: SizedBox(
+            width: 48,
+            height: 48,
+            child: hasSubCommunities
+                ? InkWell(
+              onTap: () {
+                setState(() {
+                  if (isExpanded) {
+                    _expandedCommunities.remove(communityId);
+                  } else {
+                    _expandedCommunities.add(communityId);
+                  }
+                });
+              },
+              borderRadius: BorderRadius.circular(24),
               child: Icon(
-                isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                isExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
                 color: Colors.white70,
-                size: 20,
+                size: 24,
               ),
+            )
+                : const Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white70,
+              size: 16,
             ),
-          )
-              : Icon(
-            Icons.arrow_forward_ios,
-            color: Colors.white70,
-            size: 12,
           ),
           onTap: () {
             widget.onCommunityTapped();
-
             if (communityId.isNotEmpty) {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => CommunityInfoScreen(
-                    communityId: communityId,
-                  ),
+                  builder: (_) => CommunityInfoScreen(communityId: communityId),
                 ),
               );
             } else {
@@ -251,64 +173,100 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
 
         if (hasSubCommunities && isExpanded)
           ...subCommunities.asMap().entries.map((entry) {
-            final subCommunity = entry.value as Map<String, dynamic>;
             return _buildCommunityTile(
-              community: subCommunity,
+              community: entry.value as Map<String, dynamic>,
               level: level + 1,
               isLastInGroup: entry.key == subCommunities.length - 1,
             );
-          }).toList(),
+          }),
 
         if (level == 0 && !isLastInGroup)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(
-              color: Colors.grey[800],
-              height: 1,
-            ),
+            child: Divider(color: Colors.grey[800], height: 1),
           ),
       ],
     );
   }
 
-  List<Widget> _buildCommunityList(List<dynamic> communities) {
-    final searchQuery = widget.searchController.text.toLowerCase();
-
-    List<dynamic> filteredCommunities = [];
-    if (searchQuery.isEmpty) {
-      filteredCommunities = communities;
-    } else {
-      for (var community in communities) {
-        if (_communityMatchesSearch(community, searchQuery)) {
-          filteredCommunities.add(community);
-        }
-      }
+  Widget _buildSubtitle(
+      Map<String, dynamic> community,
+      int level,
+      bool hasSubCommunities,
+      List subCommunities,
+      ) {
+    if (level != 0) {
+      return Text(
+        'Subcommunity',
+        style: TextStyle(color: Colors.grey[500], fontSize: 11),
+      );
     }
 
-    return filteredCommunities.asMap().entries.map((entry) {
-      final index = entry.key;
-      final community = entry.value as Map<String, dynamic>;
-      final isLast = index == filteredCommunities.length - 1;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          community['isPrivate'] == true ? Icons.lock : Icons.public,
+          color: Colors.grey[500],
+          size: 13,
+        ),
+        const SizedBox(width: 3),
+        Flexible(
+          child: Text(
+            community['isPrivate'] == true ? 'Private' : 'Public',
+            style: TextStyle(color: Colors.grey[500], fontSize: 12),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (hasSubCommunities) ...[
+          const SizedBox(width: 6),
+          Icon(Icons.folder_outlined, color: Colors.grey[500], size: 13),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              '${subCommunities.length} sub${subCommunities.length == 1 ? '' : 's'}',
+              style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 
+  bool _communityMatchesSearch(Map<String, dynamic> community, String query) {
+    if ((community['name']?.toString().toLowerCase() ?? '').contains(query)) return true;
+    final subs = community['subCommunities'] as List? ?? [];
+    return subs.any((s) => _communityMatchesSearch(s as Map<String, dynamic>, query));
+  }
+
+  List<Widget> _buildCommunityList(List<dynamic> communities) {
+    final query = widget.searchController.text.toLowerCase();
+    final filtered = query.isEmpty
+        ? communities
+        : communities
+        .where((c) => _communityMatchesSearch(c as Map<String, dynamic>, query))
+        .toList();
+
+    return filtered.asMap().entries.map((entry) {
       return _buildCommunityTile(
-        community: community,
+        community: entry.value as Map<String, dynamic>,
         level: 0,
-        isLastInGroup: isLast,
+        isLastInGroup: entry.key == filtered.length - 1,
       );
     }).toList();
   }
 
-  bool _communityMatchesSearch(Map<String, dynamic> community, String query) {
-    final name = community['name']?.toString().toLowerCase() ?? '';
-    if (name.contains(query)) return true;
-
-    final subCommunities = community['subCommunities'] as List? ?? [];
-    for (var subCommunity in subCommunities) {
-      if (_communityMatchesSearch(subCommunity as Map<String, dynamic>, query)) {
-        return true;
+  void _expandAllWithSubs(List<dynamic> communities) {
+    for (final c in communities) {
+      final community = c as Map<String, dynamic>;
+      final id = (community['_id'] ?? community['id'])?.toString() ?? '';
+      final subs = community['subCommunities'] as List? ?? [];
+      if (subs.isNotEmpty && id.isNotEmpty) {
+        _expandedCommunities.add(id);
+        _expandAllWithSubs(subs);
       }
     }
-    return false;
   }
 
   @override
@@ -316,18 +274,13 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section Header
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           child: Row(
             children: [
-              Icon(
-                Icons.group_outlined,
-                color: Colors.white70,
-                size: 20,
-              ),
-              SizedBox(width: 10),
-              Expanded(
+              const Icon(Icons.group_outlined, color: Colors.white70, size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
                 child: Text(
                   'My Communities',
                   style: TextStyle(
@@ -339,16 +292,18 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               InkWell(
                 onTap: () {
                   setState(() {
-                    if (expandedCommunities.isEmpty) {
-                      final provider = Provider.of<CommunityProvider>(context, listen: false);
-                      final communityList = provider.myCommunities['data'] as List? ?? [];
-                      _expandAllCommunitiesWithSubs(communityList);
+                    if (_expandedCommunities.isEmpty) {
+                      final provider =
+                      Provider.of<CommunityProvider>(context, listen: false);
+                      final list =
+                          provider.myCommunities['data'] as List? ?? [];
+                      _expandAllWithSubs(list);
                     } else {
-                      expandedCommunities.clear();
+                      _expandedCommunities.clear();
                     }
                   });
                 },
@@ -356,8 +311,8 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: Text(
-                    expandedCommunities.isEmpty ? 'Expand All' : 'Collapse All',
-                    style: TextStyle(
+                    _expandedCommunities.isEmpty ? 'Expand all' : 'Collapse all',
+                    style: const TextStyle(
                       color: Colors.white70,
                       fontSize: 11,
                       decoration: TextDecoration.underline,
@@ -369,13 +324,12 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
           ),
         ),
 
-        // Search Field
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
           child: TextField(
             controller: widget.searchController,
             focusNode: widget.searchFocusNode,
-            style: TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: 'Search communities...',
               hintStyle: TextStyle(color: Colors.grey[500]),
@@ -394,23 +348,18 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
               ),
               filled: true,
               fillColor: Colors.grey[900],
-              contentPadding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
+              contentPadding:
+              const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
             ),
-            onTap: () {
-              widget.searchFocusNode.requestFocus();
-            },
-            onChanged: (value) {
-              setState(() {});
-            },
+            onChanged: (_) => setState(() {}),
           ),
         ),
 
-        // Communities List
         Expanded(
           child: Consumer<CommunityProvider>(
-            builder: (context, provider, child) {
+            builder: (context, provider, _) {
               if (provider.isLoadingMy) {
-                return Center(
+                return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(15),
                     child: CircularProgressIndicator(
@@ -427,35 +376,25 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.error_outline,
-                          color: Colors.red[300],
-                          size: 48,
-                        ),
+                        Icon(Icons.error_outline, color: Colors.red[300], size: 48),
                         const SizedBox(height: 16),
-                        Text(
+                        const Text(
                           'Error loading communities',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                          ),
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '${provider.myCommunitiesError}',
+                          provider.myCommunitiesError!,
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.red[300],
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(color: Colors.red[300], fontSize: 12),
                         ),
                         const SizedBox(height: 16),
                         ElevatedButton(
-                          onPressed: () {
-                            provider.fetchMyCommunities();
-                          },
+                          onPressed: provider.fetchMyCommunities,
                           child: const Text('Retry'),
                         ),
                       ],
@@ -464,28 +403,22 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
                 );
               }
 
-              final communityList = provider.myCommunities['data'] as List? ?? [];
+              final communityList =
+                  provider.myCommunities['data'] as List? ?? [];
 
               if (communityList.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Center(
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.group_off,
-                          color: Colors.grey[600],
-                          size: 48,
-                        ),
+                        Icon(Icons.group_off, color: Colors.grey[600], size: 48),
                         const SizedBox(height: 16),
                         Text(
                           'No communities found',
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 16,
-                          ),
+                          style: TextStyle(color: Colors.grey[400], fontSize: 16),
                         ),
                       ],
                     ),
@@ -496,25 +429,20 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
               final communityWidgets = _buildCommunityList(communityList);
 
               if (communityWidgets.isEmpty) {
-                return Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Center(
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.search_off,
-                          color: Colors.grey[600],
-                          size: 48,
-                        ),
+                        Icon(Icons.search_off, color: Colors.grey[600], size: 48),
                         const SizedBox(height: 16),
                         Text(
-                          'No matching communities for "${widget.searchController.text}"',
+                          'No results for "${widget.searchController.text}"',
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 16,
-                          ),
+                          style: TextStyle(color: Colors.grey[400], fontSize: 16),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
                         ),
                       ],
                     ),
@@ -523,7 +451,8 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
               }
 
               return ListView(
-                padding: EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
                 children: communityWidgets,
               );
             },
@@ -531,17 +460,5 @@ class _CommunitiesListWidgetState extends State<CommunitiesListWidget> {
         ),
       ],
     );
-  }
-
-  void _expandAllCommunitiesWithSubs(List<dynamic> communities) {
-    for (var community in communities) {
-      final communityData = community as Map<String, dynamic>;
-      final communityId = (communityData['_id'] ?? communityData['id'])?.toString() ?? '';
-      final subCommunities = communityData['subCommunities'] as List? ?? [];
-      if (subCommunities.isNotEmpty && communityId.isNotEmpty) {
-        expandedCommunities.add(communityId);
-        _expandAllCommunitiesWithSubs(subCommunities);
-      }
-    }
   }
 }

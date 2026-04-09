@@ -17,6 +17,7 @@ import '../../providers/comment_provider.dart';
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/google_auth_service.dart';
+import 'launguage_selection_page.dart';
 import 'signup_screen.dart';
 import 'otp_screen.dart';
 
@@ -508,6 +509,45 @@ class _LoginScreenState extends State<LoginScreen>
                               )),
                         ),
                       ],
+                    ),SizedBox(height:15,),
+
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const LanguageSelectionScreen(
+
+                              isFromSettings: true,
+                            ),
+                          ),
+
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 10, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color:        _C.surfaceHi,
+                          borderRadius: BorderRadius.circular(10),
+                          border:       Border.all(color: _C.border),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: const [
+                            Icon(Icons.language_rounded,
+                                color: _C.accent, size: 16),
+                            SizedBox(width: 8),
+                            Text(
+                              'Change Language',
+                              style: TextStyle(
+                                color:      _C.accent,
+                                fontSize:   13,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                     SizedBox(height: 2.h),
                   ],
@@ -519,7 +559,6 @@ class _LoginScreenState extends State<LoginScreen>
       ),
     );
   }
-
   // ── Small Helpers ─────────────────────────────────────────────────────────
 
   Widget _buildLabel(String text) => Text(

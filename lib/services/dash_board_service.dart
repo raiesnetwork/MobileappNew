@@ -1,36 +1,19 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:ixes.app/services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class DashboardService {
 
   Future<Map<String, dynamic>> getStudentDashboard({String? communityId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final query = (communityId != null && communityId.isNotEmpty)
+          ? '?communityId=$communityId'
+          : '';
 
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-
-      String url = '${apiBaseUrl}api/cms-dashboard/student';
-      if (communityId != null && communityId.isNotEmpty) {
-        url += '?communityId=$communityId';
-      }
-
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/cms-dashboard/student$query');
+      ApiService.checkResponse(response);
 
       print('getStudentDashboard - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -60,29 +43,11 @@ class DashboardService {
     }
   }
 
-  /// 5.1 Get Student Journey
-  /// GET /api/communities/student/journey/:communityId
-  /// Retrieves student profile and journey information for the authenticated user.
   Future<Map<String, dynamic>> getStudentJourney(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/student/journey/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/student/journey/$communityId');
+      ApiService.checkResponse(response);
 
       print('getStudentJourney - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -112,29 +77,11 @@ class DashboardService {
     }
   }
 
-  /// 5.1.1 Update Welcome Note Status
-  /// PUT /api/communities/student/journey-welcomenote/:communityId
-  /// Marks the welcome screen as viewed (sets welcomeScreenShow to false).
   Future<Map<String, dynamic>> updateWelcomeNoteStatus(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'success': false
-        };
-      }
-
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/communities/student/journey-welcomenote/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.put(
+          '/api/communities/student/journey-welcomenote/$communityId', {});
+      ApiService.checkResponse(response);
 
       print('updateWelcomeNoteStatus - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -164,33 +111,14 @@ class DashboardService {
     }
   }
 
-  /// 5.6.1 Get Student Profile
-  /// GET /api/communities/student-profile/:communityId/:userId
-  /// Retrieves comprehensive student profile including personal info,
-  /// academic details, projects, internships, and certifications.
   Future<Map<String, dynamic>> getStudentProfile({
     required String communityId,
     required String userId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/student-profile/$communityId/$userId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/student-profile/$communityId/$userId');
+      ApiService.checkResponse(response);
 
       print('getStudentProfile - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -226,26 +154,12 @@ class DashboardService {
     }
   }
 
-  /// 5.6.2 Update Student Profile
-  /// PUT /api/communities/student-profile/:communityId/:userId
-  /// Updates student profile information. Only specified fields will be updated.
   Future<Map<String, dynamic>> updateStudentProfile({
     required String communityId,
     required String userId,
     Map<String, dynamic>? profileData,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
       if (profileData == null || profileData.isEmpty) {
         return {
           'error': true,
@@ -254,14 +168,9 @@ class DashboardService {
         };
       }
 
-      final response = await http.put(
-        Uri.parse('${apiBaseUrl}api/communities/student-profile/$communityId/$userId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(profileData),
-      );
+      final response = await ApiService.put(
+          '/api/communities/student-profile/$communityId/$userId', profileData);
+      ApiService.checkResponse(response);
 
       print('updateStudentProfile - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -303,38 +212,14 @@ class DashboardService {
     }
   }
 
-  // ==================== HOD DASHBOARD APIS ====================
-
-  /// 4.2 HOD Dashboard
-  /// GET /api/cms-dashboard/hod
-  /// Retrieves dashboard data for Heads of Department including mentor assignments,
-  /// total student count, and mandatory actions.
   Future<Map<String, dynamic>> getHODDashboard({String? communityId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final query = (communityId != null && communityId.isNotEmpty)
+          ? '?communityId=$communityId'
+          : '';
 
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      // Build URL with optional communityId query parameter
-      String url = '${apiBaseUrl}api/cms-dashboard/hod';
-      if (communityId != null && communityId.isNotEmpty) {
-        url += '?communityId=$communityId';
-      }
-
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/cms-dashboard/hod$query');
+      ApiService.checkResponse(response);
 
       print('getHODDashboard - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -364,32 +249,11 @@ class DashboardService {
     }
   }
 
-  // ==================== ADMIN DASHBOARD APIS ====================
-
-  /// 4.3 Admin Dashboard
-  /// GET /api/cms-dashboard/admin
-  /// Comprehensive dashboard for administrators showing revenue metrics,
-  /// member statistics, campaign performance, and growth trends.
   Future<Map<String, dynamic>> getAdminDashboard({required String communityId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/cms-dashboard/admin?communityId=$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/cms-dashboard/admin?communityId=$communityId');
+      ApiService.checkResponse(response);
 
       print('getAdminDashboard - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -425,30 +289,11 @@ class DashboardService {
     }
   }
 
-  /// 4.4 Activation, Leakage & Quadrant Analysis
-  /// GET /api/cms-dashboard/admin/leakage
-  /// Advanced analytics endpoint providing activation rate, revenue leakage analysis,
-  /// weekly trends, and revenue quadrant breakdown.
   Future<Map<String, dynamic>> getLeakageAnalysis({required String communityId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/cms-dashboard/admin/leakage?communityId=$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/cms-dashboard/admin/leakage?communityId=$communityId');
+      ApiService.checkResponse(response);
 
       print('getLeakageAnalysis - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -484,32 +329,11 @@ class DashboardService {
     }
   }
 
-  // ==================== PLACEMENT CELL DASHBOARD APIS ====================
-
-  /// 5.2 Placement Cell Dashboard
-  /// GET /api/communities/placementCell/:communityId
-  /// Comprehensive placement cell dashboard showing students, employers,
-  /// positions, and hiring funnel data.
   Future<Map<String, dynamic>> getPlacementCellDashboard(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/placementCell/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/placementCell/$communityId');
+      ApiService.checkResponse(response);
 
       print('getPlacementCellDashboard - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -539,30 +363,11 @@ class DashboardService {
     }
   }
 
-  /// 5.3 Get Career Roles
-  /// GET /api/communities/carrier-roles/:communityId
-  /// Fetches available career tracks from assessments.
-  /// Used while creating a service under Educational Service category.
   Future<Map<String, dynamic>> getCareerRoles(String communityId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'carrierRole': []
-        };
-      }
-
-      final response = await http.get(
-        Uri.parse('${apiBaseUrl}api/communities/carrier-roles/$communityId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/communities/carrier-roles/$communityId');
+      ApiService.checkResponse(response);
 
       print('getCareerRoles - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -592,10 +397,6 @@ class DashboardService {
     }
   }
 
-  /// 5.4 Apply for Job
-  /// POST /api/communities/student/job-apply
-  /// Submit job application with resume upload. Sends confirmation email to applicant.
-  /// Used in the Announcement section when a job poster is available.
   Future<Map<String, dynamic>> applyForJob({
     required String jobId,
     required String fullName,
@@ -623,10 +424,7 @@ class DashboardService {
         Uri.parse('${apiBaseUrl}api/communities/student/job-apply'),
       );
 
-      // Add headers
       request.headers['Authorization'] = 'Bearer $token';
-
-      // Add fields
       request.fields['jobId'] = jobId;
       request.fields['fullName'] = fullName;
       request.fields['email'] = email;
@@ -642,17 +440,14 @@ class DashboardService {
         request.fields['linkedinUrl'] = linkedinUrl;
       }
 
-      // Add resume file
-      var resumeFile = await http.MultipartFile.fromPath(
-        'resumeFile',
-        resumeFilePath,
-      );
-      request.files.add(resumeFile);
+      request.files.add(await http.MultipartFile.fromPath(
+          'resumeFile', resumeFilePath));
 
       print('Applying for job - JobId: $jobId');
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print('applyForJob - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -665,17 +460,9 @@ class DashboardService {
           'data': decoded['data']
         };
       } else if (response.statusCode == 400) {
-        return {
-          'error': true,
-          'message': 'Resume file is required',
-          'data': null
-        };
+        return {'error': true, 'message': 'Resume file is required', 'data': null};
       } else if (response.statusCode == 404) {
-        return {
-          'error': true,
-          'message': 'Job not found',
-          'data': null
-        };
+        return {'error': true, 'message': 'Job not found', 'data': null};
       } else if (response.statusCode == 409) {
         return {
           'error': true,
@@ -700,9 +487,6 @@ class DashboardService {
     }
   }
 
-  /// 5.5 Send Interview Invitation
-  /// POST /api/communities/send-interview-invitation-mail
-  /// Send interview invitation email and update student profile with interview details.
   Future<Map<String, dynamic>> sendInterviewInvitation({
     required String userId,
     required String communityId,
@@ -712,17 +496,6 @@ class DashboardService {
     required String emailMessageHtml,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'success': false
-        };
-      }
-
       final body = {
         'userId': userId,
         'communityId': communityId,
@@ -734,14 +507,9 @@ class DashboardService {
         }
       };
 
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/communities/send-interview-invitation-mail'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post(
+          '/api/communities/send-interview-invitation-mail', body);
+      ApiService.checkResponse(response);
 
       print('sendInterviewInvitation - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -771,10 +539,6 @@ class DashboardService {
     }
   }
 
-  /// 5.7 Send Service Inquiry Email
-  /// POST /api/communities/send-service-inquiry
-  /// Send service inquiry emails to multiple recipients.
-  /// Used in Community Member section to send inquiry about services.
   Future<Map<String, dynamic>> sendServiceInquiry({
     required String communityId,
     required String subject,
@@ -783,17 +547,6 @@ class DashboardService {
     required List<String> recipients,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': false
-        };
-      }
-
       final body = {
         'communityId': communityId,
         'emailData': {
@@ -804,14 +557,9 @@ class DashboardService {
         }
       };
 
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/communities/send-service-inquiry'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post(
+          '/api/communities/send-service-inquiry', body);
+      ApiService.checkResponse(response);
 
       print('sendServiceInquiry - Status Code: ${response.statusCode}');
       print('Response body: ${response.body}');
@@ -825,7 +573,6 @@ class DashboardService {
           'details': decoded['details']
         };
       } else if (response.statusCode == 207) {
-        // Partial success
         final decoded = jsonDecode(response.body);
         return {
           'error': false,

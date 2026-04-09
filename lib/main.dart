@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_background/flutter_background.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
@@ -26,11 +27,13 @@ import 'package:ixes.app/providers/service_provider.dart';
 import 'package:ixes.app/providers/service_request_provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
+import 'package:ixes.app/screens/auth/launguage_selection_page.dart';
 import 'package:ixes.app/screens/video_call/video_call.dart';
 import 'package:ixes.app/screens/voice_call/voice_call_room_screen.dart';
 import 'package:ixes.app/screens/widgets/video_call.dart';
 import 'package:ixes.app/screens/widgets/voice_call.dart';
 import 'package:ixes.app/services/api_service.dart';
+import 'package:ixes.app/services/deep_linking_service.dart';
 import 'package:ixes.app/services/meeting_overlay_service.dart';
 import 'package:ixes.app/services/socket_service.dart';
 import 'package:provider/provider.dart';
@@ -300,32 +303,54 @@ Future<void> _checkActiveCallsOnStartup() async {
 // ════════════════════════════════════════════════════════════════════════
 // MAIN
 // ════════════════════════════════════════════════════════════════════════
+// In main() — add language check:
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  debugPrint('🚀 [MAIN] Starting...');
 
   await Firebase.initializeApp();
+  DeepLinkService.init();
   FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
   await _initFCM();
-
-  // ✅ Check for missed CallKit accept event BEFORE runApp
   await _checkActiveCallsOnStartup();
+  const androidConfig = FlutterBackgroundAndroidConfig(
+    notificationTitle: 'Screen Sharing',
+    notificationText: 'Ixes meeting is running in background',
+    notificationImportance: AndroidNotificationImportance.normal,
+    notificationIcon: AndroidResource(
+      name: 'ic_launcher',
+      defType: 'mipmap',
+    ),
+  );
 
-  final prefs  = await SharedPreferences.getInstance();
-  final token  = prefs.getString('auth_token');
-  final userId = prefs.getString('user_id');
-  debugPrint('🔑 [MAIN] token=${token != null} | pending=${_pendingCallData != null}');
+  await FlutterBackground.initialize(androidConfig: androidConfig);
 
-  runApp(IxesApp(initialToken: token, initialUserId: userId));
+  final prefs    = await SharedPreferences.getInstance();
+  final token    = prefs.getString('auth_token');
+  final userId   = prefs.getString('user_id');
+  final language = prefs.getString('app_language'); // ✅ ADD THIS
+
+  runApp(IxesApp(
+    initialToken:  token,
+    initialUserId: userId,
+    showLanguage:  language == null, // ✅ ADD THIS — true only on first launch
+  ));
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // ROOT APP
 // ════════════════════════════════════════════════════════════════════════
+// Update IxesApp to accept showLanguage:
 class IxesApp extends StatelessWidget {
   final String? initialToken;
   final String? initialUserId;
-  const IxesApp({super.key, this.initialToken, this.initialUserId});
+  final bool showLanguage;
+
+  const IxesApp({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+    this.showLanguage = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -354,8 +379,9 @@ class IxesApp extends StatelessWidget {
           ChangeNotifierProvider(create: (_) => MeetingOverlayService()),
         ],
         child: AppWithLifecycleObserver(
-          initialToken: initialToken,
+          initialToken:  initialToken,
           initialUserId: initialUserId,
+          showLanguage:  showLanguage,
         ),
       ),
     );
@@ -365,13 +391,22 @@ class IxesApp extends StatelessWidget {
 // ════════════════════════════════════════════════════════════════════════
 // APP WITH LIFECYCLE OBSERVER
 // ════════════════════════════════════════════════════════════════════════
+// Update AppWithLifecycleObserver to accept showLanguage:
 class AppWithLifecycleObserver extends StatefulWidget {
   final String? initialToken;
   final String? initialUserId;
-  const AppWithLifecycleObserver({super.key, this.initialToken, this.initialUserId});
+  final bool showLanguage; // ✅ ADD THIS
+
+  const AppWithLifecycleObserver({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+    this.showLanguage = false, // ✅ ADD THIS
+  });
 
   @override
-  State<AppWithLifecycleObserver> createState() => _AppWithLifecycleObserverState();
+  State<AppWithLifecycleObserver> createState() =>
+      _AppWithLifecycleObserverState();
 }
 
 class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
@@ -727,6 +762,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         });
       }
 
+// In build() — update the home decision:
       return _buildApp(
         home: auth.isAuthenticated
             ? VoiceCallListener(
@@ -734,6 +770,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
             child: const MainScreen(initialIndex: 0),
           ),
         )
+            : widget.showLanguage          // ✅ ADD THIS CHECK
+            ? const LanguageSelectionScreen()
             : const SplashScreen(),
       );
     });
@@ -756,6 +794,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     }
   }
 
+  // In _buildApp — update home logic:
   Widget _buildApp({required Widget home}) {
     return MaterialApp(
       title: 'Ixes',
@@ -765,7 +804,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       home: home,
       routes: {
         '/login': (_) => const LoginScreen(),
-        '/main': (_) => VoiceCallListener(
+        '/main':  (_) => VoiceCallListener(
           child: IncomingCallListener(
             child: const MainScreen(initialIndex: 0),
           ),

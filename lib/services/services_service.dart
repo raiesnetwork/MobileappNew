@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
 import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:ixes.app/services/api_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http_parser/http_parser.dart' as http_parser;
@@ -10,29 +11,11 @@ import 'package:http_parser/http_parser.dart' as http_parser;
 class ServicesService {
   Future<Map<String, dynamic>> getAllServices({int page = 1, int limit = 10}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': [],
-          'totalPages': 0,
-          'currentPage': 1,
-          'totalServices': 0
-        };
-      }
-
       print('🔍 Fetching ALL services - Page: $page, Limit: $limit');
-      print('🔑 Using token: ${token.substring(0, 20)}...');
 
-      final response = await http.get(
-        Uri.parse('https://api.ixes.ai/api/service/fetchallservices?page=$page&limit=$limit'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/service/fetchallservices?page=$page&limit=$limit');
+      ApiService.checkResponse(response);
 
       print('📡 Status: ${response.statusCode}');
       print('📦 FULL Response Body: ${response.body}');
@@ -42,31 +25,16 @@ class ServicesService {
         final pagination = decoded['pagination'] ?? {};
         final services = decoded['data'] ?? [];
 
-        // ✅ DETAILED LOGGING
         print('📊 Services returned: ${services.length}');
         print('📊 Total from pagination: ${pagination['total']}');
         print('📊 Total pages: ${pagination['totalPages']}');
         print('📊 Current page: ${pagination['page']}');
 
-        // Print each service ID and details
         if (services.isNotEmpty) {
           print('📋 Service IDs in response:');
           for (var i = 0; i < services.length; i++) {
             print('   ${i + 1}. ID: ${services[i]['_id']} | Name: ${services[i]['name']} | Provider: ${services[i]['serviceProvider']} | Status: ${services[i]['status']}');
           }
-        }
-
-        // Check if the newly created service should be here
-        print('🔍 Looking for service ID: 69784a8aade75ffe80fd5a35');
-        final foundService = services.firstWhere(
-              (s) => s['_id'] == '69784a8aade75ffe80fd5a35',
-          orElse: () => null,
-        );
-        if (foundService != null) {
-          print('✅ NEW SERVICE FOUND in all services!');
-        } else {
-          print('❌ NEW SERVICE NOT FOUND in all services');
-          print('⚠️ This means the backend is filtering it out');
         }
 
         return {
@@ -105,32 +73,14 @@ class ServicesService {
 
   Future<Map<String, dynamic>> getAllCommunityServices({String? communityId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': []
-        };
-      }
-
-      final uri = communityId != null && communityId.isNotEmpty
-          ? Uri.parse('${apiBaseUrl}api/service/allservices?communityId=$communityId')
-          : Uri.parse('${apiBaseUrl}api/service/allservices');
+      final endpoint = (communityId != null && communityId.isNotEmpty)
+          ? '/api/service/allservices?communityId=$communityId'
+          : '/api/service/allservices';
 
       print('🔍 Community ID: $communityId');
-      print('🌐 Request URI: $uri');
 
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(endpoint);
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -138,14 +88,10 @@ class ServicesService {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
 
-        // FIXED: Handle different response structures
         List<dynamic> allServices = [];
-
-        // Check if response has services directly
         if (decoded['services'] != null) {
           allServices = decoded['services'];
         } else {
-          // Otherwise combine different service types
           final communityServices = decoded['communityServices'] ?? [];
           final userServices = decoded['userServices'] ?? [];
           final memberServices = decoded['memberServices'] ?? [];
@@ -153,24 +99,21 @@ class ServicesService {
         }
 
         print('✅ Combined Services Length: ${allServices.length}');
-        print('📋 First service (if any): ${allServices.isNotEmpty ? allServices[0] : 'None'}');
 
         return {
-          'error': false, // FIXED: Ensure error is false on success
+          'error': false,
           'message': decoded['message'] ?? 'Services fetched successfully',
           'data': allServices
         };
       } else {
         try {
           final decoded = jsonDecode(response.body);
-          print('⚠️ Error from API: ${decoded['message']}');
           return {
             'error': true,
             'message': decoded['message'] ?? 'Failed to fetch services',
             'data': []
           };
         } catch (e) {
-          print('⚠️ Failed to decode error response: $e');
           return {
             'error': true,
             'message': 'Server error: ${response.statusCode}',
@@ -187,8 +130,6 @@ class ServicesService {
       };
     }
   }
-
-
 
   Future<Map<String, dynamic>> createService({
     required String name,
@@ -208,28 +149,18 @@ class ServicesService {
     File? image,
   }) async {
     try {
-      // 1. Get authentication token
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       print('🔑 Token: $token');
 
       if (token == null || token.isEmpty) {
-        print('❌ Token missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-        };
+        return {'error': true, 'message': 'Authentication token is missing'};
       }
 
-      // 2. Setup API endpoint
       final uri = Uri.parse('${apiBaseUrl}api/service/create-service');
-      print('📤 API URL: $uri');
-
-      // 3. Create multipart request
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $token';
 
-      // 4. Add text fields
       request.fields['name'] = name;
       request.fields['description'] = description;
       request.fields['location'] = location;
@@ -243,36 +174,22 @@ class ServicesService {
       request.fields['serviceProvider'] = serviceProvider;
       request.fields['slots'] = slots;
 
-      // 5. Add available days
       for (var day in availableDays) {
         request.fields['availableDays'] = day;
       }
-      print('📤 Available days: $availableDays');
 
-      // 6. Process and add image
       if (image != null) {
         try {
-          print('📸 Processing image: ${image.path}');
-
-          // Check if file exists
           if (!await image.exists()) {
-            print('❌ Image file does not exist');
-            return {
-              'error': true,
-              'message': 'Selected image file does not exist',
-            };
+            return {'error': true, 'message': 'Selected image file does not exist'};
           }
 
-          // Get original file size
           final fileSize = await image.length();
-          print('📏 Original size: ${fileSize} bytes (${(fileSize / 1024).toStringAsFixed(2)} KB)');
+          print('📏 Original size: $fileSize bytes');
 
           File imageToUpload = image;
 
-          // Compress if larger than 500KB
           if (fileSize > 500 * 1024) {
-            print('⚠️ Image too large, compressing...');
-
             final compressedBytes = await FlutterImageCompress.compressWithFile(
               image.path,
               quality: 70,
@@ -285,104 +202,61 @@ class ServicesService {
               final tempPath = '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg';
               final compressedFile = File(tempPath);
               await compressedFile.writeAsBytes(compressedBytes);
-
               imageToUpload = compressedFile;
-              final compressedSize = await compressedFile.length();
-              print('✅ Compressed size: ${compressedSize} bytes (${(compressedSize / 1024).toStringAsFixed(2)} KB)');
             }
           }
 
-          // Final size validation
           final finalSize = await imageToUpload.length();
           if (finalSize > 5 * 1024 * 1024) {
-            print('❌ Image still too large after compression');
-            return {
-              'error': true,
-              'message': 'Image is too large. Please select a smaller image.',
-            };
+            return {'error': true, 'message': 'Image is too large. Please select a smaller image.'};
           }
 
-          // Determine MIME type
           final extension = imageToUpload.path.split('.').last.toLowerCase();
           String mimeType = 'image/jpeg';
-          if (extension == 'png') {
-            mimeType = 'image/png';
-          } else if (extension == 'webp') {
-            mimeType = 'image/webp';
-          }
+          if (extension == 'png') mimeType = 'image/png';
+          else if (extension == 'webp') mimeType = 'image/webp';
 
-          // Add file to request
-          final multipartFile = await http.MultipartFile.fromPath(
+          request.files.add(await http.MultipartFile.fromPath(
             'image',
             imageToUpload.path,
             contentType: http_parser.MediaType.parse(mimeType),
-          );
-
-          request.files.add(multipartFile);
-          print('✅ Image added (${mimeType})');
+          ));
         } catch (e) {
-          print('💥 Image processing error: $e');
-          return {
-            'error': true,
-            'message': 'Failed to process image: ${e.toString()}',
-          };
+          return {'error': true, 'message': 'Failed to process image: ${e.toString()}'};
         }
       }
 
-      // 7. Send request
-      print('📤 Sending request...');
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print('📥 Status Code: ${response.statusCode}');
       print('📥 Response Body: ${response.body}');
 
-      // 8. Handle HTTP 413 error specifically
       if (response.statusCode == 413) {
-        print('❌ 413 Request Entity Too Large');
-        return {
-          'error': true,
-          'message': 'Image is too large for the server. Please select a smaller image.',
-        };
+        return {'error': true, 'message': 'Image is too large for the server. Please select a smaller image.'};
       }
 
-      // 9. Parse JSON response
       dynamic decoded;
       try {
         decoded = jsonDecode(response.body);
       } catch (e) {
-        print('❌ Failed to parse JSON: $e');
-        return {
-          'error': true,
-          'message': 'Server returned invalid response. Status: ${response.statusCode}',
-        };
+        return {'error': true, 'message': 'Server returned invalid response. Status: ${response.statusCode}'};
       }
 
-      // 10. Handle success
       if (response.statusCode == 201 || response.statusCode == 200) {
-        print('✅ Service created successfully');
-        final hasError = decoded['err'] ?? decoded['error'] ?? false;
-
         return {
-          'error': hasError,
+          'error': decoded['err'] ?? decoded['error'] ?? false,
           'message': decoded['message'] ?? 'Service created successfully',
           'data': decoded['service'] ?? {},
         };
       }
 
-      // 11. Handle failure
-      print('⚠️ Service creation failed');
-      return {
-        'error': true,
-        'message': decoded['message'] ?? 'Failed to create service',
-      };
+      return {'error': true, 'message': decoded['message'] ?? 'Failed to create service'};
     } catch (e, stackTrace) {
       print('💥 Exception: $e');
       print('Stack trace: $stackTrace');
-      return {
-        'error': true,
-        'message': 'Error creating service: ${e.toString()}',
-      };
+      return {'error': true, 'message': 'Error creating service: ${e.toString()}'};
     }
   }
 
@@ -405,15 +279,6 @@ class ServicesService {
     String? serviceProvider,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-        };
-      }
-
       final body = {
         '_id': id,
         if (name != null) 'name': name,
@@ -433,14 +298,8 @@ class ServicesService {
         if (serviceProvider != null) 'serviceProvider': serviceProvider,
       };
 
-      final response = await http.post(
-        Uri.parse('${apiBaseUrl}api/service/edit-service'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/service/edit-service', body);
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -451,37 +310,18 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to update service',
-        };
+        return {'error': true, 'message': decoded['message'] ?? 'Failed to update service'};
       }
     } catch (e) {
-      return {
-        'error': true,
-        'message': 'Error updating service: ${e.toString()}',
-      };
+      return {'error': true, 'message': 'Error updating service: ${e.toString()}'};
     }
   }
 
-  Future<Map<String, dynamic>> deleteService({
-    required String serviceId,
-  }) async {
+  Future<Map<String, dynamic>> deleteService({required String serviceId}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      if (token == null || token.isEmpty) {
-        return {'err': true, 'message': 'Authentication token is missing'};
-      }
-
-      final response = await http.get(
-        Uri.parse(
-            '${apiBaseUrl}api/service/deleteService?serviceId=$serviceId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/service/deleteService?serviceId=$serviceId');
+      ApiService.checkResponse(response);
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
@@ -491,43 +331,17 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        return {
-          'err': true,
-          'message': decoded['message'] ?? 'Failed to delete service',
-        };
+        return {'err': true, 'message': decoded['message'] ?? 'Failed to delete service'};
       }
     } catch (e) {
-      return {
-        'err': true,
-        'message': 'Error deleting service: ${e.toString()}',
-      };
+      return {'err': true, 'message': 'Error deleting service: ${e.toString()}'};
     }
   }
 
   Future<Map<String, dynamic>> getMyServices() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'myServices': []
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/myservices');
-      print('🔍 Fetching my services from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/service/myservices');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -541,46 +355,18 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch my services',
-          'myServices': []
-        };
+        return {'error': true, 'message': decoded['message'] ?? 'Failed to fetch my services', 'myServices': []};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching my services: ${e.toString()}',
-        'myServices': []
-      };
+      return {'error': true, 'message': 'Error fetching my services: ${e.toString()}', 'myServices': []};
     }
   }
+
   Future<Map<String, dynamic>> activateService(String serviceId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'service': {}
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/activateService?serviceId=$serviceId');
-      print('🔍 Activating service from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/service/activateService?serviceId=$serviceId');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -594,47 +380,18 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'err': true,
-          'message': decoded['message'] ?? 'Failed to activate service',
-          'service': {}
-        };
+        return {'err': true, 'message': decoded['message'] ?? 'Failed to activate service', 'service': {}};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'err': true,
-        'message': 'Error activating service: ${e.toString()}',
-        'service': {}
-      };
+      return {'err': true, 'message': 'Error activating service: ${e.toString()}', 'service': {}};
     }
   }
 
   Future<Map<String, dynamic>> deactivateService(String serviceId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'service': {}
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/deactivateService?serviceId=$serviceId');
-      print('🔍 Deactivating service from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/service/deactivateService?serviceId=$serviceId');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -648,46 +405,17 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'err': true,
-          'message': decoded['message'] ?? 'Failed to deactivate service',
-          'service': {}
-        };
+        return {'err': true, 'message': decoded['message'] ?? 'Failed to deactivate service', 'service': {}};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'err': true,
-        'message': 'Error deactivating service: ${e.toString()}',
-        'service': {}
-      };
+      return {'err': true, 'message': 'Error deactivating service: ${e.toString()}', 'service': {}};
     }
   }
+
   Future<Map<String, dynamic>> getServiceDetails(String id) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': {}
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/details/$id');
-      print('🔍 Fetching service details from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/service/details/$id');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -701,108 +429,55 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch service details',
-          'data': {}
-        };
+        return {'error': true, 'message': decoded['message'] ?? 'Failed to fetch service details', 'data': {}};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching service details: ${e.toString()}',
-        'data': {}
-      };
+      return {'error': true, 'message': 'Error fetching service details: ${e.toString()}', 'data': {}};
     }
   }
+
   Future<Map<String, dynamic>> getMyProducts() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': [],
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/myproducts');
-      print('🔍 Fetching my products from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/mobile/all-products');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
+      print('📦 Response Body: ${response.body}');   // Keep this for debugging
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
+
+        // Correct parsing for your actual API structure
+        final productsList = decoded['data']?['products'] ?? [];
+
         return {
           'error': decoded['error'] ?? false,
           'message': decoded['message'] ?? 'Products fetched successfully',
-          'data': decoded['myProducts'] ?? [],
+          'data': productsList,        // ← Now correctly passing the products list
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
         return {
           'error': true,
           'message': decoded['message'] ?? 'Failed to fetch products',
-          'data': [],
+          'data': []
         };
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
+      print('❌ Error in getMyProducts: $e');
       return {
         'error': true,
         'message': 'Error fetching products: ${e.toString()}',
-        'data': [],
+        'data': []
       };
     }
   }
 
-
-  /// Create Razorpay Payment Order
-  Future<Map<String, dynamic>> createPaymentOrder({
-    required num amount,
-  }) async {
+  Future<Map<String, dynamic>> createPaymentOrder({required num amount}) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'order': {}
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/create-order');
-      print('🔍 Creating payment order at: $uri');
-      print('💰 Amount: $amount');
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'amount': amount,
-        }),
-      );
+      final response = await ApiService.post(
+          '/api/service/create-order', {'amount': amount});
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -816,24 +491,13 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'err': true,
-          'message': decoded['message'] ?? 'Failed to create payment order',
-          'order': {}
-        };
+        return {'err': true, 'message': decoded['message'] ?? 'Failed to create payment order', 'order': {}};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'err': true,
-        'message': 'Error creating payment order: ${e.toString()}',
-        'order': {}
-      };
+      return {'err': true, 'message': 'Error creating payment order: ${e.toString()}', 'order': {}};
     }
   }
 
-  /// Verify Payment and Create Booking
   Future<Map<String, dynamic>> verifyPayment({
     required Map<String, dynamic> response,
     required String serviceId,
@@ -847,21 +511,8 @@ class ServicesService {
       final token = prefs.getString('auth_token');
 
       if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'booking': {}
-        };
+        return {'err': true, 'message': 'Authentication token is missing', 'booking': {}};
       }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/verify-payment');
-      print('🔍 Verifying payment at: $uri');
-      print('📦 Service ID: $serviceId');
-      print('💰 Amount: $amount');
-      print('📅 Date: $date');
-      print('🎫 Slots count: $slots');
-      print('🎫 Selected slots: $selectedSlots');
 
       final body = {
         'response': response,
@@ -874,24 +525,14 @@ class ServicesService {
 
       print('📤 Request Body: ${jsonEncode(body)}');
 
-      final httpResponse = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final httpResponse = await ApiService.post('/api/service/verify-payment', body);
+      ApiService.checkResponse(httpResponse);
 
       print('📡 Response Status: ${httpResponse.statusCode}');
       print('📦 Response Body: ${httpResponse.body}');
 
       if (httpResponse.statusCode == 200 || httpResponse.statusCode == 201) {
         final decoded = jsonDecode(httpResponse.body);
-        print('✅ Success Response - err: ${decoded['err']}');
-        print('✅ Success Response - message: ${decoded['message']}');
-        print('✅ Success Response - booking: ${decoded['booking']}');
-
         return {
           'err': decoded['err'] ?? false,
           'message': decoded['message'] ?? 'Payment verified successfully',
@@ -899,22 +540,9 @@ class ServicesService {
         };
       } else if (httpResponse.statusCode == 500) {
         print('⚠️ Server returned 500 - attempting fallback booking fetch...');
-
-        // ✅ Backend crashed after booking was created, fetch latest booking manually
         try {
-          final bookingUri = Uri.parse('${apiBaseUrl}api/service/my-bookings?limit=1');
-          print('🔍 Fetching latest booking from: $bookingUri');
-
-          final bookingResponse = await http.get(
-            bookingUri,
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-          );
-
-          print('📡 Fallback Booking Response Status: ${bookingResponse.statusCode}');
-          print('📦 Fallback Booking Response Body: ${bookingResponse.body}');
+          final bookingResponse = await ApiService.get('/api/service/my-bookings?limit=1');
+          ApiService.checkResponse(bookingResponse);
 
           if (bookingResponse.statusCode == 200) {
             final bookingDecoded = jsonDecode(bookingResponse.body);
@@ -925,29 +553,15 @@ class ServicesService {
               final bookingServiceId =
                   latestBooking['serviceId']?['_id'] ?? latestBooking['serviceId'];
 
-              print('🔍 Latest booking serviceId: $bookingServiceId');
-              print('🔍 Expected serviceId: $serviceId');
-
-              // ✅ Confirm it's for the same service
               if (bookingServiceId?.toString() == serviceId) {
-                print('✅ Fallback booking matched! Returning success.');
-                return {
-                  'err': false,
-                  'message': 'Payment verified successfully',
-                  'booking': latestBooking
-                };
-              } else {
-                print('❌ Fallback booking serviceId mismatch');
+                return {'err': false, 'message': 'Payment verified successfully', 'booking': latestBooking};
               }
-            } else {
-              print('❌ No bookings found in fallback response');
             }
           }
         } catch (fallbackError) {
           print('❌ Fallback booking fetch failed: $fallbackError');
         }
 
-        // If fallback also fails, return error
         final decoded = jsonDecode(httpResponse.body);
         return {
           'err': true,
@@ -957,23 +571,6 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(httpResponse.body);
-
-        print('❌ HTTP Error - Status Code: ${httpResponse.statusCode}');
-        print('❌ Error Response - Full Body: ${httpResponse.body}');
-        print('❌ Error Response - err: ${decoded['err']}');
-        print('❌ Error Response - message: ${decoded['message']}');
-        print('❌ Error Response - error object: ${decoded['error']}');
-
-        if (decoded['error'] != null && decoded['error'] is Map) {
-          final errorMap = decoded['error'] as Map;
-          print('❌ Error Details:');
-          errorMap.forEach((key, value) {
-            print('   - $key: $value');
-          });
-        }
-
-        print('❌ All response keys: ${decoded.keys.toList()}');
-
         return {
           'err': true,
           'message': decoded['message'] ?? 'Failed to verify payment',
@@ -983,16 +580,11 @@ class ServicesService {
       }
     } catch (e, stackTrace) {
       print('💥 Exception occurred: $e');
-      print('💥 Exception type: ${e.runtimeType}');
       print('💥 Stack trace: $stackTrace');
-
-      return {
-        'err': true,
-        'message': 'Error verifying payment: ${e.toString()}',
-        'booking': {}
-      };
+      return {'err': true, 'message': 'Error verifying payment: ${e.toString()}', 'booking': {}};
     }
   }
+
   Future<Map<String, dynamic>> getMyBookings({
     int page = 1,
     int limit = 10,
@@ -1001,47 +593,20 @@ class ServicesService {
     String? toDate,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': [],
-        };
-      }
-
-      // Build query parameters
-      final queryParams = {
+      final queryParams = <String, String>{
         'page': page.toString(),
         'limit': limit.toString(),
       };
+      if (paymentStatus != null && paymentStatus.isNotEmpty) queryParams['paymentStatus'] = paymentStatus;
+      if (fromDate != null && fromDate.isNotEmpty) queryParams['fromDate'] = fromDate;
+      if (toDate != null && toDate.isNotEmpty) queryParams['toDate'] = toDate;
 
-      if (paymentStatus != null && paymentStatus.isNotEmpty) {
-        queryParams['paymentStatus'] = paymentStatus;
-      }
+      final queryString = queryParams.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
 
-      if (fromDate != null && fromDate.isNotEmpty) {
-        queryParams['fromDate'] = fromDate;
-      }
-
-      if (toDate != null && toDate.isNotEmpty) {
-        queryParams['toDate'] = toDate;
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/service/my-bookings')
-          .replace(queryParameters: queryParams);
-      print('🔍 Fetching my bookings from: $uri');
-
-      final response = await http.get(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/service/my-bookings?$queryString');
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
@@ -1059,76 +624,37 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch bookings',
-          'data': [],
-        };
+        return {'error': true, 'message': decoded['message'] ?? 'Failed to fetch bookings', 'data': []};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching bookings: ${e.toString()}',
-        'data': [],
-      };
+      return {'error': true, 'message': 'Error fetching bookings: ${e.toString()}', 'data': []};
     }
   }
-  /// Create Partner Razorpay Order
+
   Future<Map<String, dynamic>> createPartnerOrder({
     required String dealerId,
     required num amount,
     required Map<String, dynamic> customerDetails,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final body = {
+        'dealerId': dealerId,
+        'amount': amount,
+        'customerDetails': customerDetails,
+      };
 
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'order': {},
-          'key_id': ''
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/onlinePayment/create-partner-order');
-      print('🔍 Creating partner order at: $uri');
-      print('💰 Amount: $amount');
-      print('👤 Customer: ${customerDetails['name']}');
-
-      final response = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'dealerId': dealerId,
-          'amount': amount,
-          'customerDetails': customerDetails,
-        }),
-      );
+      final response = await ApiService.post(
+          '/api/onlinePayment/create-partner-order', body);
+      ApiService.checkResponse(response);
 
       print('📡 Response Status: ${response.statusCode}');
       print('📦 Response Body: ${response.body}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
-
-        // Check for No_OAuth error
         if (decoded['order'] != null && decoded['order']['error'] == 'No_OAuth') {
-          return {
-            'err': true,
-            'message': 'Dealer has not connected Razorpay OAuth',
-            'order': {},
-            'key_id': ''
-          };
+          return {'err': true, 'message': 'Dealer has not connected Razorpay OAuth', 'order': {}, 'key_id': ''};
         }
-
         return {
           'err': false,
           'message': 'Order created successfully',
@@ -1137,26 +663,13 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(response.body);
-        print('⚠️ Error from API: ${decoded['message']}');
-        return {
-          'err': true,
-          'message': decoded['message'] ?? 'Failed to create partner order',
-          'order': {},
-          'key_id': ''
-        };
+        return {'err': true, 'message': decoded['message'] ?? 'Failed to create partner order', 'order': {}, 'key_id': ''};
       }
     } catch (e) {
-      print('💥 Exception occurred: $e');
-      return {
-        'err': true,
-        'message': 'Error creating partner order: ${e.toString()}',
-        'order': {},
-        'key_id': ''
-      };
+      return {'err': true, 'message': 'Error creating partner order: ${e.toString()}', 'order': {}, 'key_id': ''};
     }
   }
 
-  /// Verify Razorpay Payment and Create Order
   Future<Map<String, dynamic>> verifyPaymentAndCreateOrder({
     required Map<String, dynamic> response,
     required List<Map<String, dynamic>> productDetails,
@@ -1170,23 +683,6 @@ class ServicesService {
     required String dealerId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print('❗ Auth token is missing.');
-        return {
-          'err': true,
-          'message': 'Authentication token is missing',
-          'data': {}
-        };
-      }
-
-      final uri = Uri.parse('${apiBaseUrl}api/storuser/verify-payment');
-      print('🔍 Verifying payment at: $uri');
-      print('💰 Total Amount: $totalAmount');
-      print('📦 Products: ${productDetails.length}');
-
       final body = {
         'datas': {
           'response': response,
@@ -1204,24 +700,15 @@ class ServicesService {
 
       print('📤 Request Body: ${jsonEncode(body)}');
 
-      final httpResponse = await http.post(
-        uri,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(body),
-      );
+      final httpResponse = await ApiService.post(
+          '/api/storuser/verify-payment', body);
+      ApiService.checkResponse(httpResponse);
 
       print('📡 Response Status: ${httpResponse.statusCode}');
       print('📦 Response Body: ${httpResponse.body}');
 
       if (httpResponse.statusCode == 200 || httpResponse.statusCode == 201) {
         final decoded = jsonDecode(httpResponse.body);
-        print('✅ Success Response - err: ${decoded['err']}');
-        print('✅ Success Response - message: ${decoded['message']}');
-        print('✅ Success Response - data: ${decoded['data']}');
-
         return {
           'err': decoded['err'] ?? false,
           'message': decoded['message'] ?? 'Payment completed and order created successfully',
@@ -1229,24 +716,6 @@ class ServicesService {
         };
       } else {
         final decoded = jsonDecode(httpResponse.body);
-
-        // DETAILED ERROR LOGGING
-        print('❌ HTTP Error - Status Code: ${httpResponse.statusCode}');
-        print('❌ Error Response - Full Body: ${httpResponse.body}');
-        print('❌ Error Response - err: ${decoded['err']}');
-        print('❌ Error Response - message: ${decoded['message']}');
-
-        // Check if error object has more details
-        if (decoded['error'] != null && decoded['error'] is Map) {
-          final errorMap = decoded['error'] as Map;
-          print('❌ Error Details:');
-          errorMap.forEach((key, value) {
-            print('   - $key: $value');
-          });
-        }
-
-        print('❌ All response keys: ${decoded.keys.toList()}');
-
         return {
           'err': true,
           'message': decoded['message'] ?? 'Failed to verify payment',
@@ -1256,16 +725,8 @@ class ServicesService {
       }
     } catch (e, stackTrace) {
       print('💥 Exception occurred: $e');
-      print('💥 Exception type: ${e.runtimeType}');
       print('💥 Stack trace: $stackTrace');
-
-      return {
-        'err': true,
-        'message': 'Error verifying payment: ${e.toString()}',
-        'data': {}
-      };
+      return {'err': true, 'message': 'Error verifying payment: ${e.toString()}', 'data': {}};
     }
   }
-
 }
-

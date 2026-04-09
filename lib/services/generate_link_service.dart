@@ -3,34 +3,16 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../constants/apiConstants.dart';
+import 'api_service.dart';
 
 class MeetService {
 
-
-  /// Creates a new meeting link
   Future<Map<String, dynamic>> createMeetLink({
     required String linkId,
-    required String type, // 'personal' | 'groups' | 'mail'
+    required String type,
     required String dateAndTime,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      print('Retrieved token: $token');
-
-      if (token == null || token.isEmpty) {
-        print('Token is missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final url = '${apiBaseUrl}api/meet/create';
-      print('Requesting URL: $url');
-
       final requestBody = {
         'linkId': linkId,
         'type': type,
@@ -39,32 +21,18 @@ class MeetService {
 
       print('Request body: $requestBody');
 
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post('/api/meet/create', requestBody);
+      ApiService.checkResponse(response);
 
       print('Response status code: ${response.statusCode}');
       print('Response body: ${response.body}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
-        print('Decoded response: $decoded');
-
         return {
           'error': false,
           'message': decoded['message'] ?? 'Meeting link created successfully',
           'data': decoded
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'error': true,
-          'message': 'Unauthorized - Please log in again',
-          'data': null
         };
       } else if (response.statusCode == 500) {
         return {
@@ -89,35 +57,17 @@ class MeetService {
     }
   }
 
-  /// Shares a meeting link with users, groups, or via email
   Future<Map<String, dynamic>> shareMeetLink({
     required String meetLink,
     required String dateAndTimeFrom,
     required String dateAndTimeTo,
     required String description,
-    required String type, // 'personal' | 'groups' | 'mail'
+    required String type,
     List<Map<String, String>>? members,
     List<Map<String, String>>? mail,
     Map<String, dynamic>? recurrenceSettings,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      print('Retrieved token: $token');
-
-      if (token == null || token.isEmpty) {
-        print('Token is missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null
-        };
-      }
-
-      final url = '${apiBaseUrl}api/meet/share';
-      print('Requesting URL: $url');
-
       final requestBody = {
         'meetLink': meetLink,
         'dateAndTimeFrom': dateAndTimeFrom,
@@ -131,32 +81,18 @@ class MeetService {
 
       print('Request body: $requestBody');
 
-      final response = await http.post(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode(requestBody),
-      );
+      final response = await ApiService.post('/api/meet/share', requestBody);
+      ApiService.checkResponse(response);
 
       print('Response status code: ${response.statusCode}');
       print('Response body: ${response.body}');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
-        print('Decoded response: $decoded');
-
         return {
           'error': false,
           'message': decoded['message'] ?? 'Meeting invitation sent successfully',
           'data': decoded
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'error': true,
-          'message': 'Unauthorized - Please log in again',
-          'data': null
         };
       } else if (response.statusCode == 500) {
         return {
@@ -181,56 +117,23 @@ class MeetService {
     }
   }
 
-  /// Validates a meeting link
   Future<Map<String, dynamic>> validateMeetLink({
     required String linkId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      print('Retrieved token: $token');
-
-      if (token == null || token.isEmpty) {
-        print('Token is missing');
-        return {
-          'error': true,
-          'message': 'Authentication token is missing',
-          'data': null,
-          'isValid': false
-        };
-      }
-
-      final url = '${apiBaseUrl}api/meet/validate?linkId=$linkId';
-      print('Requesting URL: $url');
-
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/meet/validate?linkId=$linkId');
+      ApiService.checkResponse(response);
 
       print('Response status code: ${response.statusCode}');
       print('Response body: ${response.body}');
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
-        print('Decoded response: $decoded');
-
         return {
           'error': false,
           'message': decoded['message'] ?? 'Validation successful',
           'data': decoded,
           'isValid': decoded['isValid'] ?? false
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'error': true,
-          'message': 'Unauthorized - Please log in again',
-          'data': null,
-          'isValid': false
         };
       } else if (response.statusCode == 500) {
         return {

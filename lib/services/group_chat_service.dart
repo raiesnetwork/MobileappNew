@@ -5,16 +5,13 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:ixes.app/services/api_service.dart';
 import 'package:ixes.app/services/socket_service.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:ixes.app/constants/apiConstants.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GroupChatService — pure HTTP only.
-// Socket events are handled entirely in GroupChatProvider, NOT here.
-// ═══════════════════════════════════════════════════════════════════════════
 class GroupChatService {
   bool get isSocketConnected => SocketService().isConnected;
 
@@ -57,11 +54,6 @@ class GroupChatService {
     return t;
   }
 
-  Map<String, String> _jsonHeaders(String token) => {
-    'Authorization': 'Bearer $token',
-    'Content-Type': 'application/json',
-  };
-
   // ── Standard error returns ─────────────────────────────────────────────
   Map<String, dynamic> _noToken() =>
       {'error': true, 'message': 'Auth token missing', 'data': null};
@@ -89,7 +81,7 @@ class GroupChatService {
     };
   }
 
-  // ── Safe JSON decode — guards against HTML 500 pages ──────────────────
+  // ── Safe JSON decode ───────────────────────────────────────────────────
   Map<String, dynamic> _safeJsonDecode(http.Response res) {
     try {
       return jsonDecode(res.body) as Map<String, dynamic>;
@@ -137,19 +129,18 @@ class GroupChatService {
   }) async {
     const l = 'getAllGroups';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final params = {'pageNo': '$pageNo', 'limit': '$limit'};
       if (searchQuery != null && searchQuery.isNotEmpty) {
         params['search'] = searchQuery;
       }
-      final uri = Uri.parse('${apiBaseUrl}api/chat/getallgroups')
-          .replace(queryParameters: params);
-      _logRequest('GET', uri.toString());
+      final queryString = params.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
 
-      final res = await http.get(uri, headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      _logRequest('GET', '/api/chat/getallgroups?$queryString');
+
+      final res = await ApiService.get('/api/chat/getallgroups?$queryString');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -175,9 +166,6 @@ class GroupChatService {
   }) async {
     const l = 'getMyGroups';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final params = <String, String>{
         'pageNo': '$pageNo',
         'limit':  '$limit',
@@ -188,13 +176,14 @@ class GroupChatService {
       if (search != null && search.isNotEmpty) {
         params['search'] = search;
       }
+      final queryString = params.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
 
-      final uri = Uri.parse('${apiBaseUrl}api/chat/mygroups')
-          .replace(queryParameters: params);
-      _logRequest('GET', uri.toString());
+      _logRequest('GET', '/api/chat/mygroups?$queryString');
 
-      final res = await http.get(uri, headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      final res = await ApiService.get('/api/chat/mygroups?$queryString');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -227,9 +216,6 @@ class GroupChatService {
   }) async {
     const l = 'createGroup';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final body = {
         'name': name,
         'description': description,
@@ -237,14 +223,11 @@ class GroupChatService {
         if (profileImage != null && profileImage.isNotEmpty)
           'profileImage': profileImage,
       };
-      _logRequest('POST', '${apiBaseUrl}api/chat/creategroup',
+      _logRequest('POST', '/api/chat/creategroup',
           body: {'name': name, 'description': description});
 
-      final res = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/creategroup'),
-        headers: _jsonHeaders(token),
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 30));
+      final res = await ApiService.post('/api/chat/creategroup', body);
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -272,18 +255,11 @@ class GroupChatService {
       {int pageNo = 1, int limit = 30}) async {
     const l = 'getGroupMessages';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      _logRequest('GET', '/api/chat/groupmessages/$groupId');
 
-      final uri = Uri.parse('${apiBaseUrl}api/chat/groupmessages/$groupId')
-          .replace(queryParameters: {
-        'pageNo': '$pageNo',
-        'limit': '$limit',
-      });
-      _logRequest('GET', uri.toString());
-
-      final res = await http.get(uri, headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      final res = await ApiService.get(
+          '/api/chat/groupmessages/$groupId?pageNo=$pageNo&limit=$limit');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -299,7 +275,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 5. SEND TEXT MESSAGE — POST /groupmessage
+  // 5. SEND TEXT MESSAGE
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupMessage({
     required String groupId,
@@ -310,9 +286,6 @@ class GroupChatService {
   }) async {
     const l = 'sendGroupMessage';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final body = {
         'groupId': groupId,
         'text': text,
@@ -320,17 +293,14 @@ class GroupChatService {
         if (image != null && image.isNotEmpty) 'image': image,
         if (replyTo != null && replyTo.isNotEmpty) 'replyTo': replyTo,
       };
-      _logRequest('POST', '${apiBaseUrl}api/chat/groupmessage', body: {
+      _logRequest('POST', '/api/chat/groupmessage', body: {
         'groupId': groupId,
         'text': text.length > 60 ? '${text.substring(0, 60)}...' : text,
         if (replyTo != null) 'replyTo': replyTo,
       });
 
-      final res = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/groupmessage'),
-        headers: _jsonHeaders(token),
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 30));
+      final res = await ApiService.post('/api/chat/groupmessage', body);
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -350,7 +320,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 6. SEND FILE MESSAGE — POST /groupfilemessage (multipart)
+  // 6. SEND FILE MESSAGE (multipart)
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupFileMessage({
     required String groupId,
@@ -367,7 +337,7 @@ class GroupChatService {
       final fileSize = await file.length();
       final mime    = _mimeTypeForFile(file.path);
       print('📤 [$l] $fileName — ${(fileSize / 1024).toStringAsFixed(1)} KB — $mime');
-      _logRequest('POST multipart', '${apiBaseUrl}api/chat/groupfilemessage',
+      _logRequest('POST multipart', '/api/chat/groupfilemessage',
           body: {'groupId': groupId, 'file': fileName});
 
       final req = http.MultipartRequest(
@@ -389,6 +359,7 @@ class GroupChatService {
 
       final streamed = await req.send().timeout(const Duration(minutes: 2));
       final res = await http.Response.fromStream(streamed);
+      ApiService.checkResponse(res); // ✅ 401 check
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -408,7 +379,7 @@ class GroupChatService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // 7. SEND VOICE MESSAGE — POST /groupvoicemessage (multipart)
+  // 7. SEND VOICE MESSAGE (multipart)
   // ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>> sendGroupVoiceMessage({
     required String groupId,
@@ -426,7 +397,7 @@ class GroupChatService {
       final mime     = _mimeTypeForFile(audioFile.path);
       print('🎤 [$l] ${audioFile.path.split('/').last} — '
           '${(fileSize / 1024).toStringAsFixed(1)} KB — $mime');
-      _logRequest('POST multipart', '${apiBaseUrl}api/chat/groupvoicemessage',
+      _logRequest('POST multipart', '/api/chat/groupvoicemessage',
           body: {'groupId': groupId});
 
       final req = http.MultipartRequest(
@@ -438,7 +409,6 @@ class GroupChatService {
         contentType: MediaType.parse(mime),
       ));
       req.fields['groupId'] = groupId;
-
       if (audioDurationMs != null) {
         req.fields['audioDurationMs'] = audioDurationMs.toString();
         print('📦 [$l] audioDurationMs: $audioDurationMs');
@@ -453,6 +423,7 @@ class GroupChatService {
       print('📡 [$l] Uploading voice...');
       final streamed = await req.send().timeout(const Duration(minutes: 2));
       final res = await http.Response.fromStream(streamed);
+      ApiService.checkResponse(res); // ✅ 401 check
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
@@ -516,16 +487,11 @@ class GroupChatService {
       {required String groupId}) async {
     const l = 'requestToJoinGroup';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      _logRequest('POST', '/api/chat/grouprequest', body: {'groupId': groupId});
 
-      _logRequest('POST', '${apiBaseUrl}api/chat/grouprequest',
-          body: {'groupId': groupId});
-      final res = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/grouprequest'),
-        headers: _jsonHeaders(token),
-        body: jsonEncode({'groupId': groupId}),
-      ).timeout(const Duration(seconds: 30));
+      final res = await ApiService.post(
+          '/api/chat/grouprequest', {'groupId': groupId});
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -549,14 +515,10 @@ class GroupChatService {
       {required String groupId}) async {
     const l = 'cancelGroupRequest';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      _logRequest('DELETE', '/api/chat/grouprequest/$groupId');
 
-      final endpoint = '${apiBaseUrl}api/chat/grouprequest/$groupId';
-      _logRequest('DELETE', endpoint);
-      final res = await http.delete(Uri.parse(endpoint),
-          headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      final res = await ApiService.delete('/api/chat/grouprequest/$groupId');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -578,14 +540,10 @@ class GroupChatService {
   Future<Map<String, dynamic>> getGroupRequests(String groupId) async {
     const l = 'getGroupRequests';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      _logRequest('GET', '/api/chat/grouprequest/$groupId');
 
-      final endpoint = '${apiBaseUrl}api/chat/grouprequest/$groupId';
-      _logRequest('GET', endpoint);
-      final res = await http.get(Uri.parse(endpoint),
-          headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      final res = await ApiService.get('/api/chat/grouprequest/$groupId');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -609,16 +567,12 @@ class GroupChatService {
   }) async {
     const l = 'updateGroupRequest';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
-      _logRequest('PUT', '${apiBaseUrl}api/chat/grouprequest/',
+      _logRequest('PUT', '/api/chat/grouprequest/',
           body: {'requestId': requestId, 'status': status});
-      final res = await http.put(
-        Uri.parse('${apiBaseUrl}api/chat/grouprequest/'),
-        headers: _jsonHeaders(token),
-        body: jsonEncode({'requestId': requestId, 'status': status}),
-      ).timeout(const Duration(seconds: 30));
+
+      final res = await ApiService.put(
+          '/api/chat/grouprequest/', {'requestId': requestId, 'status': status});
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -644,16 +598,12 @@ class GroupChatService {
   }) async {
     const l = 'addMembersToGroup';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
-      _logRequest('POST', '${apiBaseUrl}api/chat/addmember',
+      _logRequest('POST', '/api/chat/addmember',
           body: {'groupId': groupId, 'members': memberIds});
-      final res = await http.post(
-        Uri.parse('${apiBaseUrl}api/chat/addmember'),
-        headers: _jsonHeaders(token),
-        body: jsonEncode({'groupId': groupId, 'members': memberIds}),
-      ).timeout(const Duration(seconds: 30));
+
+      final res = await ApiService.post(
+          '/api/chat/addmember', {'groupId': groupId, 'members': memberIds});
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -675,15 +625,11 @@ class GroupChatService {
   }) async {
     const l = 'removeMemberFromGroup';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      _logRequest('DELETE', '/api/chat/removemember/$groupId/$userId');
 
-      final endpoint =
-          '${apiBaseUrl}api/chat/removemember/$groupId/$userId';
-      _logRequest('DELETE', endpoint);
-      final res = await http.delete(Uri.parse(endpoint),
-          headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      final res = await ApiService.delete(
+          '/api/chat/removemember/$groupId/$userId');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {
@@ -706,17 +652,16 @@ class GroupChatService {
   }) async {
     const l = 'fetchAllUsers';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final params = {'pageNo': '$page', 'limit': '$limit'};
       if (search != null && search.isNotEmpty) params['search'] = search;
-      final uri = Uri.parse('${apiBaseUrl}api/mobile/all-users')
-          .replace(queryParameters: params);
-      _logRequest('GET', uri.toString());
+      final queryString = params.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
 
-      final res = await http.get(uri, headers: _jsonHeaders(token))
-          .timeout(const Duration(seconds: 30));
+      _logRequest('GET', '/api/mobile/all-users?$queryString');
+
+      final res = await ApiService.get('/api/mobile/all-users?$queryString');
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200) {

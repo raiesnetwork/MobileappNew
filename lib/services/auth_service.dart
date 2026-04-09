@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -57,7 +59,7 @@ class AuthService {
       }
 
       final response =
-          await ApiService.post('/api/auth/login', body, requireAuth: false);
+      await ApiService.post('/api/auth/login', body, requireAuth: false);
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
@@ -93,19 +95,17 @@ class AuthService {
     try {
       final Uri url = Uri.parse("https://api.ixes.ai/api/auth/loginWithOTP");
 
-      // ✅ Strip + — DB stores without + prefix
       final String normalizedMobile = mobile.startsWith('+')
           ? mobile.substring(1)
           : mobile;
 
       final Map<String, dynamic> body = {
-        'mobile': normalizedMobile, // sends 917995899113 ✅
+        'mobile': normalizedMobile,
         'otp': otp,
       };
 
       print("📤 Login Request URL: $url");
       print("📤 Login BODY: $body");
-      // ... rest stays exactly the same
 
       final response = await http.post(
         url,
@@ -116,7 +116,6 @@ class AuthService {
       print("📥 Status Code: ${response.statusCode}");
       print("📥 Response Body: ${response.body}");
 
-      // Parse the response
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data['token'] != null) {
@@ -125,14 +124,12 @@ class AuthService {
         final username = data['username'];
         final guid = data['guid'];
 
-        // ✅ Save token & user info in SharedPreferences
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('auth_token', token);
         await prefs.setString('user_id', userId ?? '');
         await prefs.setString('user_name', username ?? '');
         await prefs.setBool('guid', guid ?? false);
 
-        // 🧠 Verify token saved
         final savedToken = prefs.getString('auth_token');
         print("✅ Token saved successfully: $savedToken");
 
@@ -162,11 +159,10 @@ class AuthService {
 
   static Future<Map<String, dynamic>> sendOTP(String mobile) async {
     try {
-      // ✅ Keep + prefix — Twilio needs it to send SMS
       final response = await ApiService.post(
           '/api/auth/sendOTP',
           {
-            'mobile': mobile, // sends +917995899113 ✅
+            'mobile': mobile,
           },
           requireAuth: false);
       print(response);
@@ -191,7 +187,6 @@ class AuthService {
     }
   }
 
-  // AUTH SERVICE METHOD
   static Future<Map<String, dynamic>> forgotPassword({
     required String mobile,
     required String email,
@@ -268,7 +263,6 @@ class AuthService {
     required String newPassword,
   }) async {
     try {
-      // Get token to verify it exists
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
@@ -287,7 +281,7 @@ class AuthService {
       print('📤 Request Body Keys: ${requestBody.keys.toList()}');
 
       final response = await ApiService.post(
-          '/api/auth/change-password', // ✅ Correct endpoint
+          '/api/auth/change-password',
           requestBody,
           requireAuth: true);
 
@@ -318,7 +312,6 @@ class AuthService {
         };
       } else if (response.statusCode == 404) {
         print('❌ ERROR 404 - Not Found');
-        print('❌ Reason: User not found in database');
         final errorMsg = data['error'] ?? data['message'] ?? 'User not found';
         print('❌ Error Message: $errorMsg');
         return {
@@ -330,15 +323,12 @@ class AuthService {
             data['message'] ??
             'Server error occurred. Please try again later.';
         print('❌ Returning Error: $errorMsg');
-
         return {
           'success': false,
           'message': errorMsg,
         };
       } else {
         print('❌ ERROR ${response.statusCode} - Unexpected Status Code');
-        print('❌ Error Field: ${data['error']}');
-        print('❌ Message Field: ${data['message']}');
         final errorMsg =
             data['error'] ?? data['message'] ?? 'Failed to change password';
         print('❌ Error Message: $errorMsg');

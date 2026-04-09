@@ -14,34 +14,17 @@ class CommentService {
     isPosting = true,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-      print("token$token");
       print("postid$postId");
 
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment");
       final Map<String, dynamic> body = {
         "postId": postId,
         "commentContent": commentContent,
       };
 
-      print('📤 POST COMMENT URL: $url');
+      print('📤 POST COMMENT');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/comment', body);
+      ApiService.checkResponse(response);
 
       print('📥 COMMENT STATUS: ${response.statusCode}');
       print('📥 COMMENT RESPONSE: ${response.body}');
@@ -52,7 +35,7 @@ class CommentService {
         print('✅ Comment Posted Successfully');
         return {
           "success": true,
-          "newComment": decoded['newComment'], // ✅ key matches what provider reads
+          "newComment": decoded['newComment'],
           "message": decoded['message'] ?? "Comment posted successfully"
         };
       } else {
@@ -71,62 +54,10 @@ class CommentService {
     }
   }
 
-  // static Future<Map<String, dynamic>> fetchComments(String postId) async {
-  //   try {
-  //     SharedPreferences prefs = await SharedPreferences.getInstance();
-  //     final token = prefs.getString('auth_token');
-  //     final url = Uri.parse("https://api.ixes.ai/api/post/$postId/comments");
-  //
-  //     final response = await http.get(
-  //       url,
-  //       headers: {
-  //         'Content-Type': 'application/json',
-  //         'Authorization': 'Bearer $token',
-  //       },
-  //     );
-  //
-  //     if (response.statusCode == 200) {
-  //       final data = jsonDecode(response.body);
-  //       return {
-  //         "success": true,
-  //         "data": data['comments'] ?? [],
-  //       };
-  //     } else {
-  //       return {
-  //         "success": false,
-  //         "message": "Failed to load comments",
-  //       };
-  //     }
-  //   } catch (e) {
-  //     return {
-  //       "success": false,
-  //       "message": "Fetch error: $e",
-  //     };
-  //   }
-  // }
-
-  // ✅ FIXED: Returns null on error instead of throwing exception
   static Future<Post?> getPostById(String postId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for getPostById");
-        return null;
-      }
-
-      final url = Uri.parse("https://api.ixes.ai/api/post/$postId");
-
-      print('📤 GET POST BY ID URL: $url');
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.get('/api/post/$postId');
+      ApiService.checkResponse(response);
 
       print('📥 GET POST BY ID STATUS: ${response.statusCode}');
       print('📥 GET POST BY ID RESPONSE: ${response.body}');
@@ -134,7 +65,6 @@ class CommentService {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
 
-        // ✅ Handle different response structures
         if (data['post'] != null) {
           print('✅ Post found in response["post"]');
           return Post.fromJson(data['post']);
@@ -163,37 +93,17 @@ class CommentService {
     required String reportReason,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for comment");
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-      print("token$token");
       print("postid$postId");
 
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/report");
       final Map<String, dynamic> body = {
         "postId": postId,
         "reportReason": reportReason,
       };
 
-      print('📤 reportReason URL: $url');
       print('📤 reportReason BODY: $body');
-      print('🔐 TOKEN: $token');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/report', body);
+      ApiService.checkResponse(response);
 
       print('📥 reportReason STATUS: ${response.statusCode}');
       print('📥 reportReason RESPONSE: ${response.body}');
@@ -227,36 +137,16 @@ class CommentService {
     required String postId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for comment");
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-      print("token$token");
       print("postid$postId");
 
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/not-intrested");
       final Map<String, dynamic> body = {
         "postId": postId,
       };
 
-      print('📤 markAsNotInterested URL: $url');
       print('📤 markAsNotInterested BODY: $body');
-      print('🔐 TOKEN: $token');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/not-intrested', body);
+      ApiService.checkResponse(response);
 
       print('📥 markAsNotInterested STATUS: ${response.statusCode}');
       print('📥 markAsNotInterested RESPONSE: ${response.body}');
@@ -268,8 +158,7 @@ class CommentService {
         return {
           "success": true,
           "data": decoded['newComment'],
-          "message":
-          decoded['message'] ?? "markAsNotInterested posted successfully"
+          "message": decoded['message'] ?? "markAsNotInterested posted successfully"
         };
       } else {
         print('⚠️ Failed to Post markAsNotInterested');
@@ -287,24 +176,11 @@ class CommentService {
     }
   }
 
-  // Get all users
   static Future<Map<String, dynamic>> getAllUsers({
     String? search,
     int pageNo = 1,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for getAllUsers");
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-
-      // Build query parameters
       Map<String, dynamic> queryParams = {
         'pageNo': pageNo.toString(),
       };
@@ -313,19 +189,13 @@ class CommentService {
         queryParams['search'] = search;
       }
 
-      final Uri url = Uri.parse("https://api.ixes.ai/api/mobile/all-users")
-          .replace(queryParameters: queryParams);
+      final queryString = queryParams.entries
+          .map((e) => '${e.key}=${Uri.encodeComponent(e.value)}')
+          .join('&');
 
-      print('📤 getAllUsers URL: $url');
-      print('🔐 TOKEN: $token');
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await ApiService.get(
+          '/api/mobile/all-users?$queryString');
+      ApiService.checkResponse(response);
 
       print('📥 getAllUsers STATUS: ${response.statusCode}');
       print('📥 getAllUsers RESPONSE: ${response.body}');
@@ -357,28 +227,14 @@ class CommentService {
     }
   }
 
-// Share post
   static Future<Map<String, dynamic>> sharePost({
     required String postId,
-    required String type, // "user" or "group"
-    required String userId, // Receiver ID
-    required String shareContext, // "feed", "campaign", "service", "announcement"
-    String? contextId, // Required if shareContext is not "feed"
+    required String type,
+    required String userId,
+    required String shareContext,
+    String? contextId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for sharePost");
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/share");
-
       final Map<String, dynamic> body = {
         "postId": postId,
         "userId": userId,
@@ -386,23 +242,14 @@ class CommentService {
         "shareContext": shareContext,
       };
 
-      // Add contextId only if shareContext is not "feed"
       if (shareContext != "feed" && contextId != null) {
         body["contextId"] = contextId;
       }
 
-      print('📤 sharePost URL: $url');
       print('📤 sharePost BODY: $body');
-      print('🔐 TOKEN: $token');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/share', body);
+      ApiService.checkResponse(response);
 
       print('📥 sharePost STATUS: ${response.statusCode}');
       print('📥 sharePost RESPONSE: ${response.body}');
@@ -435,26 +282,8 @@ class CommentService {
     required String postId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/delete/$postId");
-      print("Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
-
-      final response = await http.delete(
-        url,
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json',
-        },
-      );
+      final response = await ApiService.delete('/api/post/delete/$postId');
+      ApiService.checkResponse(response);
 
       final decoded = jsonDecode(response.body);
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -476,32 +305,14 @@ class CommentService {
     }
   }
 
-  // ✅ FIXED: Better error handling
-
-  /// ✅ Like a Post
   static Future<Map<String, dynamic>> likePost(String postId) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {"success": false, "message": "Token missing"};
-      }
-
-      final url = Uri.parse("https://api.ixes.ai/api/post/like");
       final body = {"postId": postId};
 
       print('❤️ Sending Like for postId: $postId');
-      print('📤 LIKE POST URL: $url');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/like', body);
+      ApiService.checkResponse(response);
 
       print('📥 LIKE STATUS: ${response.statusCode}');
       print('📥 LIKE RESPONSE: ${response.body}');
@@ -517,31 +328,14 @@ class CommentService {
     }
   }
 
-  /// 🔻 Unlike a Post - ✅ FIXED: Changed URL from api2.ixes.ai to api.ixes.ai
   static Future<Map<String, dynamic>> unlikePost(String postId) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {"success": false, "message": "Token missing"};
-      }
-
-      // ✅ FIXED: Changed from api2.ixes.ai to api.ixes.ai
-      final url = Uri.parse("https://api.ixes.ai/api/post/unlike");
       final body = {"postId": postId};
 
       print('💔 Sending Unlike for postId: $postId');
-      print('📤 UNLIKE POST URL: $url');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/post/unlike', body);
+      ApiService.checkResponse(response);
 
       print('📥 UNLIKE STATUS: ${response.statusCode}');
       print('📥 UNLIKE RESPONSE: ${response.body}');
@@ -556,28 +350,17 @@ class CommentService {
       return {"success": false, "message": "Unlike error: $e"};
     }
   }
+
   static Future<Map<String, dynamic>> editComment({
     required String commentId,
     required String commentContent,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {"success": false, "message": "Authentication token is missing"};
-      }
-
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment/$commentId");
-
-      final response = await http.put(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({"commentContent": commentContent}),
+      final response = await ApiService.put(
+        '/api/post/comment/$commentId',
+        {"commentContent": commentContent},
       );
+      ApiService.checkResponse(response);
 
       final decoded = jsonDecode(response.body);
 
@@ -595,22 +378,8 @@ class CommentService {
     required String commentId,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {"success": false, "message": "Authentication token is missing"};
-      }
-
-      final Uri url = Uri.parse("https://api.ixes.ai/api/post/comment/$commentId");
-
-      final response = await http.delete(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await ApiService.delete('/api/post/comment/$commentId');
+      ApiService.checkResponse(response);
 
       final decoded = jsonDecode(response.body);
 

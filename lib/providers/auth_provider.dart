@@ -4,20 +4,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/user_model.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import '../services/fcm_service.dart';
+import '../screens/auth/login_screen.dart';
 import 'communities_provider.dart';
+
+// ✅ Import navigatorKey from main.dart
+import '../main.dart' show navigatorKey;
 
 class AuthProvider with ChangeNotifier {
   User? _user;
   bool _isLoading = false;
   String _errorMessage = '';
-  bool _isInitialized = false; // Add initialization state
+  bool _isInitialized = false;
 
   User? get user => _user;
   bool get isLoading => _isLoading;
   String get errorMessage => _errorMessage;
   bool get isAuthenticated => _user != null;
-  bool get isInitialized => _isInitialized; // Getter for initialization state
+  bool get isInitialized => _isInitialized;
 
   void _setLoading(bool loading) {
     _isLoading = loading;
@@ -33,6 +38,7 @@ class AuthProvider with ChangeNotifier {
     _errorMessage = '';
     notifyListeners();
   }
+
   Future<void> saveUserFromGoogle({
     required String token,
     required String userId,
@@ -42,7 +48,6 @@ class AuthProvider with ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // ✅ If userId is empty, decode it from the JWT token directly
       String resolvedId = userId;
       String resolvedUsername = username;
 
@@ -70,10 +75,9 @@ class AuthProvider with ChangeNotifier {
       await prefs.setString('user_id', resolvedId);
       await prefs.setString('user_name', resolvedUsername);
 
-      // ✅ Spread userData first, then override with resolved values
       final Map<String, dynamic> userMap = {
         ...?userData,
-        'id': resolvedId,        // ✅ Always wins — not overwritten
+        'id': resolvedId,
         'username': resolvedUsername,
         'token': token,
         'mobile': '',
@@ -145,7 +149,7 @@ class AuthProvider with ChangeNotifier {
     if (result['success']) {
       print('✅ LOGIN SUCCESS - API Response:');
       print(result);
-      
+
       if (result['otpRequired'] == true) {
         _setLoading(false);
         return {
@@ -184,7 +188,6 @@ class AuthProvider with ChangeNotifier {
 
     final success = result['success'] == true;
     if (success) {
-      // Build User object from the response and save it
       _user = User(
         id: result['user_id'] ?? '',
         username: result['username'] ?? '',
@@ -193,7 +196,7 @@ class AuthProvider with ChangeNotifier {
         guidStatus: result['guid'] ?? false,
         token: result['token'],
       );
-      await _saveUserData(_user!);   // persists to SharedPreferences
+      await _saveUserData(_user!);
 
       await FcmService.saveFcmToken();
       FcmService.listenForTokenRefresh();
@@ -204,7 +207,6 @@ class AuthProvider with ChangeNotifier {
     _setLoading(false);
     return success;
   }
-
 
   Future<bool> sendOTP(String mobile) async {
     _setLoading(true);
@@ -226,17 +228,14 @@ class AuthProvider with ChangeNotifier {
 
   Future<Map<String, dynamic>> checkMobileExists(String mobile) async {
     final result = await AuthService.checkMobileExists(mobile);
-    
+
     if (result['success']) {
       print('✅ CHECK MOBILE SUCCESS - API Response:');
       print(result);
     }
-    
+
     return result;
   }
-
-// Updated logout method for AuthProvider
-// Replace your existing logout method with this
 
   Future<void> logout(BuildContext? context) async {
     _setLoading(true);
@@ -245,23 +244,14 @@ class AuthProvider with ChangeNotifier {
     print('✅ LOGOUT - API Response:');
     print(result);
 
-    // Clear user data from SharedPreferences
     await _clearUserData();
     _user = null;
 
-    // IMPORTANT: Clear all provider data when logging out
     if (context != null && context.mounted) {
       try {
-        // Clear community provider data
         final communityProvider = Provider.of<CommunityProvider>(context, listen: false);
         communityProvider.clearAllData();
         print('✅ Community data cleared on logout');
-
-        // You can add other provider clears here if needed
-        // Example:
-        // final postProvider = Provider.of<PostProvider>(context, listen: false);
-        // postProvider.clearAllData();
-
       } catch (e) {
         print('⚠️ Error clearing provider data: $e');
       }
@@ -271,7 +261,32 @@ class AuthProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Replace your _saveUserData method with this updated version
+  // ✅ NEW METHOD — called automatically when another device steals the session
+  Future<void> forceLogout() async {
+    // Prevent duplicate triggers if already logged out
+    if (_user == null) return;
+
+    debugPrint('🔐 [FORCE LOGOUT] Session expired — another device logged in');
+
+    await _clearUserData();
+    _user = null;
+    notifyListeners();
+
+    final context = navigatorKey.currentContext;
+    if (context != null && context.mounted) {
+      try {
+        context.read<CommunityProvider>().clearAllData();
+        debugPrint('✅ [FORCE LOGOUT] Community data cleared');
+      } catch (e) {
+        debugPrint('⚠️ [FORCE LOGOUT] Provider clear error: $e');
+      }
+
+      navigatorKey.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
+      );
+    }
+  }
 
   Future<void> _saveUserData(User user) async {
     try {
@@ -280,31 +295,26 @@ class AuthProvider with ChangeNotifier {
       print('💾 Attempting to save user data...');
       print('User object: ${user.toString()}');
 
-      // Save token separately
       if (user.token != null && user.token!.isNotEmpty) {
         await prefs.setString('auth_token', user.token!);
         print('✅ Token saved: ${user.token}');
       }
 
-      // Save user ID separately
       if (user.id != null && user.id!.isNotEmpty) {
         await prefs.setString('user_id', user.id!);
         print('✅ User ID saved: ${user.id}');
       }
 
-      // ✅ ADD THIS: Save username separately for video call
       if (user.username.isNotEmpty) {
         await prefs.setString('user_name', user.username);
         print('✅ Username saved: ${user.username}');
       }
 
-      // ✅ ADD THIS: Save mobile separately (useful for other features)
       if (user.mobile.isNotEmpty) {
         await prefs.setString('user_mobile', user.mobile);
         print('✅ Mobile saved: ${user.mobile}');
       }
 
-      // Convert user object to JSON
       final Map<String, dynamic> userMap = user.toJson();
       final String userJson = jsonEncode(userMap);
       await prefs.setString('user_data', userJson);
@@ -312,7 +322,6 @@ class AuthProvider with ChangeNotifier {
       print('✅ User data saved successfully');
       print('JSON saved: $userJson');
 
-      // Verify the save worked
       final savedData = prefs.getString('user_data');
       final savedToken = prefs.getString('auth_token');
       final savedUsername = prefs.getString('user_name');
@@ -326,22 +335,19 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
-// Also update your _clearUserData method to clear the new fields
   Future<void> _clearUserData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
       await prefs.remove('user_data');
       await prefs.remove('user_id');
-      await prefs.remove('user_name');  // ✅ ADD THIS
-      await prefs.remove('user_mobile'); // ✅ ADD THIS
+      await prefs.remove('user_name');
+      await prefs.remove('user_mobile');
       print('✅ User data cleared from SharedPreferences');
     } catch (e) {
       print('❌ Error clearing user data: $e');
     }
   }
-
-// Add this method to your AuthProvider class
 
   Future<bool> changePassword({
     required String currentPassword,
@@ -374,34 +380,29 @@ class AuthProvider with ChangeNotifier {
     }
   }
 
+  Future<bool> sendForgotPasswordOTP({
+    required String email,
+    required String mobile,
+  }) async {
+    _setLoading(true);
+    _setError('');
 
+    final result = await AuthService.forgotPassword(
+      mobile: mobile,
+      email: email,
+    );
 
-Future<bool> sendForgotPasswordOTP({
-  required String email,
-  required String mobile,
-}) async {
-  _setLoading(true);
-  _setError('');
-
-  final result = await AuthService.forgotPassword(
-    mobile: mobile,
-    email: email,
-  );
-
-  if (result['success']) {
-    print('✅ FORGOT PASSWORD SUCCESS - API Response:');
-    print(result);
-    _setLoading(false);
-    return true;
-  } else {
-    _setError(result['message']);
-    _setLoading(false);
-    return false;
+    if (result['success']) {
+      print('✅ FORGOT PASSWORD SUCCESS - API Response:');
+      print(result);
+      _setLoading(false);
+      return true;
+    } else {
+      _setError(result['message']);
+      _setLoading(false);
+      return false;
+    }
   }
-}
- 
-  // Enhanced: Load user data with better error handling and debugging
-  // Replace your loadUserFromStorage method with this updated version
 
   Future<void> loadUserFromStorage() async {
     try {
@@ -420,18 +421,14 @@ Future<bool> sendForgotPasswordOTP({
 
       if (token != null && userDataString != null && userDataString.isNotEmpty) {
         try {
-          // Parse the JSON string back to Map
           final Map<String, dynamic> userJson = jsonDecode(userDataString);
           print('🔍 Parsed JSON: $userJson');
 
-          // Create User object from JSON
           _user = User.fromJson(userJson);
           print('🔍 User object created: ${_user.toString()}');
 
-          // Ensure token is set
           if (_user!.token == null || _user!.token!.isEmpty) {
             print('🔧 Setting token from separate storage');
-            // Create new user object with token
             _user = User(
               id: _user!.id,
               username: _user!.username,
@@ -450,7 +447,6 @@ Future<bool> sendForgotPasswordOTP({
 
         } catch (parseError) {
           print('❌ Error parsing user data: $parseError');
-          // Clear corrupted data
           await _clearUserData();
           _user = null;
         }
@@ -458,6 +454,9 @@ Future<bool> sendForgotPasswordOTP({
         print('ℹ️ No user data found in storage (token: ${token != null}, userData: ${userDataString != null})');
         _user = null;
       }
+
+      // ✅ Register 401 callback — fires forceLogout() when another device steals the session
+      ApiService.onUnauthorized = () => forceLogout();
 
       _isInitialized = true;
       notifyListeners();
@@ -471,13 +470,12 @@ Future<bool> sendForgotPasswordOTP({
     }
   }
 
-  // Debug method to check storage contents
   Future<void> debugStorageContents() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final keys = prefs.getKeys();
       print('🐛 All SharedPreferences keys: $keys');
-      
+
       for (String key in keys) {
         final value = prefs.get(key);
         print('🐛 $key: $value');
@@ -487,12 +485,10 @@ Future<bool> sendForgotPasswordOTP({
     }
   }
 
-  // Optional: Method to check if user data exists in storage
   Future<bool> hasUserDataInStorage() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('auth_token');
     final userData = prefs.getString('user_data');
     return token != null && userData != null;
   }
-  
 }

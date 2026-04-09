@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ixes.app/constants/apiConstants.dart';
+import 'package:ixes.app/services/api_service.dart';
 
 class ChatService {
   Future<String> sendMessage(String message, int type,
@@ -31,36 +32,14 @@ class ChatService {
     required String message,
   }) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      print("$token");
-
-      if (token == null || token.isEmpty) {
-        print("❌ Token missing for general chat");
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-
-      final Uri url = Uri.parse("${apiBaseUrl}api/ask-newa/chat");
-
       final Map<String, dynamic> body = {
         "message": message,
       };
 
-      print('📤 Chat URL: $url');
       print('📤 Chat BODY: $body');
-      print('🔐 TOKEN: $token');
 
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
-      );
+      final response = await ApiService.post('/api/ask-newa/chat', body);
+      ApiService.checkResponse(response);
 
       print('📥 STATUS: ${response.statusCode}');
       print('📥 RESPONSE: ${response.body}');
@@ -94,24 +73,11 @@ class ChatService {
   // BUSINESS
   Future<String> sendToBusiness(String msg) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return "❌ Authentication token is missing";
-      }
-
-      final Uri url = Uri.parse("${apiBaseUrl}api/ask-newa/bussinessChat");
-      final Map<String, dynamic> body = {"message": msg};
-
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode(body),
+      final response = await ApiService.post(
+        '/api/ask-newa/bussinessChat',
+        {"message": msg},
       );
+      ApiService.checkResponse(response);
 
       print("📥 BUSINESS STATUS: ${response.statusCode}");
       print("📥 BUSINESS RESPONSE: ${response.body}");
@@ -128,9 +94,7 @@ class ChatService {
     }
   }
 
-  // PERSONAL - Fixed to handle both file and text-only messages
-
-
+  // PERSONAL
   Future<Map<String, dynamic>> sendPersonalChat(
       String question, String filePath) async {
     try {
@@ -156,7 +120,6 @@ class ChatService {
         ..headers['Authorization'] = 'Bearer $token'
         ..fields['question'] = question;
 
-      // Only add file if filePath is not empty
       if (filePath.isNotEmpty) {
         final file = File(filePath);
         if (!await file.exists()) {
@@ -201,6 +164,7 @@ class ChatService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print("📥 Personal Chat STATUS: ${response.statusCode}");
       print("📥 Personal Chat RESPONSE: ${response.body}");
@@ -242,22 +206,8 @@ class ChatService {
   // HISTORY
   Future<List<dynamic>> fetchChatHistory() async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        throw Exception("❌ Authentication token is missing");
-      }
-
-      final Uri url = Uri.parse("${apiBaseUrl}api/ask-newa/history");
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await ApiService.get('/api/ask-newa/history');
+      ApiService.checkResponse(response);
 
       print("📥 HISTORY STATUS: ${response.statusCode}");
       print("📥 HISTORY RESPONSE: ${response.body}");
@@ -278,25 +228,9 @@ class ChatService {
   static Future<Map<String, dynamic>> deleteChatHistory(
       String historyId) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      if (token == null || token.isEmpty) {
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-        };
-      }
-
-      final url =
-          Uri.parse("https://api.ixes.ai/api/ask-newa/delete/$historyId");
-
-      final response = await http.delete(
-        url,
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
+      final response =
+      await ApiService.delete('/api/ask-newa/delete/$historyId');
+      ApiService.checkResponse(response);
 
       final decoded = jsonDecode(response.body);
       if (response.statusCode == 200 && decoded['success'] == true) {
@@ -319,15 +253,8 @@ class ChatService {
   }
 
   Future<Map<String, dynamic>> fetchUserSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('auth_token');
-
-    final response = await http.get(
-      Uri.parse('https://api.ixes.ai/api/ask-newa/setting'),
-      headers: {
-        'Authorization': 'Bearer $token',
-      },
-    );
+    final response = await ApiService.get('/api/ask-newa/setting');
+    ApiService.checkResponse(response);
 
     if (response.statusCode == 200) {
       final jsonData = json.decode(response.body);
@@ -343,22 +270,19 @@ class ChatService {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
 
-      final uri = Uri.parse("https://api.ixes.ai/api/ask-newa/setting");
+      final uri = Uri.parse("${apiBaseUrl}api/ask-newa/setting");
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $token';
 
-      // Add text fields
       fields.forEach((key, value) {
         request.fields[key] = value;
       });
 
-      // Add files if any
       for (final path in filePaths) {
         print("📎 Attaching file: $path");
         request.files.add(await http.MultipartFile.fromPath('files', path));
       }
 
-      // Print request details
       print("📤 Saving settings to: $uri");
       print("🔐 Authorization: Bearer $token");
       print("📝 Fields: ${request.fields}");
@@ -366,6 +290,7 @@ class ChatService {
 
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      ApiService.checkResponse(response); // ✅ 401 check
 
       print("📥 Status Code: ${response.statusCode}");
       print("📥 Response Body: ${response.body}");

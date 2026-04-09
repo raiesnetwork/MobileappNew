@@ -18,6 +18,7 @@ import '../../video_call/video_call_initiate_.dart';
 import '../../voice_call/outgoing_voice_call.dart';
 import '../chat_detail_screen.dart';
 import '../view_file_screen.dart';
+import 'forwarded_message_screen.dart';
 
 class GroupMessageBubble extends StatefulWidget {
   final Map<String, dynamic> message;
@@ -51,6 +52,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
   late final Map<String, dynamic>? _senderMap;
   late final bool _isAudio;
   late final bool _isFile;
+  late final bool _isForwardedMsg;
 
   FlutterSoundPlayer? _player;
   bool _isPlayerInitialized = false;
@@ -331,40 +333,64 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     );
   }
   Widget _buildSharedPost() {
-    // Try nested sharedPost first (future-proof)
-    Map<String, dynamic>? postData =
-    widget.message['sharedPost'] as Map<String, dynamic>?;
-    if (postData == null &&
-        (widget.message['forwerd'] == true ||
-            widget.message['forwerdMessage'] != null)) {
-      final image = widget.message['image']?.toString() ?? '';
-      final text = widget.message['text']?.toString() ?? '';
-      final forwardLabel =
-          widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
+    Map<String, dynamic>? postData = widget.message['sharedPost'] as Map<String, dynamic>?;
 
-      // ✅ Extract actual postId from forwerdUrl
-      // forwerdUrl format: "https://ixes.ai/feeds/6954b0fcfb282e4eb94cee1a"
+    if (postData == null &&
+        (widget.message['forwerd'] == true || widget.message['forwerdMessage'] != null)) {
+
+      final text = widget.message['text']?.toString() ?? '';
+      final forwardLabel = widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
+
       String actualPostId = '';
       final forwerdUrl = widget.message['forwerdUrl']?.toString() ?? '';
       if (forwerdUrl.isNotEmpty) {
-        actualPostId = forwerdUrl.split('/').last;
+        final segment = forwerdUrl.split('/').last.trim();
+        // ✅ only use valid 24-char hex ObjectId
+        if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+          actualPostId = segment;
+        }
       }
-      // Fallback to sharedPostId if forwerdUrl not available
       if (actualPostId.isEmpty) {
-        actualPostId = widget.message['sharedPostId']?.toString() ?? '';
+        final fallback = widget.message['sharedPostId']?.toString() ?? '';
+        if (fallback.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(fallback)) {
+          actualPostId = fallback;
+        }
       }
 
-      print('✅ Group bubble resolved postId: $actualPostId from forwerdUrl: $forwerdUrl');
+      // Extract image
+      String imageUrl = '';
+      for (final key in ['image', 'forwerdImage', 'postImage', 'images', 'media']) {
+        final val = widget.message[key];
+        if (val is String && val.isNotEmpty && !val.contains('ixes.ai/feeds')) {
+          imageUrl = val;
+          break;
+        }
+        if (val is List && val.isNotEmpty && val.first is String) {
+          imageUrl = val.first.toString();
+          break;
+        }
+      }
+
+      // Fallback: check inside sharedPost object
+      if (imageUrl.isEmpty && widget.message['sharedPost'] is Map<String, dynamic>) {
+        final sp = widget.message['sharedPost'] as Map<String, dynamic>;
+        for (final key in ['images', 'image', 'media', 'forwerdImage', 'postImage']) {
+          final val = sp[key];
+          if (val is String && val.isNotEmpty) {
+            imageUrl = val;
+            break;
+          }
+          if (val is List && val.isNotEmpty && val.first is String) {
+            imageUrl = val.first.toString();
+            break;
+          }
+        }
+      }
 
       postData = {
         '_id': actualPostId,
         'text': text,
-        'images': (image.isNotEmpty &&
-            (image.startsWith('http://') ||
-                image.startsWith('https://') ||
-                image.startsWith('data:image')))
-            ? [image]
-            : [],   // ← don't add plain text as image
+        'images': imageUrl.isNotEmpty ? [imageUrl] : [],
         'authorName': forwardLabel,
         'authorProfile': '',
         'likesCount': 0,
@@ -372,50 +398,55 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       };
     }
 
-
     if (postData == null) {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.share, size: 18,
               color: _isMe ? Colors.white70 : Colors.grey[600]),
-
           const SizedBox(width: 6),
           Text('Shared a post',
               style: TextStyle(
                   fontSize: 14,
                   fontStyle: FontStyle.italic,
-                  color: _isMe ? Colors.white70 : Colors.grey[600])
-          ),
-
+                  color: _isMe ? Colors.white70 : Colors.grey[600])),
         ],
-
       );
-
     }
-    List<dynamic> _resolvePostImages(Map<String, dynamic> postData) {
-      for (final key in ['images', 'image', 'media', 'attachments', 'photos']) {
+
+    List<dynamic> resolvePostImages(Map<String, dynamic> postData) {
+      for (final key in ['images', 'image', 'forwerdImage', 'postImage', 'media']) {
         final v = postData[key];
         if (v is List && v.isNotEmpty) return v;
         if (v is String && v.isNotEmpty) return [v];
       }
       return [];
     }
+
     print('🖼️ sharedPost data: ${jsonEncode(postData)}');
     print('🖼️ images field: ${postData['images']}');
 
     final postContent = postData['text']?.toString() ?? '';
-    final postImages = _resolvePostImages(postData);
+    final postImages = resolvePostImages(postData);
     final authorName = postData['authorName']?.toString() ?? 'Unknown';
     final authorProfile = postData['authorProfile']?.toString();
     final likesCount = postData['likesCount'] ?? 0;
     final commentsCount = postData['commentsCount'] ?? 0;
+    final postId = postData['_id']?.toString() ?? '';
 
-    final postId = postData?['_id']?.toString() ?? '';
+    print('🔗 postId for navigation: $postId'); // debug
 
     return GestureDetector(
       onTap: () {
-        if (postId.isEmpty) return;
+        if (postId.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Post link not available'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+          return;
+        }
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -441,147 +472,134 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
           ),
         );
       },
-        child: Container(
-          constraints: BoxConstraints(
-              maxWidth: MediaQuery.of(context).size.width * 0.65),
-          decoration: BoxDecoration(
-        color: _isMe
-            ? Colors.white.withOpacity(0.15)
-            : Colors.grey[100],
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-            color: _isMe
-                ? Colors.white.withOpacity(0.25)
-                : Colors.grey[300]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: _isMe
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.grey[200],
-              borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(10),
-                  topRight: Radius.circular(10)),
-            ),
-            child: Row(children: [
-              Icon(Icons.share,
-                  size: 14,
-                  color: _isMe ? Colors.white60 : Colors.grey[600]),
-              const SizedBox(width: 5),
-              Text('Shared Post',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: _isMe ? Colors.white60 : Colors.grey[600])),
-            ]),
-          ),
-
-          // Author
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-            child: Row(children: [
-              CircleAvatar(
-                radius: 14,
-                backgroundColor: _isMe
-                    ? Colors.white.withOpacity(0.3)
-                    : Colors.grey[300],
-                backgroundImage: authorProfile != null &&
-                    authorProfile.isNotEmpty
-                    ? (authorProfile.startsWith('data:image/')
-                    ? MemoryImage(
-                    base64Decode(authorProfile.split(',')[1]))
-                    : NetworkImage(authorProfile) as ImageProvider)
-                    : null,
-                child: authorProfile == null || authorProfile.isEmpty
-                    ? Text(
-                    authorName.isNotEmpty
-                        ? authorName[0].toUpperCase()
-                        : 'U',
-                    style: TextStyle(
-                        fontSize: 12,
-                        color:
-                        _isMe ? Colors.white : Colors.grey[700]))
-                    : null,
+      child: Container(
+        constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.65),
+        decoration: BoxDecoration(
+          color: _isMe ? Colors.white.withOpacity(0.15) : Colors.grey[100],
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: _isMe ? Colors.white.withOpacity(0.25) : Colors.grey[300]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10)),
               ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(authorName,
+              child: Row(children: [
+                Icon(Icons.share,
+                    size: 14,
+                    color: _isMe ? Colors.white60 : Colors.grey[600]),
+                const SizedBox(width: 5),
+                Text('Shared Post',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _isMe ? Colors.white60 : Colors.grey[600])),
+              ]),
+            ),
+
+            // Author
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 14,
+                  backgroundColor: _isMe
+                      ? Colors.white.withOpacity(0.3)
+                      : Colors.grey[300],
+                  backgroundImage: authorProfile != null && authorProfile.isNotEmpty
+                      ? (authorProfile.startsWith('data:image/')
+                      ? MemoryImage(base64Decode(authorProfile.split(',')[1]))
+                      : NetworkImage(authorProfile) as ImageProvider)
+                      : null,
+                  child: authorProfile == null || authorProfile.isEmpty
+                      ? Text(
+                      authorName.isNotEmpty ? authorName[0].toUpperCase() : 'U',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: _isMe ? Colors.white : Colors.grey[700]))
+                      : null,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(authorName,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _isMe ? Colors.white : Colors.black87),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ]),
+            ),
+
+            // Post text
+            if (postContent.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
+                child: Text(postContent,
                     style: TextStyle(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        height: 1.4,
                         color: _isMe ? Colors.white : Colors.black87),
-                    maxLines: 1,
+                    maxLines: 3,
                     overflow: TextOverflow.ellipsis),
               ),
-            ]),
-          ),
 
-          // Post text
-          if (postContent.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
-              child: Text(postContent,
-                  style: TextStyle(
-                      fontSize: 13,
-                      height: 1.4,
-                      color: _isMe ? Colors.white : Colors.black87),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis),
-            ),
-
-          // Post image
-          if (postImages.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: _buildPostImage(postImages[0]),
+            // Post image
+            if (postImages.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: AspectRatio(
+                    aspectRatio: 16 / 9,
+                    child: _buildPostImage(postImages[0]),
+                  ),
                 ),
               ),
+
+            // Stats
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: Row(children: [
+                Icon(Icons.favorite,
+                    size: 13,
+                    color: _isMe ? Colors.white60 : Colors.grey[500]),
+                const SizedBox(width: 3),
+                Text('$likesCount',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: _isMe ? Colors.white70 : Colors.grey[600])),
+                const SizedBox(width: 12),
+                Icon(Icons.comment,
+                    size: 13,
+                    color: _isMe ? Colors.white60 : Colors.grey[500]),
+                const SizedBox(width: 3),
+                Text('$commentsCount',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: _isMe ? Colors.white70 : Colors.grey[600])),
+                const Spacer(),
+                Text('Tap to view',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                        color: _isMe ? Colors.white60 : Colors.blue[600])),
+              ]),
             ),
-
-
-          // Stats
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-            child: Row(children: [
-              Icon(Icons.favorite,
-                  size: 13,
-                  color: _isMe ? Colors.white60 : Colors.grey[500]),
-              const SizedBox(width: 3),
-              Text('$likesCount',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: _isMe ? Colors.white70 : Colors.grey[600])),
-              const SizedBox(width: 12),
-              Icon(Icons.comment,
-                  size: 13,
-                  color: _isMe ? Colors.white60 : Colors.grey[500]),
-              const SizedBox(width: 3),
-              Text('$commentsCount',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: _isMe ? Colors.white70 : Colors.grey[600])),
-              const Spacer(),
-              Text('Tap to view',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                      color:
-                      _isMe ? Colors.white60 : Colors.blue[600])),
-            ]),
-          ),
-        ],
+          ],
+        ),
       ),
-        ),  // closes Container
-    );   // closes GestureDetector
+    );
   }
 
   Widget _buildPostImage(dynamic imageData) {
@@ -605,6 +623,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       );
     }
 
+    // Prepend base URL for relative paths
+    if (!imageUrl.startsWith('http://') &&
+        !imageUrl.startsWith('https://') &&
+        !imageUrl.startsWith('data:image/')) {
+      imageUrl = 'https://api.ixes.ai/$imageUrl';
+    }
+
+    // Handle base64
     if (imageUrl.startsWith('data:image/')) {
       try {
         return Image.memory(
@@ -622,24 +648,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         );
       }
     }
-    if (!imageUrl.startsWith('http://') &&
-        !imageUrl.startsWith('https://') &&
-        !imageUrl.startsWith('data:image/')) {
-      // Not a valid image URL or base64 — show broken image placeholder
-      return Container(
-        color: Colors.grey[200],
-        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
-      );
-    }
 
+    // Network image — at this point imageUrl is guaranteed to be http/https
     return Image.network(
       imageUrl,
       fit: BoxFit.cover,
       loadingBuilder: (context, child, progress) {
         if (progress == null) return child;
-        return Center(
-          child: CircularProgressIndicator(strokeWidth: 2),
-        );
+        return Center(child: CircularProgressIndicator(strokeWidth: 2));
       },
       errorBuilder: (_, __, ___) => Container(
         color: Colors.grey[200],
@@ -649,7 +665,24 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
   }
 
   void _parseMessage() {
+// Extract valid postId from forwerdUrl
+    String extractedPostId = '';
+    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
+    if (fUrl.isNotEmpty) {
+      final segment = fUrl.split('/').last.trim();
+      if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+        extractedPostId = segment;
+      }
+    }
+    final hasValidPostId = extractedPostId.isNotEmpty;
+
+// Show label for plain text forwards AND non-navigable post cards
+// Hide only when it's a navigable shared post
+    _isForwardedMsg = widget.message['forwerd'] == true && !hasValidPostId;
     final rawSender = widget.message['senderId'];
+    if (widget.message['forwerd'] == true) {
+      print('🔥 GROUP FORWARDED MESSAGE: ${jsonEncode(widget.message)}');
+    }
     if (rawSender is Map<String, dynamic>) {
       _senderMap = rawSender;
       _senderName = rawSender['profile']?['name']?.toString() ?? 'Unknown';
@@ -663,10 +696,18 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     _isAudio = widget.message['isAudio'] == true;
     _isFile = widget.message['isFile'] == true ||
         (widget.message['fileUrl'] != null && !_isAudio);
-    _isSharedPost = widget.message['forwerd'] == true ||
-        widget.message['forwerdMessage'] != null ||
+    _isSharedPost =
         widget.message['isSharedPost'] == true ||
-        widget.message['sharedPost'] != null;
+            widget.message['sharedPost'] != null ||
+            (widget.message['forwerdUrl'] != null &&
+                (widget.message['forwerdUrl']?.toString() ?? '').isNotEmpty) ||
+            (widget.message['forwerd'] == true &&
+                widget.message['image'] != null &&
+                (widget.message['image']?.toString() ?? '').isNotEmpty &&
+                widget.message['isAudio'] != true &&
+                widget.message['isFile'] != true);
+
+    _isForwardedMsg = widget.message['forwerd'] == true && !_isSharedPost;
   }
 
   @override
@@ -775,6 +816,31 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     }
     return null;
   }
+  Widget _buildForwardedLabel() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.reply_rounded,
+            size: 13,
+            color: _isMe ? Colors.white60 : Colors.grey[500],
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Forwarded',
+            style: TextStyle(
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.w500,
+              color: _isMe ? Colors.white60 : Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   // ════════════════════════════════════════════════════════════════════════
   //  MESSAGE OPTIONS (Reply / Edit / Delete)
@@ -804,8 +870,22 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         }
       },
     ));
+    options.add(ListTile(
+      leading: Icon(Icons.reply_rounded, color: _purple),
+      title: const Text('Forward'),
+      onTap: () {
+        Navigator.pop(context);
+        // Pass the FULL message map — the screen handles both post and text types
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ForwardMessageScreen(message: widget.message),
+          ),
+        );
+      },
+    ));
 
-    // ── Edit — only my non-optimistic text messages ──────────────────────
+
     final isOptimistic = widget.message['isOptimistic'] == true;
     final status = widget.message['status']?.toString();
     if (_isMe &&
@@ -1332,6 +1412,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
           mainAxisAlignment: _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+
             // ── Left avatar ─────────────────────────────────────────────
             if (!_isMe) ...[
               SizedBox(
@@ -1378,6 +1459,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (_isForwardedMsg) _buildForwardedLabel(),
                       // Sender name
                       if (!_isMe && widget.showAvatar) ...[
                         Text(_senderName,
