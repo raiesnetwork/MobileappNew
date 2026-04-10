@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/video_call/video_call.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,7 @@ class _CallingScreenState extends State<CallingScreen>
   bool _isActioning = false;
   bool _isMuted = false;
   bool _isSpeakerOn = false;
+  final AudioPlayer _ringPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -29,6 +31,8 @@ class _CallingScreenState extends State<CallingScreen>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
+    _ringPlayer.setReleaseMode(ReleaseMode.loop);
+    _ringPlayer.play(AssetSource('sounds/outgoing.mp3'));
   }
 
   void _handleCallStateChange() {
@@ -75,6 +79,8 @@ class _CallingScreenState extends State<CallingScreen>
   void dispose() {
     _provider.removeListener(_handleCallStateChange);
     _pulseController.dispose();
+    _ringPlayer.stop();
+    _ringPlayer.dispose();
     super.dispose();
   }
 

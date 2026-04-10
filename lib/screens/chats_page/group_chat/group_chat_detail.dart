@@ -45,7 +45,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   bool _isSending = false;
   File? _selectedFile;
 
-  // ── Voice recording ─────────────────────────────────────────────────────
+  // ── Voice recording ──────────────────────────────────────────────────────
   FlutterSoundRecorder? _recorder;
   bool _isRecording = false;
   bool _isRecorderInitialized = false;
@@ -53,38 +53,37 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   Duration _recordingDuration = Duration.zero;
   Timer? _recordingTimer;
 
-  // ── Reply ────────────────────────────────────────────────────────────────
+  // ── Reply ─────────────────────────────────────────────────────────────────
   Map<String, dynamic>? _replyingToMessage;
 
-  // ── Compression constants ────────────────────────────────────────────────
+  // ── Compression constants ─────────────────────────────────────────────────
   static const int _maxImageBytes = 800 * 1024;
   static const int _maxAudioBytes = 4 * 1024 * 1024;
 
-// Add this field at the top of _GroupChatDetailPageState:
   late GroupChatProvider _groupChatProvider;
 
-// In initState, save the reference:
   @override
   void initState() {
     super.initState();
-    _groupChatProvider = context.read<GroupChatProvider>(); // ✅ save early
+    _groupChatProvider = context.read<GroupChatProvider>();
     _loadCurrentUser();
     _initializeRecorder();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initializeChat());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _initializeChat());
   }
 
-// In dispose, use the saved reference instead of context.read:
   @override
   void dispose() {
-    _groupChatProvider.onNewMessageReceived = null; // ✅ no context.read here
-
+    _groupChatProvider.onNewMessageReceived = null;
     _recordingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _recorder?.closeRecorder();
     SocketService().leaveGroup(widget.groupId);
     if (_recordingPath != null && File(_recordingPath!).existsSync()) {
-      try { File(_recordingPath!).deleteSync(); } catch (_) {}
+      try {
+        File(_recordingPath!).deleteSync();
+      } catch (_) {}
     }
     super.dispose();
   }
@@ -101,17 +100,15 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     provider.clearUnreadCount(widget.groupId);
     SocketService().joinGroup(widget.groupId);
 
-    // ✅ Auto scroll when new message arrives via socket
     provider.onNewMessageReceived = () {
       if (mounted) _scrollToBottom();
     };
   }
 
-
-
   String _readableSize(int bytes) {
     if (bytes < 1024) return '${bytes}B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024)
+      return '${(bytes / 1024).toStringAsFixed(1)}KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(2)}MB';
   }
 
@@ -123,7 +120,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
 
   Future<File> _compressImage(File imageFile) async {
     final ext = p.extension(imageFile.path).toLowerCase();
-    final format = ext == '.png' ? CompressFormat.png : CompressFormat.jpeg;
+    final format =
+    ext == '.png' ? CompressFormat.png : CompressFormat.jpeg;
     final tmpDir = await getTemporaryDirectory();
     final outExt = ext == '.png' ? 'png' : 'jpg';
 
@@ -136,11 +134,12 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       );
       if (result == null) break;
 
-      final outPath = p.join(
-          tmpDir.path, 'img_${DateTime.now().millisecondsSinceEpoch}.$outExt');
+      final outPath = p.join(tmpDir.path,
+          'img_${DateTime.now().millisecondsSinceEpoch}.$outExt');
       final outFile = File(outPath)..writeAsBytesSync(result);
 
-      if (result.length <= _maxImageBytes || quality == 25) return outFile;
+      if (result.length <= _maxImageBytes || quality == 25)
+        return outFile;
     }
     return imageFile;
   }
@@ -233,13 +232,15 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         _recordingDuration = Duration.zero;
       });
       _recordingTimer?.cancel();
-      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (t) {
-        if (_isRecording && mounted) {
-          setState(() => _recordingDuration = Duration(seconds: t.tick));
-        } else {
-          t.cancel();
-        }
-      });
+      _recordingTimer =
+          Timer.periodic(const Duration(seconds: 1), (t) {
+            if (_isRecording && mounted) {
+              setState(() =>
+              _recordingDuration = Duration(seconds: t.tick));
+            } else {
+              t.cancel();
+            }
+          });
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('Failed to start recording: $e'),
@@ -254,7 +255,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       _recordingTimer = null;
       await _recorder!.stopRecorder();
       setState(() => _isRecording = false);
-      if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+      if (_recordingPath != null &&
+          File(_recordingPath!).existsSync()) {
         _showVoicePreview();
       }
     } catch (e) {
@@ -281,7 +283,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
               Text('Voice message recorded',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text('Duration: ${_formatDuration(_recordingDuration)}'),
+              Text(
+                  'Duration: ${_formatDuration(_recordingDuration)}'),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -318,7 +321,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   }
 
   Future<void> _sendVoiceMessage() async {
-    if (_recordingPath == null || !File(_recordingPath!).existsSync()) {
+    if (_recordingPath == null ||
+        !File(_recordingPath!).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('No voice recording found'),
           backgroundColor: Colors.red));
@@ -351,18 +355,16 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       _scrollToBottom();
       _clearReply();
 
-      // Replace with:
       final ok = await provider.sendGroupVoiceMessage(
         groupId: widget.groupId,
         audioFile: uploadFile,
         communityInfo: communityInfo,
         audioDurationMs: durationMs,
         replyTo: replyId,
-        tempId: tempId, // ← ADD THIS
+        tempId: tempId,
       );
 
       if (ok) {
-
         _scrollToBottom();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -373,11 +375,12 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           ));
         }
       } else {
-        provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+        provider.updateOptimisticStatus(
+            widget.groupId, tempId, 'failed');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content:
-            Text('Failed: ${provider.sendVoiceError ?? "Unknown error"}'),
+            content: Text(
+                'Failed: ${provider.sendVoiceError ?? "Unknown error"}'),
             backgroundColor: Colors.red,
           ));
         }
@@ -385,7 +388,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -396,7 +401,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   void _deleteRecording() {
     _recordingTimer?.cancel();
     _recordingTimer = null;
-    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
+    if (_recordingPath != null &&
+        File(_recordingPath!).existsSync()) {
       try {
         File(_recordingPath!).deleteSync();
       } catch (_) {}
@@ -418,10 +424,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       final XFile? photo = await _imagePicker.pickImage(
           source: ImageSource.camera, imageQuality: 85);
       if (photo != null) {
-        setState(() {
-          _selectedFile = File(photo.path);
-          _messageController.text = _selectedFile!.path.split('/').last;
-        });
+        _showCameraPreviewBottomSheet(File(photo.path));
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -430,13 +433,97 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     }
   }
 
+  void _showCameraPreviewBottomSheet(File imageFile) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.black,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.close,
+                        color: Colors.white, size: 28),
+                    onPressed: () {
+                      _messageController.clear();
+                      Navigator.pop(context);
+                    },
+                  )
+                ],
+              ),
+              Expanded(
+                child: InteractiveViewer(
+                  child: Image.file(imageFile, fit: BoxFit.contain),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 12),
+                color: Colors.black,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _messageController,
+                        style:
+                        const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Add a caption...",
+                          hintStyle:
+                          TextStyle(color: Colors.grey[400]),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(24),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[900],
+                          contentPadding:
+                          const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() {
+                          _selectedFile = imageFile;
+                        });
+                        _sendMessage();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color:
+                          Theme.of(context).colorScheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.send,
+                            color: Colors.white),
+                      ),
+                    )
+                  ],
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickFile() async {
     try {
       final result = await FilePicker.platform.pickFiles();
       if (result != null && result.files.single.path != null) {
         setState(() {
           _selectedFile = File(result.files.single.path!);
-          _messageController.text = _selectedFile!.path.split('/').last;
         });
       }
     } catch (e) {
@@ -464,18 +551,18 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       });
 
       try {
-        final fileToSend = await _compressAndWarnUser(rawFile);
-
         final replyId = _replyingToMessage?['_id']?.toString();
         final replySnapshot = _replyingToMessage;
 
-        final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+        final tempId =
+            'temp_${DateTime.now().millisecondsSinceEpoch}';
         provider.addMessageToCurrentGroup({
           '_id': tempId,
           'isFile': true,
-          'fileName': p.basename(fileToSend.path),
-          'fileUrl': fileToSend.path,
-          'localFilePath': fileToSend.path,
+          'fileName': p.basename(rawFile.path),
+          'fileUrl': rawFile.path,
+          if (_isImageFile(rawFile.path)) 'fileType': 'image',
+          'localFilePath': rawFile.path,
           'senderId': _buildMyFakeSenderMap(),
           'createdAt': DateTime.now().toIso8601String(),
           'status': 'sending',
@@ -485,20 +572,21 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         _scrollToBottom();
         _clearReply();
 
+        final fileToSend = await _compressAndWarnUser(rawFile);
+
         final ok = await provider.sendGroupFileMessage(
           groupId: widget.groupId,
           file: fileToSend,
           communityInfo: communityInfo,
           replyTo: replyId,
-          tempId: tempId, // ← ADD THIS
+          tempId: tempId,
         );
 
         if (ok) {
-
-
           _scrollToBottom();
         } else {
-          provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+          provider.updateOptimisticStatus(
+              widget.groupId, tempId, 'failed');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
               content: Text(
@@ -510,7 +598,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+            SnackBar(
+                content: Text('Error: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -534,7 +624,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         'createdAt': DateTime.now().toIso8601String(),
         'status': 'sending',
         'isOptimistic': true,
-        if (_replyingToMessage != null) 'replyToMessage': _replyingToMessage,
+        if (_replyingToMessage != null)
+          'replyToMessage': _replyingToMessage,
       });
       _clearReply();
 
@@ -544,7 +635,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           text: text,
           communityInfo: communityInfo,
           replyTo: replyId,
-          tempId: tempId, // ← ADD THIS
+          tempId: tempId,
         );
 
         if (ok) {
@@ -552,16 +643,19 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
             if (mounted) _scrollToBottom();
           });
         } else {
-          provider.updateOptimisticStatus(widget.groupId, tempId, 'failed');
+          provider.updateOptimisticStatus(
+              widget.groupId, tempId, 'failed');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(provider.sendMessageError ?? 'Failed to send'),
+              content:
+              Text(provider.sendMessageError ?? 'Failed to send'),
               backgroundColor: Colors.red,
               action: SnackBarAction(
                   label: 'Retry',
                   textColor: Colors.white,
                   onPressed: () {
-                    provider.removeOptimisticMessage(widget.groupId, tempId);
+                    provider.removeOptimisticMessage(
+                        widget.groupId, tempId);
                     _messageController.text = text;
                   }),
             ));
@@ -572,7 +666,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-                content: Text('Failed: $e'), backgroundColor: Colors.red),
+                content: Text('Failed: $e'),
+                backgroundColor: Colors.red),
           );
         }
       } finally {
@@ -584,7 +679,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
   // ════════════════════════════════════════════════════════════════════════
   //  HELPERS
   // ════════════════════════════════════════════════════════════════════════
-  Map<String, dynamic> _buildCommunityInfo(GroupChatProvider provider) {
+  Map<String, dynamic> _buildCommunityInfo(
+      GroupChatProvider provider) {
     final g = provider.getGroupById(widget.groupId);
     return {
       '_id': g?['_id'] ?? widget.groupId,
@@ -608,7 +704,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients && mounted) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
+          0.0,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
@@ -620,16 +716,12 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     try {
       final da = DateTime.parse(a);
       final db = DateTime.parse(b);
-      return da.year == db.year && da.month == db.month && da.day == db.day;
+      return da.year == db.year &&
+          da.month == db.month &&
+          da.day == db.day;
     } catch (_) {
       return true;
     }
-  }
-
-  String _senderId(Map<String, dynamic> msg) {
-    final s = msg['senderId'];
-    if (s is Map<String, dynamic>) return s['_id']?.toString() ?? '';
-    return s?.toString() ?? '';
   }
 
   ImageProvider? _imageProvider(String? src) {
@@ -647,9 +739,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  MEMBER MANAGEMENT — async so we can refresh on return
-  // ════════════════════════════════════════════════════════════════════════
   Future<void> _openMemberManagement({bool adminMode = true}) async {
     final provider = context.read<GroupChatProvider>();
     final group = provider.getGroupById(widget.groupId) ??
@@ -668,7 +757,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       ),
     );
 
-    // Re-fetch from server so member list is always fresh on return
     if (mounted) {
       await provider.fetchMyGroups();
     }
@@ -705,7 +793,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           final count = group?['memberCount'] ?? 0;
           final name = group?['name'] ?? widget.groupName;
           final img = group?['profileImage']?.toString();
-          final hasImg = img != null && img.isNotEmpty && img != 'null';
+          final hasImg =
+              img != null && img.isNotEmpty && img != 'null';
 
           return Row(children: [
             Container(
@@ -713,7 +802,10 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 shape: BoxShape.circle,
                 gradient: !hasImg
                     ? const LinearGradient(
-                    colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
+                    colors: [
+                      Color(0xFF9B8FF5),
+                      Color(0xFF6C5CE7)
+                    ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight)
                     : null,
@@ -739,7 +831,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                   children: [
                     Text(name,
                         style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w600),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600),
                         overflow: TextOverflow.ellipsis),
                     if (count > 0)
                       Text('$count members',
@@ -758,9 +851,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
             switch (v) {
               case 'manage_members':
                 _openMemberManagement(adminMode: true);
-                break;
-              case 'remove_members':
-                _openMemberManagement(adminMode: false);
                 break;
               case 'group_info':
                 _showGroupInfo();
@@ -831,7 +921,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                        color: Colors.red[50], shape: BoxShape.circle),
+                        color: Colors.red[50],
+                        shape: BoxShape.circle),
                     child: Icon(Icons.error_outline,
                         size: 48, color: Colors.red[400])),
                 const SizedBox(height: 16),
@@ -843,8 +934,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 const SizedBox(height: 8),
                 Text(provider.messagesError!,
                     textAlign: TextAlign.center,
-                    style:
-                    TextStyle(color: Colors.grey[600], fontSize: 14)),
+                    style: TextStyle(
+                        color: Colors.grey[600], fontSize: 14)),
                 const SizedBox(height: 20),
                 ElevatedButton(
                   onPressed: () =>
@@ -864,6 +955,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
 
         final messages = provider.currentGroupMessages
             .where((m) => m['isDelete'] != true)
+            .toList()
+            .reversed
             .toList();
 
         if (messages.isEmpty) {
@@ -874,7 +967,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                   Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                          color: Colors.grey[100], shape: BoxShape.circle),
+                          color: Colors.grey[100],
+                          shape: BoxShape.circle),
                       child: Icon(Icons.chat_bubble_outline,
                           size: 60, color: Colors.grey[400])),
                   const SizedBox(height: 20),
@@ -900,33 +994,52 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           color: const Color(0xFF6C5CE7),
           child: ListView.builder(
             controller: _scrollController,
-            padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            reverse: true,
+            shrinkWrap: messages.length < 15,
+            padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 10),
             physics: const AlwaysScrollableScrollPhysics(),
             itemCount: messages.length,
-            itemBuilder: (context, i) {
-              final msg = messages[i];
-              final prev = i > 0 ? messages[i - 1] : null;
-              final next =
-              i < messages.length - 1 ? messages[i + 1] : null;
+            itemBuilder: (context, index) {
+              final msg = messages[index];
 
-              final showDateDiv = prev == null ||
-                  !_sameDay(
-                      msg['createdAt'] ?? '', prev['createdAt'] ?? '');
+              // ── Stable key prevents Flutter reusing widget state
+              //    across different messages (fixes text→post bug)
+              final msgKey = ValueKey(msg['_id'] ?? index);
 
-              final isSameSenderAsNext = false;
+              final msgTime = DateTime.parse(
+                  msg['createdAt'] ??
+                      DateTime.now().toIso8601String())
+                  .toLocal();
+              DateTime? olderTime;
+              for (int j = index + 1; j < messages.length; j++) {
+                olderTime = DateTime.parse(
+                    messages[j]['createdAt'] ??
+                        DateTime.now().toIso8601String())
+                    .toLocal();
+                break;
+              }
+              final showDateDiv = olderTime == null ||
+                  !_sameDay(msgTime.toIso8601String(),
+                      olderTime.toIso8601String());
 
               return Column(
+                key: msgKey,
                 children: [
                   if (showDateDiv)
-                    _buildDateDivider(msg['createdAt'] ?? ''),
+                    _buildDateDivider(msgTime.toIso8601String()),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: GroupMessageBubble(
+                      // ── ValueKey here is the critical fix:
+                      //    ensures each message ID maps to exactly
+                      //    one widget instance, preventing state
+                      //    from leaking between bubbles on scroll
+                      key: ValueKey(msg['_id'] ?? index),
                       message: msg,
                       currentUserId: _currentUserId,
                       groupId: widget.groupId,
-                      showAvatar: !isSameSenderAsNext,
+                      showAvatar: true,
                       onReply: _setReplyMessage,
                     ),
                   ),
@@ -965,13 +1078,14 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
                 color: Colors.grey[200],
                 borderRadius: BorderRadius.circular(12)),
             child: Text(label,
-                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                style:
+                TextStyle(fontSize: 12, color: Colors.grey[600])),
           ),
         ),
         Expanded(child: Divider(color: Colors.grey[300])),
@@ -994,7 +1108,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         const SizedBox(width: 10),
         Text('Recording... ${_formatDuration(_recordingDuration)}',
             style: TextStyle(
-                color: Colors.red[700], fontWeight: FontWeight.w500)),
+                color: Colors.red[700],
+                fontWeight: FontWeight.w500)),
         const Spacer(),
         TextButton(
             onPressed: _stopRecording, child: const Text('Stop')),
@@ -1051,7 +1166,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                               textCapitalization:
                               TextCapitalization.sentences,
                               style: TextStyle(
-                                  fontSize: 16, color: Colors.grey[800]),
+                                  fontSize: 16,
+                                  color: Colors.grey[800]),
                               cursorColor: const Color(0xFF6C5CE7),
                               enabled: !_isSending,
                               onSubmitted: (_) {
@@ -1074,7 +1190,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                                             !_isSending)
                                             ? const Color(0xFF6C5CE7)
                                             : Colors.grey[400]),
-                                    onPressed: (_selectedFile == null &&
+                                    onPressed:
+                                    (_selectedFile == null &&
                                         !_isSending)
                                         ? _capturePhoto
                                         : null,
@@ -1089,7 +1206,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                                             !_isSending)
                                             ? const Color(0xFF6C5CE7)
                                             : Colors.grey[400]),
-                                    onPressed: (_selectedFile == null &&
+                                    onPressed:
+                                    (_selectedFile == null &&
                                         !_isSending)
                                         ? _pickFile
                                         : null,
@@ -1176,7 +1294,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         color: Colors.grey[100],
         borderRadius: BorderRadius.circular(8),
         border: Border(
-            left: BorderSide(color: const Color(0xFF6C5CE7), width: 3)),
+            left: BorderSide(
+                color: const Color(0xFF6C5CE7), width: 3)),
       ),
       child: Row(children: [
         Expanded(
@@ -1201,7 +1320,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                           : '')),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.grey[700], fontSize: 13),
+                  style:
+                  TextStyle(color: Colors.grey[700], fontSize: 13),
                 ),
               ]),
         ),
@@ -1209,7 +1329,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
           onPressed: _clearReply,
           padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          constraints:
+          const BoxConstraints(minWidth: 28, minHeight: 28),
         ),
       ]),
     );
@@ -1219,13 +1340,14 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     return FutureBuilder<int>(
       future: _selectedFile!.length(),
       builder: (context, snap) {
-        final sizeStr = snap.hasData ? _readableSize(snap.data!) : '...';
+        final sizeStr =
+        snap.hasData ? _readableSize(snap.data!) : '...';
         final name = _selectedFile!.path.split('/').last;
         final isImg = _isImageFile(_selectedFile!.path);
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
-          padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.grey[100],
             borderRadius: BorderRadius.circular(8),
@@ -1251,7 +1373,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                             fontSize: 11, color: Colors.grey[500])),
                   ]),
             ),
-            if (isImg && snap.hasData && snap.data! > _maxImageBytes)
+            if (isImg &&
+                snap.hasData &&
+                snap.data! > _maxImageBytes)
               Container(
                 margin: const EdgeInsets.only(right: 6),
                 padding: const EdgeInsets.symmetric(
@@ -1264,10 +1388,11 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                         fontSize: 10, color: Colors.orange[800])),
               ),
             IconButton(
-              icon: Icon(Icons.close, size: 18, color: Colors.grey[600]),
+              icon: Icon(Icons.close,
+                  size: 18, color: Colors.grey[600]),
               padding: EdgeInsets.zero,
-              constraints:
-              const BoxConstraints(minWidth: 28, minHeight: 28),
+              constraints: const BoxConstraints(
+                  minWidth: 28, minHeight: 28),
               onPressed: () => setState(() {
                 _selectedFile = null;
                 _messageController.clear();
@@ -1305,7 +1430,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
         ),
         child: Column(
           children: [
-            // ── Drag Handle ──
             Container(
               width: 40,
               height: 4,
@@ -1315,13 +1439,10 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-
-            // ── Group Avatar + Name + Description ──
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Column(
                 children: [
-                  // Avatar
                   Container(
                     width: 80,
                     height: 80,
@@ -1330,7 +1451,10 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                       gradient: (group['profileImage'] == null ||
                           (group['profileImage'] as String).isEmpty)
                           ? const LinearGradient(
-                        colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
+                        colors: [
+                          Color(0xFF9B8FF5),
+                          Color(0xFF6C5CE7)
+                        ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       )
@@ -1340,7 +1464,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                       radius: 40,
                       backgroundColor: Colors.transparent,
                       backgroundImage: (group['profileImage'] != null &&
-                          (group['profileImage'] as String).isNotEmpty)
+                          (group['profileImage'] as String)
+                              .isNotEmpty)
                           ? NetworkImage(group['profileImage'])
                           : null,
                       child: (group['profileImage'] == null ||
@@ -1371,22 +1496,22 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                     const SizedBox(height: 6),
                     Text(
                       group['description'],
-                      style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                      style: TextStyle(
+                          fontSize: 14, color: Colors.grey[500]),
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
                   const SizedBox(height: 16),
-
-                  // ── Stats Row ──
                   Row(
                     children: [
                       Expanded(
                         child: _infoStatCard(
                           icon: Icons.people_rounded,
                           label: 'Members',
-                          value: '${group['memberCount'] ?? members.length}',
+                          value:
+                          '${group['memberCount'] ?? members.length}',
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1396,7 +1521,9 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                               ? Icons.admin_panel_settings_rounded
                               : Icons.person_rounded,
                           label: 'Your Role',
-                          value: group['isAdmin'] == true ? 'Admin' : 'Member',
+                          value: group['isAdmin'] == true
+                              ? 'Admin'
+                              : 'Member',
                         ),
                       ),
                     ],
@@ -1404,38 +1531,31 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 ],
               ),
             ),
-
             const SizedBox(height: 16),
             Divider(color: Colors.grey[100], thickness: 1),
-
-            // ── Members List Header ──
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
               child: Row(
                 children: [
-                  const Text(
-                    'Members',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1A1D2E),
-                    ),
-                  ),
+                  const Text('Members',
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1A1D2E))),
                   const SizedBox(width: 8),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF6C5CE7).withOpacity(0.10),
+                      color:
+                      const Color(0xFF6C5CE7).withOpacity(0.10),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text(
-                      '${members.length}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF6C5CE7),
-                      ),
-                    ),
+                    child: Text('${members.length}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF6C5CE7))),
                   ),
                   const Spacer(),
                   if (group['isAdmin'] == true)
@@ -1444,44 +1564,42 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                         Navigator.pop(context);
                         _openMemberManagement(adminMode: true);
                       },
-                      child: const Text(
-                        'Manage',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Color(0xFF6C5CE7),
-                        ),
-                      ),
+                      child: const Text('Manage',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF6C5CE7))),
                     ),
                 ],
               ),
             ),
-
-            // ── Members List ──
             Expanded(
               child: members.isEmpty
                   ? Center(
-                child: Text(
-                  'No members to display',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 14),
-                ),
-              )
+                  child: Text('No members to display',
+                      style: TextStyle(
+                          color: Colors.grey[400], fontSize: 14)))
                   : ListView.separated(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                padding:
+                const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 itemCount: members.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 6),
+                separatorBuilder: (_, __) =>
+                const SizedBox(height: 6),
                 itemBuilder: (context, i) {
                   final m = members[i];
-                  final isAdmin =
-                      m is Map && (m['isAdmin'] == true || m['role'] == 'admin');
+                  final isAdmin = m is Map &&
+                      (m['isAdmin'] == true ||
+                          m['role'] == 'admin');
 
-                  // Extract name
                   String name = 'Member';
                   if (m is Map) {
                     final profile = m['profile'];
                     if (profile is Map &&
                         profile['name'] != null &&
-                        profile['name'].toString().trim().isNotEmpty) {
+                        profile['name']
+                            .toString()
+                            .trim()
+                            .isNotEmpty) {
                       name = profile['name'].toString().trim();
                     } else if (m['name'] != null) {
                       name = m['name'].toString().trim();
@@ -1490,7 +1608,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                     }
                   }
 
-                  // Extract mobile
                   String mobile = '';
                   if (m is Map) {
                     mobile = (m['mobile'] ??
@@ -1501,19 +1618,22 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                         .toString();
                   }
 
-                  // Extract avatar
                   String? avatar;
                   if (m is Map) {
                     final profile = m['profile'];
                     if (profile is Map) {
-                      final img = profile['profileImage']?.toString() ?? '';
-                      if (img.isNotEmpty && img != 'null') avatar = img;
+                      final img =
+                          profile['profileImage']?.toString() ??
+                              '';
+                      if (img.isNotEmpty && img != 'null')
+                        avatar = img;
                     }
                   }
 
                   final initials = name[0].toUpperCase();
-                  final hasAvatar =
-                      avatar != null && avatar.isNotEmpty && avatar != 'null';
+                  final hasAvatar = avatar != null &&
+                      avatar.isNotEmpty &&
+                      avatar != 'null';
 
                   return Container(
                     padding: const EdgeInsets.symmetric(
@@ -1521,109 +1641,104 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                     decoration: BoxDecoration(
                       color: Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey[100]!),
+                      border:
+                      Border.all(color: Colors.grey[100]!),
                     ),
                     child: Row(
                       children: [
-                        // Avatar
-                        Stack(
-                          children: [
-                            Container(
-                              width: 44,
-                              height: 44,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: !hasAvatar
-                                    ? const LinearGradient(
-                                  colors: [
-                                    Color(0xFF9B8FF5),
-                                    Color(0xFF6C5CE7)
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                )
-                                    : null,
-                              ),
-                              child: CircleAvatar(
-                                radius: 22,
-                                backgroundColor: Colors.transparent,
-                                backgroundImage: hasAvatar
-                                    ? NetworkImage(avatar!)
-                                    : null,
-                                child: !hasAvatar
-                                    ? Text(
-                                  initials,
+                        Stack(children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: !hasAvatar
+                                  ? const LinearGradient(
+                                colors: [
+                                  Color(0xFF9B8FF5),
+                                  Color(0xFF6C5CE7)
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                                  : null,
+                            ),
+                            child: CircleAvatar(
+                              radius: 22,
+                              backgroundColor: Colors.transparent,
+                              backgroundImage: hasAvatar
+                                  ? NetworkImage(avatar!)
+                                  : null,
+                              child: !hasAvatar
+                                  ? Text(initials,
                                   style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 16,
-                                  ),
-                                )
-                                    : null,
+                                      color: Colors.white,
+                                      fontWeight:
+                                      FontWeight.bold,
+                                      fontSize: 16))
+                                  : null,
+                            ),
+                          ),
+                          if (isAdmin)
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 16,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color:
+                                  const Color(0xFFFFB347),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                      color: Colors.white,
+                                      width: 1.5),
+                                ),
+                                child: const Icon(
+                                    Icons.star_rounded,
+                                    size: 9,
+                                    color: Colors.white),
                               ),
                             ),
-                            if (isAdmin)
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFFFB347),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 1.5),
-                                  ),
-                                  child: const Icon(Icons.star_rounded,
-                                      size: 9, color: Colors.white),
-                                ),
-                              ),
-                          ],
-                        ),
+                        ]),
                         const SizedBox(width: 12),
-                        // Name + mobile
                         Expanded(
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                name,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Color(0xFF1A1D2E),
-                                ),
-                              ),
-                              if (mobile.isNotEmpty && mobile != name)
-                                Text(
-                                  mobile,
+                              Text(name,
                                   style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Color(0xFF9DA3B4),
-                                  ),
-                                ),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color:
+                                      Color(0xFF1A1D2E))),
+                              if (mobile.isNotEmpty &&
+                                  mobile != name)
+                                Text(mobile,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color:
+                                        Color(0xFF9DA3B4))),
                             ],
                           ),
                         ),
-                        // Admin badge
                         if (isAdmin)
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color:
-                              const Color(0xFFFFB347).withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(8),
+                              color: const Color(0xFFFFB347)
+                                  .withOpacity(0.15),
+                              borderRadius:
+                              BorderRadius.circular(8),
                             ),
-                            child: const Text(
-                              'Admin',
-                              style: TextStyle(
-                                color: Color(0xFFE08500),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
+                            child: const Text('Admin',
+                                style: TextStyle(
+                                    color: Color(0xFFE08500),
+                                    fontSize: 11,
+                                    fontWeight:
+                                    FontWeight.w700)),
                           ),
                       ],
                     ),
@@ -1631,30 +1746,35 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                 },
               ),
             ),
-
-            // ── Leave Group (members only, NO join button) ──
             if (group['isMember'] == true && group['isAdmin'] != true)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                padding:
+                const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(context);
-                      final ok = await provider.cancelGroupRequest(widget.groupId);
+                      final ok = await provider
+                          .cancelGroupRequest(widget.groupId);
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text(ok ? 'Left group' : 'Failed to leave'),
-                          backgroundColor: ok ? Colors.green : Colors.red,
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(SnackBar(
+                          content: Text(
+                              ok ? 'Left group' : 'Failed to leave'),
+                          backgroundColor:
+                          ok ? Colors.green : Colors.red,
                         ));
                       }
                     },
-                    icon: const Icon(Icons.exit_to_app, color: Colors.red),
+                    icon: const Icon(Icons.exit_to_app,
+                        color: Colors.red),
                     label: const Text('Leave Group',
                         style: TextStyle(color: Colors.red)),
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      padding:
+                      const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                     ),
@@ -1667,7 +1787,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     );
   }
 
-// Add this helper widget alongside _infoRow:
   Widget _infoStatCard({
     required IconData icon,
     required String label,
@@ -1678,7 +1797,8 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       decoration: BoxDecoration(
         color: const Color(0xFF6C5CE7).withOpacity(0.06),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF6C5CE7).withOpacity(0.12)),
+        border: Border.all(
+            color: const Color(0xFF6C5CE7).withOpacity(0.12)),
       ),
       child: Row(
         children: [
@@ -1701,38 +1821,6 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _actionButton(
-      String label, IconData icon, Color color, VoidCallback? onTap) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon),
-        label: Text(label),
-        style: ElevatedButton.styleFrom(
-            backgroundColor: color,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12)),
-      ),
-    );
-  }
-
-  Widget _infoRow(String label, String value, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(children: [
-        Icon(icon, size: 20, color: Colors.grey[600]),
-        const SizedBox(width: 12),
-        Text(label,
-            style: TextStyle(fontSize: 15, color: Colors.grey[600])),
-        const Spacer(),
-        Text(value,
-            style: const TextStyle(
-                fontSize: 15, fontWeight: FontWeight.w500)),
-      ]),
     );
   }
 }

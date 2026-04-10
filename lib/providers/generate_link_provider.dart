@@ -79,6 +79,7 @@ class MeetProvider with ChangeNotifier {
     List<Map<String, String>>? members,
     List<Map<String, String>>? mail,
     Map<String, dynamic>? recurrenceSettings,
+    String? message, // ✅ Added here
   }) async {
     _isLoading = true;
     _errorMessage = null;
@@ -95,11 +96,11 @@ class MeetProvider with ChangeNotifier {
         members: members,
         mail: mail,
         recurrenceSettings: recurrenceSettings,
+        message: message, // ✅ Pass it here
       );
 
       _isLoading = false;
 
-      // FIXED: Check for either error field OR message field
       if (result['error'] == false || result['message'] == 'success') {
         _successMessage = result['message'] ?? 'Meeting link shared successfully';
         _errorMessage = null;
@@ -119,7 +120,6 @@ class MeetProvider with ChangeNotifier {
       return false;
     }
   }
-
   /// Validates a meeting link
   Future<bool> validateMeetLink({
     required String linkId,

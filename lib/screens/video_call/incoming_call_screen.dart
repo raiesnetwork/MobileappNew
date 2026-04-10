@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/video_call/video_call.dart';
 import 'package:provider/provider.dart';
@@ -10,41 +11,35 @@ class IncomingCallScreen extends StatefulWidget {
 
 class _IncomingCallScreenState extends State<IncomingCallScreen> {
   late final VideoCallProvider _provider;
+  final AudioPlayer _ringPlayer = AudioPlayer();
 
-  bool _isActioning = false; // prevent double-tap
-  bool _isPopping   = false; // prevent double-pop → red screen bug
+  bool _isActioning = false;
+  bool _isPopping = false;
 
   @override
   void initState() {
     super.initState();
     _provider = context.read<VideoCallProvider>();
     _provider.addListener(_handleCallStateChange);
+
+    _ringPlayer.setReleaseMode(ReleaseMode.loop);
+    _ringPlayer.play(AssetSource('sounds/ringtone.mp3'));
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Called when provider state changes (e.g. caller cancelled)
-  // ─────────────────────────────────────────────────────────────────────────
   void _handleCallStateChange() {
     if (!mounted || _isActioning || _isPopping) return;
 
-    // ✅ Only pop on 'ended' — NOT on 'idle'
-    // Provider auto-resets ended → idle after 2s which was causing a
-    // second pop attempt → red screen / "Unknown" reappear bug
     if (_provider.callState == CallState.ended) {
       debugPrint('📵 IncomingCallScreen: caller cancelled → popping safely');
       _safePop();
     }
   }
 
-  /// Pop safely — never mid-build frame
   void _safePop() {
     if (_isPopping || !mounted) return;
     _isPopping = true;
-
-    // Stop listening immediately so no further state changes fire
     _provider.removeListener(_handleCallStateChange);
-
-    // ✅ addPostFrameCallback = never pop during a build → avoids red screen
+    _ringPlayer.stop();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop();
     });
@@ -53,36 +48,26 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   @override
   void dispose() {
     _provider.removeListener(_handleCallStateChange);
+    _ringPlayer.stop();
+    _ringPlayer.dispose();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Decline
-  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _onDecline() async {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
-
-    // Remove listener BEFORE rejectCall() so the 'ended' state change
-    // doesn't re-trigger _handleCallStateChange → double-pop
     _provider.removeListener(_handleCallStateChange);
-
+    _ringPlayer.stop();
     await _provider.rejectCall();
-
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Accept
-  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _onAccept() async {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
-
     _provider.removeListener(_handleCallStateChange);
-
+    _ringPlayer.stop();
     await _provider.acceptCall();
-
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => VideoCallScreen()),
@@ -90,9 +75,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return WillPopScope(

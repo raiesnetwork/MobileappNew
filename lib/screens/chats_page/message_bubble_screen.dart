@@ -37,6 +37,9 @@ class MessageBubble extends StatefulWidget {
   final bool isSharedPost;
   final Map<String, dynamic>? sharedPostData;
   final bool isForwarded;
+  final bool isLink;
+  final Map<String, dynamic>? linkMeta;
+
 
   // Voice message properties
   final bool isAudio;
@@ -70,6 +73,8 @@ class MessageBubble extends StatefulWidget {
     this.isSharedPost = false,
     this.sharedPostData,
     this.isForwarded = false,
+    this.isLink = false,
+    this.linkMeta,
 
   }) : super(key: key);
 
@@ -488,6 +493,82 @@ class _MessageBubbleState extends State<MessageBubble> {
       ),
     );
   }
+  Widget _buildLinkPreview() {
+    final meta = widget.linkMeta;
+
+    if (meta == null) return const SizedBox();
+
+    return GestureDetector(
+      onTap: () async {
+        final url = meta['url'];
+        if (url != null) {
+          final uri = Uri.parse(url);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+          color: widget.isMe ? Colors.white.withOpacity(0.1) : Colors.grey[100],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 🖼 IMAGE
+            if ((meta['image'] ?? '').toString().isNotEmpty)
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                child: Image.network(
+                  meta['image'],
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+
+            // 📝 TEXT
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    meta['title'] ?? '',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: widget.isMe ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    meta['description'] ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: widget.isMe ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    meta['url'] ?? '',
+                    style: const TextStyle(
+                      color: Colors.blue,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildPostImage(dynamic imageData) {
     String? imageUrl;
@@ -560,6 +641,128 @@ class _MessageBubbleState extends State<MessageBubble> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  bool get _isImageFile {
+    if (widget.fileType != null && widget.fileType!.toLowerCase().contains('image')) return true;
+    if (widget.fileName != null) {
+      final ext = widget.fileName!.toLowerCase();
+      return ext.endsWith('.png') || ext.endsWith('.jpg') || ext.endsWith('.jpeg') || ext.endsWith('.gif') || ext.endsWith('.webp');
+    }
+    return false;
+  }
+
+  Widget _buildChatMessageImage() {
+    Widget imageWidget;
+
+    if (widget.localFilePath != null && widget.localFilePath!.isNotEmpty) {
+      final file = File(widget.localFilePath!);
+      if (file.existsSync()) {
+        imageWidget = Image.file(
+          file,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildImageError(),
+        );
+      } else {
+        imageWidget = _buildImageError();
+      }
+    } else {
+      String url = widget.fileUrl ?? '';
+      if (url.isNotEmpty) {
+        if (!url.startsWith('http')) {
+          url = 'https://api.ixes.ai/$url';
+        }
+        imageWidget = CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            width: 250,
+            height: 200,
+            color: widget.isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+            child: const Center(child: CircularProgressIndicator()),
+          ),
+          errorWidget: (context, url, error) => _buildImageError(),
+        );
+      } else {
+        imageWidget = _buildImageError();
+      }
+    }
+
+    return GestureDetector(
+      onTap: widget.status == 'sending' ? null : () => _handleFileOpen(context),
+      child: Container(
+        constraints: const BoxConstraints(
+          maxHeight: 300,
+          maxWidth: 250,
+          minWidth: 150,
+          minHeight: 150,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18).copyWith(
+            bottomRight: widget.isMe ? const Radius.circular(4) : null,
+            bottomLeft: !widget.isMe ? const Radius.circular(4) : null,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18).copyWith(
+            bottomRight: widget.isMe ? const Radius.circular(4) : null,
+            bottomLeft: !widget.isMe ? const Radius.circular(4) : null,
+          ),
+          child: Stack(
+            fit: StackFit.loose,
+            alignment: Alignment.center,
+            children: [
+              imageWidget,
+              
+              if (widget.status == 'sending')
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black45,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                
+              if (widget.status == 'failed')
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black45,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.refresh,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -899,11 +1102,12 @@ class _MessageBubbleState extends State<MessageBubble> {
             constraints: BoxConstraints(
               maxWidth: MediaQuery.of(context).size.width * 0.75,
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: EdgeInsets.symmetric(
+              horizontal: (widget.isFile && _isImageFile) ? 0 : 16,
+              vertical: (widget.isFile && _isImageFile) ? 0 : 10,
+            ),
             decoration: BoxDecoration(
-              color: widget.isMe
-                  ? Primary
-                  : Colors.grey[300],
+              color: (widget.isFile && _isImageFile) ? Colors.transparent : (widget.isMe ? Primary : Colors.grey[300]),
               borderRadius: BorderRadius.circular(18).copyWith(
                 bottomRight: widget.isMe ? const Radius.circular(4) : null,
                 bottomLeft: !widget.isMe ? const Radius.circular(4) : null,
@@ -975,6 +1179,9 @@ class _MessageBubbleState extends State<MessageBubble> {
 
                 // File content
                 else if (widget.isFile && widget.fileUrl != null && widget.fileName != null)
+                  if (_isImageFile)
+                    _buildChatMessageImage()
+                  else
                     GestureDetector(
                       onTap: () => _handleFileOpen(context),
                       child: Container(
@@ -1045,19 +1252,30 @@ class _MessageBubbleState extends State<MessageBubble> {
                       ),
                     )
 
-                  // Text content
-                  else if (widget.content != null)
+                  else if (widget.content != null) ...[
                       ClickableMessageText(
                         text: widget.content!,
                         isMe: widget.isMe,
                       ),
 
+                      // 🔥 ADD THIS
+                      if (widget.isLink && widget.linkMeta != null)
+                        _buildLinkPreview(),
+                    ],
+
+
                 const SizedBox(height: 4),
 
                 // Timestamp and status
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: (widget.isFile && _isImageFile) ? 4.0 : 0,
+                    right: (widget.isFile && _isImageFile) ? 8.0 : 0,
+                    left: (widget.isFile && _isImageFile) ? 8.0 : 0,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                     Text(
                       _formatTime(widget.timestamp),
                       style: TextStyle(
@@ -1082,6 +1300,7 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ],
                   ],
                 ),
+                ), // Close Padding here
               ],
             ),
           ),

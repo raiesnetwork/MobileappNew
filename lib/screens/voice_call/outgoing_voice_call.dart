@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/voice_call/voice_call_room_screen.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,7 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
   // Add these state variables at the top of _VoiceCallingScreenState:
   bool _isMuted = false;
   bool _isSpeakerOn = false;
+  final AudioPlayer _ringPlayer = AudioPlayer();
 
   late AnimationController _pulseController;
   bool _isActioning = false; // prevents double-pop from button + listener
@@ -32,6 +34,8 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
       vsync: this,
       duration: const Duration(seconds: 1),
     )..repeat(reverse: true);
+    _ringPlayer.setReleaseMode(ReleaseMode.loop);
+    _ringPlayer.play(AssetSource('sounds/outgoing.mp3'));
   }
 
   void _handleCallStateChange() {
@@ -85,6 +89,8 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
     // ✅ Use saved _provider ref — context.read() is UNSAFE here
     _provider.removeListener(_handleCallStateChange);
     _pulseController.dispose();
+    _ringPlayer.stop();
+    _ringPlayer.dispose();
     super.dispose();
   }
 

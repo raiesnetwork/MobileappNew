@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:provider/provider.dart';
@@ -23,36 +24,72 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   bool _isSpeakerOn = true;
   bool _isConnecting = true;
   bool _isEnding = false;
-
-  // ── Key fix: track whether we have successfully joined LiveKit ──────
-  // Only allow state-change listener to close the screen AFTER we joined.
-  // This prevents idle/ended state from a previous call closing us immediately.
   bool _hasJoined = false;
 
   Timer? _callTimer;
   int _callDuration = 0;
 
+  // ── Ringing (receiver side — plays before LiveKit join) ───────────────
+  final AudioPlayer _ringPlayer = AudioPlayer();
+  bool _isRinging = false;
+
   @override
   void initState() {
     super.initState();
     _provider = context.read<VoiceCallProvider>();
-    debugPrint('🏁 VoiceRoomScreen: initState | callState=${_provider.callState} | acceptedViaCallKit=${_provider.acceptedViaCallKit}');
+    debugPrint(
+        '🏁 VoiceRoomScreen: initState | callState=${_provider.callState} | acceptedViaCallKit=${_provider.acceptedViaCallKit}');
     _provider.addListener(_handleCallStateChange);
+
+    // FIX: if the call was NOT auto-accepted via CallKit, the receiver
+    // must manually accept — ring them here (socket path, not FCM path).
+    // FCM path already rings via the system. This covers the in-app case.
+    if (!_provider.acceptedViaCallKit) {
+      _startRinging();
+    }
+
     _joinRoom();
     _startCallTimer();
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  //  RINGING
+  // ════════════════════════════════════════════════════════════════════════
+
+  Future<void> _startRinging() async {
+    if (_isRinging) return;
+    _isRinging = true;
+    try {
+      await _ringPlayer.setReleaseMode(ReleaseMode.loop);
+      await _ringPlayer.play(AssetSource('sounds/ringtone.mp3'));
+    } catch (e) {
+      debugPrint('⚠️ VoiceRoomScreen: could not play ringtone: $e');
+    }
+  }
+
+  Future<void> _stopRinging() async {
+    if (!_isRinging) return;
+    _isRinging = false;
+    try {
+      await _ringPlayer.stop();
+    } catch (e) {
+      debugPrint('⚠️ VoiceRoomScreen: could not stop ringtone: $e');
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  CALL STATE LISTENER
+  // ════════════════════════════════════════════════════════════════════════
+
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
 
-    debugPrint('🔔 VoiceRoomScreen: callState=${_provider.callState} | hasJoined=$_hasJoined | isEnding=$_isEnding');
+    debugPrint(
+        '🔔 VoiceRoomScreen: callState=${_provider.callState} | hasJoined=$_hasJoined | isEnding=$_isEnding');
 
-    // ── CRITICAL FIX ──────────────────────────────────────────────────
-    // Only close if we have successfully joined LiveKit room.
-    // Without this guard, an idle/ended state from a previous call
-    // (before socket reconnects) would close this screen immediately.
     if (!_hasJoined) {
-      debugPrint('⚠️ VoiceRoomScreen: ignoring state change — not joined yet');
+      debugPrint(
+          '⚠️ VoiceRoomScreen: ignoring state change — not joined yet');
       return;
     }
 
@@ -66,16 +103,17 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   void _closeScreen() {
     if (_isEnding) return;
     _isEnding = true;
+    _stopRinging();
     _provider.removeListener(_handleCallStateChange);
     _room?.disconnect();
     _callTimer?.cancel();
-    FlutterCallkitIncoming.endAllCalls(); // ✅ ADD
+    FlutterCallkitIncoming.endAllCalls();
     if (mounted) Navigator.of(context).pop();
   }
 
   void _startCallTimer() {
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() { _callDuration++; });
+      if (mounted) setState(() => _callDuration++);
     });
   }
 
@@ -84,6 +122,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     final s = seconds % 60;
     return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ICE SERVERS
+  // ════════════════════════════════════════════════════════════════════════
 
   Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
@@ -105,10 +147,12 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
         return iceList.map((server) {
           final s = server as Map<String, dynamic>;
-          final urls = s['urls']?.toString() ?? s['url']?.toString() ?? '';
+          final urls =
+              s['urls']?.toString() ?? s['url']?.toString() ?? '';
           final username = s['username']?.toString();
           final credential = s['credential']?.toString();
-          return RTCIceServer(urls: [urls], username: username, credential: credential);
+          return RTCIceServer(
+              urls: [urls], username: username, credential: credential);
         }).toList();
       }
     } catch (e) {
@@ -117,16 +161,38 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  //  JOIN ROOM
+  //  FIX: token fetch retries once on failure; acceptVoiceCall is called
+  //  for non-CallKit flows before connecting to LiveKit.
+  // ════════════════════════════════════════════════════════════════════════
+
   Future<void> _joinRoom() async {
     try {
       final bool wasAutoAccepted = _provider.acceptedViaCallKit;
-      debugPrint('🔑 VoiceRoomScreen: autoAccepted=$wasAutoAccepted | roomName=${_provider.currentRoomName}');
+      debugPrint(
+          '🔑 VoiceRoomScreen: autoAccepted=$wasAutoAccepted | roomName=${_provider.currentRoomName}');
 
-      // Step 1: Fetch voice token
+      // FIX: for socket-originated calls the receiver must emit accept
+      // BEFORE fetching the token so the caller's UI transitions correctly.
+      if (!wasAutoAccepted) {
+        debugPrint(
+            '📞 VoiceRoomScreen: emitting acceptVoiceCall via socket...');
+        await _provider.acceptVoiceCall();
+        // Stop ringing as soon as we accept
+        await _stopRinging();
+      }
+
+      // Step 1: Fetch voice token — retry once on failure
       debugPrint('🎫 VoiceRoomScreen: fetching voice token...');
-      final success = await _provider.fetchVoiceToken();
+      bool success = await _provider.fetchVoiceToken();
       if (!success) {
-        debugPrint('❌ VoiceRoomScreen: token fetch failed');
+        debugPrint('⚠️ VoiceRoomScreen: token fetch failed, retrying...');
+        await Future.delayed(const Duration(seconds: 1));
+        success = await _provider.fetchVoiceToken();
+      }
+      if (!success) {
+        debugPrint('❌ VoiceRoomScreen: token fetch failed after retry');
         _showError('Failed to get call token');
         return;
       }
@@ -134,7 +200,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
       // Step 2: Fetch ICE servers
       final iceServers = await _fetchIceServers();
-      debugPrint('🌐 VoiceRoomScreen: using ${iceServers.length} ICE servers');
+      debugPrint(
+          '🌐 VoiceRoomScreen: using ${iceServers.length} ICE servers');
 
       // Step 3: Connect to LiveKit
       debugPrint('🔌 VoiceRoomScreen: connecting to LiveKit...');
@@ -158,13 +225,11 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       _room!.addListener(_onRoomUpdate);
       _provider.notifyParticipantJoined();
 
-      // ── Mark as joined AFTER successful LiveKit connection ──────────
-      // Only now will _handleCallStateChange be allowed to close the screen
       _hasJoined = true;
-      debugPrint('✅ VoiceRoomScreen: joined LiveKit room | _hasJoined=true');
+      debugPrint(
+          '✅ VoiceRoomScreen: joined LiveKit room | _hasJoined=true');
 
-      if (mounted) setState(() { _isConnecting = false; });
-      debugPrint('✅ Joined voice room: ${_provider.currentRoomName}');
+      if (mounted) setState(() => _isConnecting = false);
     } catch (e) {
       debugPrint('❌ VoiceRoomScreen: error joining room: $e');
       _showError('Failed to join call: $e');
@@ -184,27 +249,26 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   }
 
   void _toggleSpeaker() {
-    if (mounted) setState(() { _isSpeakerOn = !_isSpeakerOn; });
+    if (mounted) setState(() => _isSpeakerOn = !_isSpeakerOn);
   }
 
   Future<void> _endCall() async {
     if (_isEnding) return;
     debugPrint('📴 VoiceRoomScreen: user ended call');
     _isEnding = true;
+    _stopRinging();
     _provider.removeListener(_handleCallStateChange);
     _provider.notifyParticipantLeft();
     await _provider.endVoiceCall();
     await _room?.disconnect();
     _callTimer?.cancel();
-
-    // ✅ ADD THIS — dismisses the ongoing call notification
     await FlutterCallkitIncoming.endAllCalls();
-
     if (mounted) Navigator.of(context).pop();
   }
 
   void _showError(String message) {
     debugPrint('❌ VoiceRoomScreen: error: $message');
+    _stopRinging();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -215,13 +279,20 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   @override
   void dispose() {
-    debugPrint('🧹 VoiceRoomScreen: dispose | _hasJoined=$_hasJoined');
+    debugPrint(
+        '🧹 VoiceRoomScreen: dispose | _hasJoined=$_hasJoined');
+    _stopRinging();
+    _ringPlayer.dispose();
     _provider.removeListener(_handleCallStateChange);
     _callTimer?.cancel();
     _room?.removeListener(_onRoomUpdate);
     _room?.disconnect();
     super.dispose();
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -233,10 +304,13 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white54),
+                valueColor:
+                AlwaysStoppedAnimation<Color>(Colors.white54),
               ),
               SizedBox(height: 20),
-              Text('Connecting...', style: TextStyle(color: Colors.white54, fontSize: 16)),
+              Text('Connecting...',
+                  style:
+                  TextStyle(color: Colors.white54, fontSize: 16)),
             ],
           ),
         ),
@@ -244,10 +318,14 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     }
 
     final callerName = _provider.currentReceiverName ??
-        _provider.currentCallerName ?? 'Voice Call';
+        _provider.currentCallerName ??
+        'Voice Call';
 
     return WillPopScope(
-      onWillPop: () async { _showEndCallDialog(); return false; },
+      onWillPop: () async {
+        _showEndCallDialog();
+        return false;
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D0D14),
         body: Stack(
@@ -289,24 +367,30 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           const Spacer(),
           Row(
             children: [
-              Icon(Icons.lock_outline, size: 13, color: Colors.white.withOpacity(0.5)),
+              Icon(Icons.lock_outline,
+                  size: 13, color: Colors.white.withOpacity(0.5)),
               const SizedBox(width: 4),
               Text('End-to-end encrypted',
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 12)),
             ],
           ),
           const Spacer(),
-          _circleIconButton(icon: Icons.person_add_alt_1_outlined, onTap: () {}),
+          _circleIconButton(
+              icon: Icons.person_add_alt_1_outlined, onTap: () {}),
         ],
       ),
     );
   }
 
-  Widget _circleIconButton({required IconData icon, required VoidCallback onTap}) {
+  Widget _circleIconButton(
+      {required IconData icon, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 44, height: 44,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(
           color: Colors.white.withOpacity(0.08),
           shape: BoxShape.circle,
@@ -324,7 +408,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 160, height: 160,
+              width: 160,
+              height: 160,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: const LinearGradient(
@@ -335,11 +420,13 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                 boxShadow: [
                   BoxShadow(
                     color: const Color(0xFF4A90D9).withOpacity(0.35),
-                    blurRadius: 40, spreadRadius: 8,
+                    blurRadius: 40,
+                    spreadRadius: 8,
                   ),
                 ],
               ),
-              child: const Icon(Icons.person, size: 80, color: Colors.white),
+              child:
+              const Icon(Icons.person, size: 80, color: Colors.white),
             ),
             const SizedBox(height: 28),
             Text(callerName,
@@ -351,20 +438,25 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             const SizedBox(height: 12),
             if (isWaiting)
               Text('Connecting...',
-                  style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 16))
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.55),
+                      fontSize: 16))
             else
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 8, height: 8,
+                    width: 8,
+                    height: 8,
                     decoration: const BoxDecoration(
-                        color: Colors.greenAccent, shape: BoxShape.circle),
+                        color: Colors.greenAccent,
+                        shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 8),
                   Text(_formatDuration(_callDuration),
                       style: TextStyle(
-                          color: Colors.white.withOpacity(0.8), fontSize: 16)),
+                          color: Colors.white.withOpacity(0.8),
+                          fontSize: 16)),
                 ],
               ),
           ],
@@ -376,7 +468,8 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   Widget _buildControls() {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.06),
         borderRadius: BorderRadius.circular(32),
@@ -385,7 +478,6 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // ── Speaker (replaces more_horiz) ──────────────────
           _smallControlButton(
             icon: _provider.isSpeakerOn
                 ? Icons.volume_up_rounded
@@ -393,12 +485,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             color: _provider.isSpeakerOn
                 ? Colors.blue.withOpacity(0.8)
                 : Colors.white.withOpacity(0.12),
-            onPressed: () {
-              _provider.setSpeaker(!_provider.isSpeakerOn);
-            },
+            onPressed: () =>
+                _provider.setSpeaker(!_provider.isSpeakerOn),
           ),
-
-          // ── Volume (keeps existing) ────────────────────────
           _smallControlButton(
             icon: _isSpeakerOn
                 ? Icons.hearing_rounded
@@ -408,26 +497,26 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                 : Colors.white.withOpacity(0.06),
             onPressed: _toggleSpeaker,
           ),
-
-          // ── End Call ───────────────────────────────────────
           GestureDetector(
             onTap: _showEndCallDialog,
             child: Container(
-              width: 68, height: 68,
+              width: 68,
+              height: 68,
               decoration: BoxDecoration(
                 color: Colors.redAccent,
                 shape: BoxShape.circle,
-                boxShadow: [BoxShadow(
-                  color: Colors.redAccent.withOpacity(0.45),
-                  blurRadius: 24, spreadRadius: 2,
-                )],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.redAccent.withOpacity(0.45),
+                    blurRadius: 24,
+                    spreadRadius: 2,
+                  )
+                ],
               ),
-              child: const Icon(
-                  Icons.call_end_rounded, size: 30, color: Colors.white),
+              child: const Icon(Icons.call_end_rounded,
+                  size: 30, color: Colors.white),
             ),
           ),
-
-          // ── Mic ───────────────────────────────────────────
           _smallControlButton(
             icon: _provider.isMuted
                 ? Icons.mic_off_rounded
@@ -437,13 +526,11 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
                 : Colors.white.withOpacity(0.12),
             onPressed: () async {
               _provider.setMuted(!_provider.isMuted);
-              await _room!.localParticipant
+              await _room?.localParticipant
                   ?.setMicrophoneEnabled(!_provider.isMuted);
               setState(() {});
             },
           ),
-
-          // ── Dialpad ───────────────────────────────────────
           _smallControlButton(
             icon: Icons.dialpad_rounded,
             color: Colors.white.withOpacity(0.12),
@@ -462,8 +549,10 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     return GestureDetector(
       onTap: onPressed,
       child: Container(
-        width: 52, height: 52,
-        decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        width: 52,
+        height: 52,
+        decoration:
+        BoxDecoration(color: color, shape: BoxShape.circle),
         child: Icon(icon, color: Colors.white, size: 24),
       ),
     );
@@ -474,20 +563,29 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
         title: const Text('End Call?',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-        content: const Text('Are you sure you want to end this call?',
+            style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w700)),
+        content: const Text(
+            'Are you sure you want to end this call?',
             style: TextStyle(color: Colors.white60)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.white60)),
           ),
           TextButton(
-            onPressed: () { Navigator.pop(ctx); _endCall(); },
-            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            child: const Text('End Call', style: TextStyle(fontWeight: FontWeight.w700)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _endCall();
+            },
+            style:
+            TextButton.styleFrom(foregroundColor: Colors.redAccent),
+            child: const Text('End Call',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),

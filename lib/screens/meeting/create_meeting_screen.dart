@@ -388,27 +388,27 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
 
   Future<void> _startMeeting(String linkId) async {
     final meetingProvider = context.read<MeetingProvider>();
+    final authProvider = context.read<AuthProvider>();
 
-    // ✅ Get real token from SharedPreferences
+    // ✅ Always get fresh token
     final prefs = await SharedPreferences.getInstance();
     final authToken = prefs.getString('auth_token');
 
-    // ✅ Get real user info from your auth provider
-    final authProvider = context.read<AuthProvider>(); // use your actual auth provider name
     final userId = authProvider.user?.id ?? 'user-${DateTime.now().millisecondsSinceEpoch}';
     final userName = authProvider.user?.username ?? 'Host';
 
-    if (meetingProvider.currentUserId == null) {
-      print('🎯 Initializing MeetingProvider');
-      meetingProvider.initialize(
-        userId: userId,
-        userName: userName,
-        authToken: authToken, // ✅ pass real token
-      );
+    print('🎯 userId: $userId');
+    print('🎯 userName: $userName');
+    print('🎯 authToken: $authToken');
 
-      await Future.delayed(const Duration(seconds: 2));
-    }
-    // ... rest stays same
+    // ✅ Always reinitialize to ensure fresh token is set
+    meetingProvider.initialize(
+      userId: userId,
+      userName: userName,
+      authToken: authToken,
+    );
+
+    await Future.delayed(const Duration(seconds: 2));
 
     meetingProvider.clearMessages();
 
@@ -423,9 +423,7 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
     print('🎯 Joining as meeting host: $linkId');
     await meetingProvider.joinAsMeetingHost(linkId);
 
-    if (mounted) {
-      Navigator.pop(context);
-    }
+    if (mounted) Navigator.pop(context);
 
     print('✅ Access token: ${meetingProvider.accessToken}');
 
@@ -444,9 +442,7 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
         print('❌ Failed: ${meetingProvider.errorMessage}');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              meetingProvider.errorMessage ?? 'Failed to start meeting',
-            ),
+            content: Text(meetingProvider.errorMessage ?? 'Failed to start meeting'),
             backgroundColor: Colors.red,
           ),
         );
@@ -454,8 +450,8 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
     }
   }
 
-  void _goToShare(String linkId, String meetLink) {
-    Navigator.push(
+  Future<void> _goToShare(String linkId, String meetLink) async {
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ShareMeetScreen(
@@ -467,6 +463,14 @@ class _CreateMeetScreenState extends State<CreateMeetScreen> {
         ),
       ),
     );
+
+    // ✅ THIS IS THE FIX
+    if (result == 'shared') {
+      _showMeetingOptionsDialog(
+        linkId: linkId,
+        meetLink: meetLink,
+      );
+    }
   }
 
   @override

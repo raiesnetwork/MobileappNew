@@ -26,12 +26,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
-
     <!-- ─── Features ─── -->
     <uses-feature android:name="android.hardware.location.network" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
-    <!-- ─── Queries ─── -->
+    <!-- ─── Deep Links ─── -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
@@ -76,15 +75,13 @@
                 android:name="io.flutter.embedding.android.SplashScreenDrawable"
                 android:resource="@drawable/launch_background" />
 
+            <!-- Launcher -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
 
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-            </intent-filter>
+            <!-- Deep Link (ONLY ONE - FIXED) -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
 
@@ -99,37 +96,29 @@
 
         </activity>
 
-        <!-- ─── FCM: Firebase Messaging Service ─── -->
-        <service
-            android:name="com.google.firebase.messaging.FirebaseMessagingService"
-            android:exported="false">
-            <intent-filter android:priority="100">
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-
-        <!-- ─── CallKit: Incoming Call Service ─── -->
+        <!-- ─── CallKit Service ─── -->
         <service
             android:name="com.hiennv.flutter_callkit_incoming.CallkitIncomingService"
             android:exported="false"
             android:foregroundServiceType="phoneCall"
             android:stopWithTask="false" />
+
         <service
             android:name="de.julianassmann.flutter_background.IsolateHolderService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
-        <!-- ─── CallKit: Broadcast Receiver ─── -->
+        <!-- CallKit Receiver -->
         <receiver
             android:name="com.hiennv.flutter_callkit_incoming.CallkitIncomingBroadcastReceiver"
             android:exported="true" />
 
-        <!-- ─── Flutter Embedding ─── -->
+        <!-- Flutter embedding -->
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
 
-        <!-- ─── Google Maps API Key ─── -->
+        <!-- Google Maps API Key -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBut5HqGXswofazEpjsi_ta8i1lwkah4TU"/>

@@ -23,7 +23,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
 
     _animationController = AnimationController(
-      duration: const Duration(seconds: 2),
+      duration: const Duration(seconds: 4),
       vsync: this,
     );
 
@@ -38,7 +38,7 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _initializeApp() async {
-    await Future.delayed(const Duration(seconds: 3));
+    await Future.delayed(const Duration(seconds: 4));
 
     if (mounted) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);

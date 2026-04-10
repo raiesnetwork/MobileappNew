@@ -496,8 +496,7 @@ class _SendCouponScreenState extends State<SendCouponScreen>
                     community['name']?.toString() ?? 'Unknown';
                 final image =
                     community['profileImage']?.toString() ?? '';
-                final memberCount =
-                    community['userCount'] ?? community['memberCount'] ?? 0;
+                final memberCount = community['userCount'] ?? community['memberCount'] ?? 0;
                 final isSubCommunity =
                     community['_isSubCommunity'] == true;
 
@@ -651,12 +650,14 @@ class _SendCouponScreenState extends State<SendCouponScreen>
     final result = <Map<String, dynamic>>[];
     for (final c in communities) {
       final community = Map<String, dynamic>.from(c as Map);
+      community['_id'] = community['_id'] ?? community['id'] ?? '';
       community['_isSubCommunity'] = false;
       result.add(community);
 
       final subs = community['subCommunities'] as List<dynamic>? ?? [];
       for (final sub in subs) {
         final subMap = Map<String, dynamic>.from(sub as Map);
+        subMap['_id'] = subMap['_id'] ?? subMap['id'] ?? '';
         subMap['_isSubCommunity'] = true;
         result.add(subMap);
       }
@@ -699,6 +700,8 @@ class _SendCouponScreenState extends State<SendCouponScreen>
 
   void _sendToCommunity() async {
     if (_selectedCommunityId == null) return;
+    print('✅ Sending couponId: ${widget.coupon['_id']}');
+    print('✅ Sending communityId: $_selectedCommunityId');
     final provider = context.read<CouponProvider>();
 
     final success = await provider.sendCouponToGroup(

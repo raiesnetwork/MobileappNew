@@ -25,7 +25,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   // ── Separated track lists ─────────────────────────────────────────────────
   List<ParticipantTrack> _participantTracks = []; // all tracks (for count badge)
   List<ParticipantTrack> _cameraTrack = [];        // camera-only tracks
-  List<ParticipantTrack> _screenShareTracks = [];  // screen-share-only tracks
+  List<ParticipantTrack> _screenShareTracks = [];  
 
   LocalParticipant? _localParticipant;
 

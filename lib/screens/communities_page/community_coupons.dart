@@ -20,11 +20,15 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
   @override
   void initState() {
     super.initState();
-    _couponsFuture = context
-        .read<CommunityProvider>()
-        .fetchCommunityCoupons(widget.communityId);
+    // ← wrap in addPostFrameCallback to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() {
+        _couponsFuture = context
+            .read<CommunityProvider>()
+            .fetchCommunityCoupons(widget.communityId);
+      });
+    });
   }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<CommunityProvider>();

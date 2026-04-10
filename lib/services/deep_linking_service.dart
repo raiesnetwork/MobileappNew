@@ -1,48 +1,44 @@
 import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
-import 'package:uni_links/uni_links.dart';
 import '../main.dart';
 import '../screens/meeting/waiting_approval_screeen.dart';
 
 
 class DeepLinkService {
-  static void init() async {
-    // App opened from killed state
-    final initialLink = await getInitialLink();
+  static final AppLinks _appLinks = AppLinks();
+  static StreamSubscription? _sub;
 
-    if (initialLink != null) {
-      _handleLink(initialLink);
-    }
+  static void init() {
+    // cold start
+    _appLinks.getInitialLink().then((uri) {
+      if (uri != null) _handle(uri);
+    });
 
-    // App already running
-    linkStream.listen((link) {
-      if (link != null) {
-        _handleLink(link);
-      }
+    // foreground/background
+    _sub = _appLinks.uriLinkStream.listen((uri) {
+      if (uri != null) _handle(uri);
     });
   }
 
-  static void _handleLink(String link) {
-    debugPrint('🔗 Deep Link: $link');
+  static void _handle(Uri uri) {
+    final segments = uri.pathSegments;
 
-    final uri = Uri.parse(link);
+    if (segments.isNotEmpty && segments[0] == "meeting") {
+      final meetingId = segments.length > 1 ? segments[1] : null;
+      if (meetingId == null) return;
 
-    // Check: ixes.ai/meeting/{id}
-    if (uri.pathSegments.contains('meeting')) {
-      final meetingId = uri.pathSegments.last;
-
-      debugPrint('📌 Meeting ID: $meetingId');
-
-      // Wait until app is ready
-      Future.delayed(const Duration(seconds: 1), () {
-        navigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (_) => WaitingApprovalScreen(
-              meetingId: meetingId,
-            ),
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => WaitingApprovalScreen(
+            meetingId: meetingId,
           ),
-        );
-      });
+        ),
+      );
     }
+  }
+
+  static void dispose() {
+    _sub?.cancel();
   }
 }

@@ -26,6 +26,7 @@ class PersonalChatProvider with ChangeNotifier {
   Map<String, dynamic>? get lastSentMessage => _lastSentMessage;
 
   bool _isLoading = false;
+  bool _isConversationLoading = false;
   String? _error;
   Map<String, dynamic> _chatData = {
     'error': true,
@@ -34,6 +35,7 @@ class PersonalChatProvider with ChangeNotifier {
   };
 
   bool get isLoading => _isLoading;
+  bool get isConversationLoading => _isConversationLoading;
   String? get error => _error;
   Map<String, dynamic> get chatData => _chatData;
 
@@ -324,7 +326,12 @@ class PersonalChatProvider with ChangeNotifier {
 
   Future<void> fetchConversation(String userId) async {
     if (_isDisposed) return;
-    _isLoading = true;
+    
+    if (_currentReceiverId != userId) {
+      _messages = []; // Prevent split-second flash of old chat's messages
+    }
+
+    _isConversationLoading = true;
     _error = null;
     _currentReceiverId = userId;
     _safeNotifyListeners();
@@ -354,7 +361,7 @@ class PersonalChatProvider with ChangeNotifier {
       _messages = [];
       _userData = {};
     } finally {
-      _isLoading = false;
+      _isConversationLoading = false;
       _safeNotifyListeners();
     }
   }

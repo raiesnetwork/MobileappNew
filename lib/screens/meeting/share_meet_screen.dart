@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../../providers/comment_provider.dart';
 import '../../providers/generate_link_provider.dart';
+import '../../providers/group_provider.dart';
 
 class ShareMeetScreen extends StatefulWidget {
   final String meetLink;
@@ -28,12 +30,19 @@ class ShareMeetScreen extends StatefulWidget {
 
 class _ShareMeetScreenState extends State<ShareMeetScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _emailController = TextEditingController();
-  final _userIdController = TextEditingController();
 
   String _shareType = 'personal';
-  List<Map<String, String>> _emailList = [];
   List<Map<String, String>> _memberList = [];
+
+  // ── User search state ─────────────────────────────────────────────────
+  final TextEditingController _userSearchController = TextEditingController();
+  String _userSearchQuery = '';
+  int _currentUserPage = 1;
+  final ScrollController _userScrollController = ScrollController();
+
+  // ── Group search state ────────────────────────────────────────────────
+  final TextEditingController _groupSearchController = TextEditingController();
+  String _groupSearchQuery = '';
 
   bool _showRecurrence = false;
   String _frequency = 'weekly';
@@ -42,10 +51,86 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
   DateTime? _recurrenceEndDate;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadUsers();
+      _loadGroups();
+    });
+    _userScrollController.addListener(_onUserScroll);
+  }
+
+  @override
   void dispose() {
-    _emailController.dispose();
-    _userIdController.dispose();
+    _userSearchController.dispose();
+    _groupSearchController.dispose();
+    _userScrollController.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Provider.of<CommentProvider>(context, listen: false).clearUsersList();
+      }
+    });
     super.dispose();
+  }
+
+  // ── Users ─────────────────────────────────────────────────────────────
+  void _loadUsers({bool isLoadMore = false}) {
+    final provider = Provider.of<CommentProvider>(context, listen: false);
+    if (isLoadMore) {
+      if (_currentUserPage < provider.totalUserPages) {
+        _currentUserPage++;
+        provider.fetchAllUsers(
+          search: _userSearchQuery.isEmpty ? null : _userSearchQuery,
+          pageNo: _currentUserPage,
+          isLoadMore: true,
+        );
+      }
+    } else {
+      _currentUserPage = 1;
+      provider.fetchAllUsers(
+        search: _userSearchQuery.isEmpty ? null : _userSearchQuery,
+        pageNo: _currentUserPage,
+      );
+    }
+  }
+
+  void _onUserScroll() {
+    if (_userScrollController.position.pixels >=
+        _userScrollController.position.maxScrollExtent - 200) {
+      final provider = Provider.of<CommentProvider>(context, listen: false);
+      if (!provider.isLoadingUsers &&
+          _currentUserPage < provider.totalUserPages) {
+        _loadUsers(isLoadMore: true);
+      }
+    }
+  }
+
+  void _onUserSearchChanged(String value) {
+    setState(() => _userSearchQuery = value);
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_userSearchQuery == value) _loadUsers();
+    });
+  }
+
+  // ── Groups ────────────────────────────────────────────────────────────
+  void _loadGroups() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = Provider.of<GroupChatProvider>(context, listen: false);
+      provider.fetchMyGroups();
+    });
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────
+  bool _isSelected(String id) => _memberList.any((m) => m['value'] == id);
+
+  void _toggleMember(String id, String name) {
+    setState(() {
+      if (_isSelected(id)) {
+        _memberList.removeWhere((m) => m['value'] == id);
+      } else {
+        _memberList.add({'value': id, 'name': name});
+      }
+    });
   }
 
   void _copyLink() {
@@ -66,42 +151,13 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
     );
   }
 
-  void _addEmail() {
-    if (_emailController.text.isNotEmpty) {
-      setState(() {
-        _emailList.add({
-          'email': _emailController.text,
-        });
-        _emailController.clear();
-      });
-    }
-  }
-
-  void _addMember() {
-    if (_userIdController.text.isNotEmpty) {
-      setState(() {
-        _memberList.add({'value': _userIdController.text});
-        _userIdController.clear();
-      });
-    }
-  }
-
   Future<void> _shareMeeting() async {
-    // Validate that user has added recipients based on share type
-    if (_shareType == 'mail' && _emailList.isEmpty) {
+    if (_memberList.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please add at least one email recipient'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    if (_shareType == 'personal' && _memberList.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please add at least one member'),
+        SnackBar(
+          content: Text(_shareType == 'personal'
+              ? 'Please select at least one person'
+              : 'Please select at least one group'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -109,6 +165,18 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
     }
 
     final provider = Provider.of<MeetProvider>(context, listen: false);
+
+    // ── Create Rich Message with Link (This is the key change) ──
+    final String richMessage = '''
+📅 Meeting Invitation
+
+${widget.description}
+
+🕒 Start: ${DateFormat('EEE, MMM dd, yyyy • hh:mm a').format(widget.startDateTime)}
+🕒 End: ${DateFormat('EEE, MMM dd, yyyy • hh:mm a').format(widget.endDateTime)}
+
+🔗 Join Meeting: ${widget.meetLink}
+'''.trim();
 
     Map<String, dynamic>? recurrenceSettings;
     if (_showRecurrence) {
@@ -127,17 +195,18 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
       dateAndTimeTo: widget.endDateTime.toUtc().toIso8601String(),
       description: widget.description,
       type: _shareType,
-      members: _shareType == 'personal' || _shareType == 'groups'
-          ? _memberList
-          : null,
-      mail: _shareType == 'mail' ? _emailList : null,
+      members: _memberList,
+      mail: null,
       recurrenceSettings: recurrenceSettings,
+
+      // ✅ This is the most important line
+      message: richMessage,
     );
 
     if (success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(
+        const SnackBar(
+          content: Row(
             children: [
               Icon(Icons.check_circle, color: Colors.white),
               SizedBox(width: 12),
@@ -146,11 +215,9 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
           ),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         ),
       );
-      Navigator.pop(context);
+      Navigator.pop(context, 'shared');
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -190,7 +257,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Meeting Link Display Card
+                  // ── Meeting Link Display Card ──────────────────────────
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -210,19 +277,15 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                     ),
                     child: Column(
                       children: [
-                        const Icon(
-                          Icons.link_rounded,
-                          size: 40,
-                          color: Colors.white,
-                        ),
+                        const Icon(Icons.link_rounded,
+                            size: 40, color: Colors.white),
                         const SizedBox(height: 12),
                         const Text(
                           'Your Meeting Link',
                           style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 12),
                         Container(
@@ -234,9 +297,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                           child: Text(
                             widget.meetLink,
                             style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                            ),
+                                color: Colors.white, fontSize: 13),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -249,12 +310,9 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                             backgroundColor: Colors.white,
                             foregroundColor: const Color(0xFF6366F1),
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
+                                horizontal: 24, vertical: 12),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
+                                borderRadius: BorderRadius.circular(10)),
                           ),
                         ),
                       ],
@@ -262,7 +320,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Meeting Details Display (Read-only)
+                  // ── Meeting Details ───────────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -279,46 +337,32 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Meeting Details',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
+                        const Text('Meeting Details',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87)),
                         const SizedBox(height: 16),
-
-                        // Description
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.description_rounded,
-                              size: 20,
-                              color: Colors.grey.shade600,
-                            ),
+                            Icon(Icons.description_rounded,
+                                size: 20, color: Colors.grey.shade600),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    'Description',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey.shade600,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
+                                  Text('Description',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.w500)),
                                   const SizedBox(height: 4),
-                                  Text(
-                                    widget.description,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.black87,
-                                    ),
-                                  ),
+                                  Text(widget.description,
+                                      style: const TextStyle(
+                                          fontSize: 14,
+                                          color: Colors.black87)),
                                 ],
                               ),
                             ),
@@ -327,72 +371,54 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                         const SizedBox(height: 16),
                         const Divider(),
                         const SizedBox(height: 16),
-
-                        // Start Time
                         Row(
                           children: [
-                            Icon(
-                              Icons.play_circle_outline_rounded,
-                              size: 20,
-                              color: Colors.grey.shade600,
-                            ),
+                            Icon(Icons.play_circle_outline_rounded,
+                                size: 20, color: Colors.grey.shade600),
                             const SizedBox(width: 12),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Start Time',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
+                                Text('Start Time',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                        fontWeight: FontWeight.w500)),
                                 const SizedBox(height: 4),
                                 Text(
                                   DateFormat('MMM dd, yyyy • hh:mm a')
                                       .format(widget.startDateTime),
                                   style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                      fontSize: 14,
+                                      color: Colors.black87,
+                                      fontWeight: FontWeight.w500),
                                 ),
                               ],
                             ),
                           ],
                         ),
                         const SizedBox(height: 16),
-
-                        // End Time
                         Row(
                           children: [
-                            Icon(
-                              Icons.stop_circle_outlined,
-                              size: 20,
-                              color: Colors.grey.shade600,
-                            ),
+                            Icon(Icons.stop_circle_outlined,
+                                size: 20, color: Colors.grey.shade600),
                             const SizedBox(width: 12),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'End Time',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
+                                Text('End Time',
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                        fontWeight: FontWeight.w500)),
                                 const SizedBox(height: 4),
                                 Text(
                                   DateFormat('MMM dd, yyyy • hh:mm a')
                                       .format(widget.endDateTime),
                                   style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.black87,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                      fontSize: 14,
+                                      color: Colors.black87,
+                                      fontWeight: FontWeight.w500),
                                 ),
                               ],
                             ),
@@ -403,7 +429,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Share Type Selection
+                  // ── Share Type Selection ──────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -420,29 +446,26 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Share With',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87,
-                          ),
-                        ),
+                        const Text('Share With',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87)),
                         const SizedBox(height: 16),
                         _buildShareTypeOption(
-                            'personal', 'Personal', Icons.person_rounded),
+                            'personal', 'Personal Chats', Icons.person_rounded),
                         const SizedBox(height: 12),
                         _buildShareTypeOption(
-                            'mail', 'Email', Icons.email_rounded),
+                            'groups', 'Groups', Icons.group_rounded),
                       ],
                     ),
                   ),
                   const SizedBox(height: 20),
 
-                  // Email/Member Input
-                  if (_shareType == 'mail') ...[
+                  // ── Selected chips ────────────────────────────────────
+                  if (_memberList.isNotEmpty) ...[
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
@@ -454,73 +477,32 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                           ),
                         ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Add Recipients',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _emailController,
-                                  keyboardType: TextInputType.emailAddress,
-                                  decoration: InputDecoration(
-                                    hintText: 'Email address',
-                                    prefixIcon:
-                                    const Icon(Icons.email_outlined),
-                                    filled: true,
-                                    fillColor: const Color(0xFFF8F9FA),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide.none,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                onPressed: _addEmail,
-                                icon: const Icon(Icons.add_circle),
-                                color: const Color(0xFF6366F1),
-                                iconSize: 32,
-                              ),
-                            ],
-                          ),
-                          if (_emailList.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: _emailList.map((email) {
-                                return Chip(
-                                  label: Text(email['email']!),
-                                  deleteIcon:
-                                  const Icon(Icons.close, size: 18),
-                                  onDeleted: () {
-                                    setState(() {
-                                      _emailList.remove(email);
-                                    });
-                                  },
-                                  backgroundColor:
-                                  const Color(0xFF6366F1).withOpacity(0.1),
-                                  deleteIconColor: const Color(0xFF6366F1),
-                                );
-                              }).toList(),
-                            ),
-                          ],
-                        ],
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _memberList.map((m) {
+                          return Chip(
+                            label: Text(m['name'] ?? m['value']!),
+                            deleteIcon: const Icon(Icons.close, size: 18),
+                            onDeleted: () {
+                              setState(() => _memberList
+                                  .removeWhere((x) => x['value'] == m['value']));
+                            },
+                            backgroundColor:
+                            const Color(0xFF6366F1).withOpacity(0.1),
+                            deleteIconColor: const Color(0xFF6366F1),
+                            labelStyle: const TextStyle(
+                                color: Color(0xFF6366F1),
+                                fontWeight: FontWeight.w500),
+                          );
+                        }).toList(),
                       ),
                     ),
                     const SizedBox(height: 20),
-                  ] else if (_shareType == 'personal') ...[
+                  ],
+
+                  // ── Personal Chats List ───────────────────────────────
+                  if (_shareType == 'personal') ...[
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
@@ -537,71 +519,338 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text(
-                            'Add Members',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.black87,
+                          const Text('Select People',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87)),
+                          const SizedBox(height: 12),
+                          // Search field
+                          TextField(
+                            controller: _userSearchController,
+                            onChanged: _onUserSearchChanged,
+                            decoration: InputDecoration(
+                              hintText: 'Search people...',
+                              prefixIcon:
+                              const Icon(Icons.search, color: Colors.grey),
+                              suffixIcon: _userSearchController.text.isNotEmpty
+                                  ? IconButton(
+                                icon: const Icon(Icons.clear,
+                                    color: Colors.grey),
+                                onPressed: () {
+                                  _userSearchController.clear();
+                                  _onUserSearchChanged('');
+                                },
+                              )
+                                  : null,
+                              filled: true,
+                              fillColor: Colors.grey[100],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
                             ),
                           ),
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _userIdController,
-                                  decoration: InputDecoration(
-                                    hintText: 'User ID',
-                                    prefixIcon:
-                                    const Icon(Icons.person_outline),
-                                    filled: true,
-                                    fillColor: const Color(0xFFF8F9FA),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide.none,
-                                    ),
+                          const SizedBox(height: 12),
+                          Consumer<CommentProvider>(
+                            builder: (context, userProvider, _) {
+                              if (userProvider.isLoadingUsers &&
+                                  userProvider.allUsers.isEmpty) {
+                                return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: CircularProgressIndicator(),
+                                    ));
+                              }
+                              if (userProvider.allUsers.isEmpty) {
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Text('No people found',
+                                        style: TextStyle(
+                                            color: Colors.grey[600])),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              IconButton(
-                                onPressed: _addMember,
-                                icon: const Icon(Icons.add_circle),
-                                color: const Color(0xFF6366F1),
-                                iconSize: 32,
-                              ),
-                            ],
-                          ),
-                          if (_memberList.isNotEmpty) ...[
-                            const SizedBox(height: 16),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: _memberList.map((member) {
-                                return Chip(
-                                  label: Text(member['value']!),
-                                  deleteIcon:
-                                  const Icon(Icons.close, size: 18),
-                                  onDeleted: () {
-                                    setState(() {
-                                      _memberList.remove(member);
-                                    });
-                                  },
-                                  backgroundColor:
-                                  const Color(0xFF6366F1).withOpacity(0.1),
-                                  deleteIconColor: const Color(0xFF6366F1),
                                 );
-                              }).toList(),
-                            ),
-                          ],
+                              }
+                              return SizedBox(
+                                height: 300,
+                                child: ListView.separated(
+                                  controller: _userScrollController,
+                                  shrinkWrap: true,
+                                  itemCount: userProvider.allUsers.length +
+                                      (userProvider.isLoadingUsers ? 1 : 0),
+                                  separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    if (index ==
+                                        userProvider.allUsers.length) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(8),
+                                        child: Center(
+                                            child:
+                                            CircularProgressIndicator()),
+                                      );
+                                    }
+                                    final user = userProvider.allUsers[index];
+                                    final profile = user['profile']
+                                    as Map<String, dynamic>?;
+                                    final userName =
+                                        profile?['name'] ?? 'Unknown User';
+                                    final profileImage =
+                                    profile?['profileImage'] as String?;
+                                    final email = user['email'] ?? '';
+                                    final userId = user['_id'] ?? '';
+                                    final selected = _isSelected(userId);
+
+                                    return ListTile(
+                                      contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 0, vertical: 4),
+                                      leading: CircleAvatar(
+                                        radius: 22,
+                                        backgroundColor: Colors.grey[300],
+                                        backgroundImage: profileImage != null &&
+                                            profileImage.isNotEmpty
+                                            ? NetworkImage(profileImage)
+                                            : null,
+                                        child: profileImage == null ||
+                                            profileImage.isEmpty
+                                            ? Text(
+                                          userName.isNotEmpty
+                                              ? userName[0].toUpperCase()
+                                              : 'U',
+                                          style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight:
+                                              FontWeight.bold),
+                                        )
+                                            : null,
+                                      ),
+                                      title: Text(userName,
+                                          style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600)),
+                                      subtitle: email.isNotEmpty
+                                          ? Text(email,
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.grey[600]))
+                                          : null,
+                                      trailing: GestureDetector(
+                                        onTap: () =>
+                                            _toggleMember(userId, userName),
+                                        child: Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: selected
+                                                ? const Color(0xFF6366F1)
+                                                : Colors.transparent,
+                                            border: Border.all(
+                                              color: selected
+                                                  ? const Color(0xFF6366F1)
+                                                  : Colors.grey.shade400,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: selected
+                                              ? const Icon(Icons.check,
+                                              color: Colors.white,
+                                              size: 18)
+                                              : null,
+                                        ),
+                                      ),
+                                      onTap: () =>
+                                          _toggleMember(userId, userName),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 20),
                   ],
 
-                  // Recurrence Settings
+                  // ── Groups List ───────────────────────────────────────
+                  if (_shareType == 'groups') ...[
+                    Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Select Groups',
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black87)),
+                          const SizedBox(height: 12),
+                          // Search field
+                          TextField(
+                            controller: _groupSearchController,
+                            onChanged: (v) =>
+                                setState(() => _groupSearchQuery = v),
+                            decoration: InputDecoration(
+                              hintText: 'Search groups...',
+                              prefixIcon:
+                              const Icon(Icons.search, color: Colors.grey),
+                              suffixIcon:
+                              _groupSearchController.text.isNotEmpty
+                                  ? IconButton(
+                                icon: const Icon(Icons.clear,
+                                    color: Colors.grey),
+                                onPressed: () {
+                                  _groupSearchController.clear();
+                                  setState(
+                                          () => _groupSearchQuery = '');
+                                },
+                              )
+                                  : null,
+                              filled: true,
+                              fillColor: Colors.grey[100],
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 12),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Consumer<GroupChatProvider>(
+                            builder: (context, groupProvider, _) {
+                              if (groupProvider.isLoadingMyGroups &&
+                                  groupProvider.myGroups.isEmpty) {
+                                return const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: CircularProgressIndicator(),
+                                    ));
+                              }
+
+                              final groups = _groupSearchQuery.isEmpty
+                                  ? groupProvider.myGroups
+                                  : groupProvider.myGroups.where((g) {
+                                final name = (g['name'] ?? '')
+                                    .toString()
+                                    .toLowerCase();
+                                return name.contains(
+                                    _groupSearchQuery.toLowerCase());
+                              }).toList();
+
+                              if (groups.isEmpty) {
+                                return Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Text('No groups found',
+                                        style: TextStyle(
+                                            color: Colors.grey[600])),
+                                  ),
+                                );
+                              }
+
+                              return SizedBox(
+                                height: 300,
+                                child: ListView.separated(
+                                  shrinkWrap: true,
+                                  itemCount: groups.length,
+                                  separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                                  itemBuilder: (context, index) {
+                                    final group = groups[index];
+                                    final groupName =
+                                        group['name'] ?? 'Unnamed Group';
+                                    final groupId = group['_id'] ?? '';
+                                    final profileImage =
+                                    group['profileImage'] as String?;
+                                    final members =
+                                        (group['members'] as List<dynamic>?)
+                                            ?.length ??
+                                            0;
+                                    final selected = _isSelected(groupId);
+                                    final hasImage = profileImage != null &&
+                                        profileImage.isNotEmpty;
+
+                                    return ListTile(
+                                      contentPadding:
+                                      const EdgeInsets.symmetric(
+                                          horizontal: 0, vertical: 4),
+                                      leading: CircleAvatar(
+                                        radius: 22,
+                                        backgroundColor:
+                                        const Color(0xFF8A2BE2),
+                                        backgroundImage: hasImage
+                                            ? NetworkImage(profileImage!)
+                                            : null,
+                                        child: !hasImage
+                                            ? const Icon(Icons.group,
+                                            color: Colors.white, size: 22)
+                                            : null,
+                                      ),
+                                      title: Text(groupName,
+                                          style: const TextStyle(
+                                              fontSize: 15,
+                                              fontWeight: FontWeight.w600)),
+                                      subtitle: Text('$members members',
+                                          style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.grey[600])),
+                                      trailing: GestureDetector(
+                                        onTap: () =>
+                                            _toggleMember(groupId, groupName),
+                                        child: Container(
+                                          width: 32,
+                                          height: 32,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: selected
+                                                ? const Color(0xFF6366F1)
+                                                : Colors.transparent,
+                                            border: Border.all(
+                                              color: selected
+                                                  ? const Color(0xFF6366F1)
+                                                  : Colors.grey.shade400,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: selected
+                                              ? const Icon(Icons.check,
+                                              color: Colors.white,
+                                              size: 18)
+                                              : null,
+                                        ),
+                                      ),
+                                      onTap: () =>
+                                          _toggleMember(groupId, groupName),
+                                    );
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  // ── Recurrence Settings ───────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
@@ -621,19 +870,15 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text(
-                              'Recurring Meeting',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.black87,
-                              ),
-                            ),
+                            const Text('Recurring Meeting',
+                                style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87)),
                             Switch(
                               value: _showRecurrence,
-                              onChanged: (value) {
-                                setState(() => _showRecurrence = value);
-                              },
+                              onChanged: (value) =>
+                                  setState(() => _showRecurrence = value),
                               activeColor: const Color(0xFF6366F1),
                             ),
                           ],
@@ -642,16 +887,11 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                           const SizedBox(height: 16),
                           const Divider(),
                           const SizedBox(height: 16),
-
-                          // Frequency Selector
-                          const Text(
-                            'Frequency',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.black87,
-                            ),
-                          ),
+                          const Text('Frequency',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black87)),
                           const SizedBox(height: 12),
                           Row(
                             children: [
@@ -663,17 +903,12 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                             ],
                           ),
                           const SizedBox(height: 16),
-
-                          // Days of Week (only for weekly)
                           if (_frequency == 'weekly') ...[
-                            const Text(
-                              'Repeat On',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.black87,
-                              ),
-                            ),
+                            const Text('Repeat On',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.black87)),
                             const SizedBox(height: 12),
                             Wrap(
                               spacing: 8,
@@ -690,18 +925,13 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                             ),
                             const SizedBox(height: 16),
                           ],
-
-                          // Interval
                           Row(
                             children: [
-                              const Text(
-                                'Repeat every',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.black87,
-                                ),
-                              ),
+                              const Text('Repeat every',
+                                  style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.black87)),
                               const SizedBox(width: 12),
                               Container(
                                 width: 60,
@@ -714,11 +944,10 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                                   child: DropdownButton<int>(
                                     value: _interval,
                                     underline: const SizedBox(),
-                                    items: List.generate(10, (index) => index + 1)
+                                    items: List.generate(
+                                        10, (index) => index + 1)
                                         .map((i) => DropdownMenuItem(
-                                      value: i,
-                                      child: Text('$i'),
-                                    ))
+                                        value: i, child: Text('$i')))
                                         .toList(),
                                     onChanged: (value) {
                                       if (value != null) {
@@ -736,9 +965,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                                     ? 'week(s)'
                                     : 'month(s)',
                                 style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.black87,
-                                ),
+                                    fontSize: 14, color: Colors.black87),
                               ),
                             ],
                           ),
@@ -748,7 +975,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                   ),
                   const SizedBox(height: 32),
 
-                  // Share Button
+                  // ── Send Invitation Button ─────────────────────────────
                   ElevatedButton(
                     onPressed: provider.isLoading ? null : _shareMeeting,
                     style: ElevatedButton.styleFrom(
@@ -756,8 +983,7 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                          borderRadius: BorderRadius.circular(12)),
                       elevation: 2,
                       shadowColor: const Color(0xFF6366F1).withOpacity(0.3),
                     ),
@@ -776,13 +1002,10 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                       children: [
                         Icon(Icons.send_rounded),
                         SizedBox(width: 8),
-                        Text(
-                          'Send Invitation',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        Text('Send Invitation',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
@@ -801,7 +1024,6 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
     return InkWell(
       onTap: () => setState(() {
         _shareType = value;
-        _emailList.clear();
         _memberList.clear();
       }),
       borderRadius: BorderRadius.circular(12),
@@ -819,25 +1041,21 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
         ),
         child: Row(
           children: [
-            Icon(
-              icon,
-              color: isSelected ? const Color(0xFF6366F1) : Colors.grey,
-            ),
+            Icon(icon,
+                color: isSelected ? const Color(0xFF6366F1) : Colors.grey),
             const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                color: isSelected ? const Color(0xFF6366F1) : Colors.black87,
-              ),
-            ),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 15,
+                    fontWeight:
+                    isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: isSelected
+                        ? const Color(0xFF6366F1)
+                        : Colors.black87)),
             const Spacer(),
             if (isSelected)
-              const Icon(
-                Icons.check_circle_rounded,
-                color: Color(0xFF6366F1),
-              ),
+              const Icon(Icons.check_circle_rounded,
+                  color: Color(0xFF6366F1)),
           ],
         ),
       ),
@@ -851,9 +1069,8 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF6366F1)
-              : const Color(0xFFF8F9FA),
+          color:
+          isSelected ? const Color(0xFF6366F1) : const Color(0xFFF8F9FA),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected
@@ -861,14 +1078,12 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
                 : Colors.grey.shade300,
           ),
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
-            fontSize: 13,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
+        child: Text(label,
+            style: TextStyle(
+                color: isSelected ? Colors.white : Colors.black87,
+                fontSize: 13,
+                fontWeight:
+                isSelected ? FontWeight.w600 : FontWeight.normal)),
       ),
     );
   }
@@ -900,14 +1115,12 @@ class _ShareMeetScreenState extends State<ShareMeetScreen> {
           ),
         ),
         child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : Colors.black87,
-              fontSize: 12,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
+          child: Text(label,
+              style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.black87,
+                  fontSize: 12,
+                  fontWeight:
+                  isSelected ? FontWeight.w600 : FontWeight.normal)),
         ),
       ),
     );

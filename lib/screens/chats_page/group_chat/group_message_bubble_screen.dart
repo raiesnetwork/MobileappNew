@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
@@ -25,7 +26,6 @@ class GroupMessageBubble extends StatefulWidget {
   final String? currentUserId;
   final String groupId;
   final bool showAvatar;
-
   final Function(Map<String, dynamic>)? onReply;
 
   const GroupMessageBubble({
@@ -41,18 +41,19 @@ class GroupMessageBubble extends StatefulWidget {
   State<GroupMessageBubble> createState() => _GroupMessageBubbleState();
 }
 
-class _GroupMessageBubbleState extends State<GroupMessageBubble> {
+class _GroupMessageBubbleState extends State<GroupMessageBubble>
+    with AutomaticKeepAliveClientMixin {
   static const Color _purple = Color(0xFF6C5CE7);
 
-  late final bool _isMe;
-  late final String _senderId;
-  // after _isFile declaration
-  late final bool _isSharedPost;
-  late final String _senderName;
-  late final Map<String, dynamic>? _senderMap;
-  late final bool _isAudio;
-  late final bool _isFile;
-  late final bool _isForwardedMsg;
+  bool _isMe = false;
+  String _senderId = '';
+  bool _isSharedPost = false;
+  String _senderName = 'Unknown';
+  Map<String, dynamic>? _senderMap;
+  bool _isAudio = false;
+  bool _isFile = false;
+  bool _isForwardedMsg = false;
+  Map<String, dynamic>? _cachedPostData;
 
   FlutterSoundPlayer? _player;
   bool _isPlayerInitialized = false;
@@ -63,16 +64,320 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
   String? _localAudioPath;
   StreamSubscription? _playerSub;
 
+  // ── AutomaticKeepAliveClientMixin ────────────────────────────────────────
+  @override
+  bool get wantKeepAlive => _isSharedPost || _isAudio;
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  INIT & DISPOSE
+  // ════════════════════════════════════════════════════════════════════════
   @override
   void initState() {
     super.initState();
     _parseMessage();
+    if (_isSharedPost) {
+      _cachedPostData = _resolvePostData();
+      // If we couldn't resolve real post data, demote to forwarded text
+      if (_cachedPostData == null) {
+        _isSharedPost = false;
+        _isForwardedMsg = widget.message['forwerd'] == true;
+      }
+    }
     if (_isAudio) {
       _initPlayer();
       final ms = widget.message['audioDurationMs'];
       if (ms is int && ms > 0) _duration = Duration(milliseconds: ms);
     }
   }
+
+  @override
+  void deactivate() {
+    _playerSub?.cancel();
+    _playerSub = null;
+    if (_isPlaying && _player != null) {
+      _player!.pausePlayer().catchError((_) {});
+      _isPlaying = false;
+    }
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    _playerSub?.cancel();
+    if (_player != null) {
+      if (_isPlaying) _player!.stopPlayer().catchError((_) {});
+      _player!.closePlayer().catchError((_) {});
+      _player = null;
+    }
+    super.dispose();
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  PARSE MESSAGE — single source of truth, strict detection
+  // ════════════════════════════════════════════════════════════════════════
+  void _parseMessage() {
+    final rawSender = widget.message['senderId'];
+    if (rawSender is Map<String, dynamic>) {
+      _senderMap = rawSender;
+      _senderName = rawSender['profile']?['name']?.toString() ?? 'Unknown';
+      _senderId = rawSender['_id']?.toString() ?? '';
+    } else {
+      _senderMap = null;
+      _senderName = 'Unknown';
+      _senderId = rawSender?.toString() ?? '';
+    }
+
+    _isMe = widget.currentUserId != null && widget.currentUserId == _senderId;
+    _isAudio = widget.message['isAudio'] == true;
+    _isFile = widget.message['isFile'] == true ||
+        (widget.message['fileUrl'] != null &&
+            widget.message['fileUrl'].toString().isNotEmpty &&
+            !_isAudio);
+
+    // ── Shared post detection ────────────────────────────────────────────
+    final sharedPost = widget.message['sharedPost'];
+    final hasValidSharedPost = sharedPost is Map &&
+        sharedPost.isNotEmpty &&
+        sharedPost['_id'] != null &&
+        sharedPost['_id'].toString().length == 24 &&
+        RegExp(r'^[a-f0-9]{24}$').hasMatch(sharedPost['_id'].toString());
+
+    String extractedPostId = '';
+    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
+    if (fUrl.isNotEmpty && fUrl != 'null') {
+      final segment = fUrl.split('/').last.trim();
+      if (segment.length == 24 &&
+          RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+        extractedPostId = segment;
+      }
+    }
+
+    // ── NEW: detect forwarded post via forwardedFrom + image ────────────
+    // Backend sends: forwardedFrom:{messageId,senderId}, image: url, text: content
+    final forwardedFrom = widget.message['forwardedFrom'];
+    final hasForwardedFrom = forwardedFrom is Map && forwardedFrom.isNotEmpty;
+    final hasImage = () {
+      final img = widget.message['image']?.toString() ?? '';
+      return img.isNotEmpty && img != 'null';
+    }();
+
+    // A message is a shared post card if ANY of these are true:
+    // 1. Has a valid sharedPost object
+    // 2. Has forwerd:true + valid post ID from forwerdUrl
+    // 3. Has forwardedFrom object (new backend format)
+    _isSharedPost = !_isAudio &&
+        !_isFile &&
+        (hasValidSharedPost ||
+            (widget.message['forwerd'] == true && extractedPostId.isNotEmpty) ||
+            hasForwardedFrom);
+
+    _isForwardedMsg = widget.message['forwerd'] == true && !_isSharedPost;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RESOLVE POST DATA
+  // ════════════════════════════════════════════════════════════════════════
+  Map<String, dynamic>? _resolvePostData() {
+    // Priority 1: real sharedPost object with valid MongoDB ObjectId
+    final sharedPost = widget.message['sharedPost'];
+    if (sharedPost is Map && sharedPost.isNotEmpty) {
+      final id = sharedPost['_id']?.toString() ?? '';
+      if (id.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
+        final post = Map<String, dynamic>.from(sharedPost as Map);
+
+        List<dynamic> images = [];
+        for (final key in ['images', 'image', 'media', 'attachments',
+          'postImages', 'photos', 'imageUrl']) {
+          final v = post[key];
+          if (v is List && v.isNotEmpty) {
+            final filtered = v
+                .where((e) => e != null && e.toString().isNotEmpty)
+                .toList();
+            if (filtered.isNotEmpty) { images = filtered; break; }
+          }
+          if (v is String && v.isNotEmpty) { images = [v]; break; }
+        }
+
+        // Fall back to outer message image if sharedPost has none
+        if (images.isEmpty) {
+          final img = widget.message['image']?.toString() ?? '';
+          if (img.isNotEmpty && img != 'null') images = [img];
+        }
+
+        // Normalize URLs
+        images = _normalizeImages(images);
+        post['images'] = images;
+
+        if (post['authorName'] == null || post['authorName'].toString().isEmpty) {
+          post['authorName'] = widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
+        }
+        return post;
+      }
+    }
+
+    // Priority 2: forwerdUrl with valid post ID
+    String postId = '';
+    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
+    if (fUrl.isNotEmpty && fUrl != 'null') {
+      final segment = fUrl.split('/').last.trim();
+      if (segment.length == 24 &&
+          RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+        postId = segment;
+      }
+    }
+
+    // Priority 3: forwardedFrom (new backend format from logs)
+    // Structure: {forwardedFrom:{messageId,senderId}, image:url, text:content}
+    final forwardedFrom = widget.message['forwardedFrom'];
+    if (postId.isEmpty && forwardedFrom is Map) {
+      // Use messageId as the post identifier for navigation
+      postId = forwardedFrom['messageId']?.toString() ?? '';
+      // Validate it's a real ObjectId
+      if (postId.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
+        postId = '';
+      }
+    }
+
+    // Collect image — the log shows image is directly on the message
+    String imageUrl = '';
+    for (final key in ['image', 'forwerdImage', 'postImage',
+      'sharedImage', 'forwerdImageUrl']) {
+      final val = widget.message[key]?.toString() ?? '';
+      if (val.isNotEmpty && val != 'null') {
+        imageUrl = _normalizeSingleUrl(val);
+        break;
+      }
+    }
+
+    if (postId.isEmpty && imageUrl.isEmpty) return null;
+
+    // Build the post card data from message fields
+    return {
+      '_id': postId,
+      'text': widget.message['text']?.toString() ?? '',
+      'images': imageUrl.isNotEmpty ? [imageUrl] : [],
+      'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared Post',
+      'authorProfile': '',
+      'likesCount': 0,
+      'commentsCount': 0,
+    };
+  }
+
+// ── URL helpers ──────────────────────────────────────────────────────────
+  List<dynamic> _normalizeImages(List<dynamic> raw) {
+    return raw.map((img) {
+      final s = img.toString().trim();
+      if (s.isEmpty || s == 'null') return null;
+      return _normalizeSingleUrl(s);
+    }).where((e) => e != null).toList();
+  }
+
+  String _normalizeSingleUrl(String s) {
+    if (s.startsWith('http://') || s.startsWith('https://') ||
+        s.startsWith('data:image/')) return s;
+    return 'https://api.ixes.ai/$s';
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  LINK PREVIEW
+  // ════════════════════════════════════════════════════════════════════════
+  bool _hasValidLinkMeta() {
+    final meta = widget.message['linkMeta'];
+    if (meta == null || meta is! Map) return false;
+    // Server sends linkMeta with all empty strings — reject that
+    final url = meta['url']?.toString().trim() ?? '';
+    final title = meta['title']?.toString().trim() ?? '';
+    return url.isNotEmpty || title.isNotEmpty;
+  }
+
+  Widget _buildLinkPreview() {
+    final meta = widget.message['linkMeta'] as Map<String, dynamic>?;
+    if (meta == null || meta.isEmpty) return const SizedBox.shrink();
+
+    return GestureDetector(
+      onTap: () async {
+        final url = meta['url']?.toString();
+        if (url != null && url.isNotEmpty) {
+          final uri =
+          Uri.parse(url.startsWith('http') ? url : 'https://$url');
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      },
+      child: Container(
+        margin: const EdgeInsets.only(top: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+          color:
+          _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[100],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if ((meta['image'] ?? '').toString().isNotEmpty)
+              ClipRRect(
+                borderRadius:
+                const BorderRadius.vertical(top: Radius.circular(12)),
+                child: Image.network(
+                  meta['image'],
+                  height: 150,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (meta['title'] != null &&
+                      meta['title'].toString().isNotEmpty)
+                    Text(
+                      meta['title'],
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _isMe ? Colors.white : Colors.black,
+                        fontSize: 14,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  if (meta['description'] != null &&
+                      meta['description'].toString().isNotEmpty)
+                    Text(
+                      meta['description'],
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _isMe ? Colors.white70 : Colors.black87,
+                        fontSize: 13,
+                      ),
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    meta['url'] ?? '',
+                    style: TextStyle(
+                      color: _isMe
+                          ? Colors.lightBlueAccent
+                          : Colors.blue[700],
+                      decoration: TextDecoration.underline,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  MEMBER PROFILE SHEET
+  // ════════════════════════════════════════════════════════════════════════
   void _showMemberProfile() {
     if (_isMe || _senderMap == null) return;
 
@@ -81,7 +386,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     final String name = _senderName;
     final String userId = _senderId;
 
-    // Build userProfile map matching ChatDetailScreen's expected format
     final Map<String, dynamic> userProfile = {
       '_id': userId,
       'profile': {
@@ -103,7 +407,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Drag handle
             Container(
               width: 40,
               height: 4,
@@ -113,12 +416,11 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
               ),
             ),
             const SizedBox(height: 24),
-
-            // Profile picture
             Container(
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
+                gradient:
+                (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
                     ? const LinearGradient(
                   colors: [Color(0xFF9B8FF5), Color(0xFF6C5CE7)],
                   begin: Alignment.topLeft,
@@ -141,7 +443,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                     imageUrl != 'null')
                     ? _imageProvider(imageUrl)
                     : null,
-                child: (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
+                child: (imageUrl == null ||
+                    imageUrl.isEmpty ||
+                    imageUrl == 'null')
                     ? Text(
                   name.isNotEmpty ? name[0].toUpperCase() : '?',
                   style: const TextStyle(
@@ -154,8 +458,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
               ),
             ),
             const SizedBox(height: 14),
-
-            // Name
             Text(
               name,
               style: const TextStyle(
@@ -174,12 +476,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
               ),
             ),
             const SizedBox(height: 32),
-
-            // Action buttons row — Message | Call | Video
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                // Message
                 _buildProfileAction(
                   icon: Icons.chat_rounded,
                   label: 'Message',
@@ -198,8 +497,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                     );
                   },
                 ),
-
-                // Voice Call
                 _buildProfileAction(
                   icon: Icons.call_rounded,
                   label: 'Call',
@@ -230,8 +527,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                     }
                   },
                 ),
-
-                // Video Call
                 _buildProfileAction(
                   icon: Icons.videocam_rounded,
                   label: 'Video',
@@ -290,7 +585,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                 ),
               ],
             ),
-
             const SizedBox(height: 8),
           ],
         ),
@@ -315,7 +609,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
             decoration: BoxDecoration(
               color: color.withOpacity(0.10),
               shape: BoxShape.circle,
-              border: Border.all(color: color.withOpacity(0.20), width: 1.5),
+              border:
+              Border.all(color: color.withOpacity(0.20), width: 1.5),
             ),
             child: Icon(icon, color: color, size: 26),
           ),
@@ -332,113 +627,26 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       ),
     );
   }
-  Widget _buildSharedPost() {
-    Map<String, dynamic>? postData = widget.message['sharedPost'] as Map<String, dynamic>?;
 
-    if (postData == null &&
-        (widget.message['forwerd'] == true || widget.message['forwerdMessage'] != null)) {
-
-      final text = widget.message['text']?.toString() ?? '';
-      final forwardLabel = widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
-
-      String actualPostId = '';
-      final forwerdUrl = widget.message['forwerdUrl']?.toString() ?? '';
-      if (forwerdUrl.isNotEmpty) {
-        final segment = forwerdUrl.split('/').last.trim();
-        // ✅ only use valid 24-char hex ObjectId
-        if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
-          actualPostId = segment;
-        }
-      }
-      if (actualPostId.isEmpty) {
-        final fallback = widget.message['sharedPostId']?.toString() ?? '';
-        if (fallback.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(fallback)) {
-          actualPostId = fallback;
-        }
-      }
-
-      // Extract image
-      String imageUrl = '';
-      for (final key in ['image', 'forwerdImage', 'postImage', 'images', 'media']) {
-        final val = widget.message[key];
-        if (val is String && val.isNotEmpty && !val.contains('ixes.ai/feeds')) {
-          imageUrl = val;
-          break;
-        }
-        if (val is List && val.isNotEmpty && val.first is String) {
-          imageUrl = val.first.toString();
-          break;
-        }
-      }
-
-      // Fallback: check inside sharedPost object
-      if (imageUrl.isEmpty && widget.message['sharedPost'] is Map<String, dynamic>) {
-        final sp = widget.message['sharedPost'] as Map<String, dynamic>;
-        for (final key in ['images', 'image', 'media', 'forwerdImage', 'postImage']) {
-          final val = sp[key];
-          if (val is String && val.isNotEmpty) {
-            imageUrl = val;
-            break;
-          }
-          if (val is List && val.isNotEmpty && val.first is String) {
-            imageUrl = val.first.toString();
-            break;
-          }
-        }
-      }
-
-      postData = {
-        '_id': actualPostId,
-        'text': text,
-        'images': imageUrl.isNotEmpty ? [imageUrl] : [],
-        'authorName': forwardLabel,
-        'authorProfile': '',
-        'likesCount': 0,
-        'commentsCount': 0,
-      };
-    }
-
-    if (postData == null) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.share, size: 18,
-              color: _isMe ? Colors.white70 : Colors.grey[600]),
-          const SizedBox(width: 6),
-          Text('Shared a post',
-              style: TextStyle(
-                  fontSize: 14,
-                  fontStyle: FontStyle.italic,
-                  color: _isMe ? Colors.white70 : Colors.grey[600])),
-        ],
-      );
-    }
-
-    List<dynamic> resolvePostImages(Map<String, dynamic> postData) {
-      for (final key in ['images', 'image', 'forwerdImage', 'postImage', 'media']) {
-        final v = postData[key];
-        if (v is List && v.isNotEmpty) return v;
-        if (v is String && v.isNotEmpty) return [v];
-      }
-      return [];
-    }
-
-    print('🖼️ sharedPost data: ${jsonEncode(postData)}');
-    print('🖼️ images field: ${postData['images']}');
-
+  // ════════════════════════════════════════════════════════════════════════
+  //  SHARED POST (from cache only — single render path)
+  // ════════════════════════════════════════════════════════════════════════
+  Widget _buildSharedPostFromCache() {
+    final postData = _cachedPostData!;
+    final postId = postData['_id']?.toString() ?? '';
     final postContent = postData['text']?.toString() ?? '';
-    final postImages = resolvePostImages(postData);
+    final images = postData['images'];
+    final postImages = images is List ? images : [];
     final authorName = postData['authorName']?.toString() ?? 'Unknown';
-    final authorProfile = postData['authorProfile']?.toString();
+    final authorProfile = postData['authorProfile']?.toString() ?? '';
     final likesCount = postData['likesCount'] ?? 0;
     final commentsCount = postData['commentsCount'] ?? 0;
-    final postId = postData['_id']?.toString() ?? '';
-
-    print('🔗 postId for navigation: $postId'); // debug
 
     return GestureDetector(
       onTap: () {
-        if (postId.isEmpty) {
+        if (postId.isEmpty ||
+            postId.length != 24 ||
+            !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Post link not available'),
@@ -458,14 +666,11 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                   icon: const Icon(Icons.arrow_back, color: Colors.black),
                   onPressed: () => Navigator.pop(context),
                 ),
-                title: const Text(
-                  'Post',
-                  style: TextStyle(
-                    color: Colors.black,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                title: const Text('Post',
+                    style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600)),
               ),
               body: FeedScreen(postId: postId),
             ),
@@ -476,29 +681,44 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.65),
         decoration: BoxDecoration(
-          color: _isMe ? Colors.white.withOpacity(0.15) : Colors.grey[100],
+          color: _isMe
+              ? Colors.white.withOpacity(0.15)
+              : Colors.grey[100],
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-              color: _isMe ? Colors.white.withOpacity(0.25) : Colors.grey[300]!),
+              color: _isMe
+                  ? Colors.white.withOpacity(0.25)
+                  : Colors.grey[300]!),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+                color: _isMe
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.grey[200],
                 borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(10),
                     topRight: Radius.circular(10)),
               ),
               child: Row(children: [
-                Icon(Icons.share,
+                Icon(
+                    (widget.message['forwardedFrom'] is Map &&
+                        (widget.message['forwardedFrom'] as Map).isNotEmpty)
+                        ? Icons.reply_rounded
+                        : Icons.share,
                     size: 14,
                     color: _isMe ? Colors.white60 : Colors.grey[600]),
                 const SizedBox(width: 5),
-                Text('Shared Post',
+                Text(
+                    (widget.message['forwardedFrom'] is Map &&
+                        (widget.message['forwardedFrom'] as Map).isNotEmpty)
+                        ? 'Forwarded Post'
+                        : 'Shared Post',
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -515,17 +735,23 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                   backgroundColor: _isMe
                       ? Colors.white.withOpacity(0.3)
                       : Colors.grey[300],
-                  backgroundImage: authorProfile != null && authorProfile.isNotEmpty
+                  backgroundImage:
+                  authorProfile.isNotEmpty && authorProfile != 'null'
                       ? (authorProfile.startsWith('data:image/')
-                      ? MemoryImage(base64Decode(authorProfile.split(',')[1]))
+                      ? MemoryImage(base64Decode(
+                      authorProfile.split(',')[1]))
                       : NetworkImage(authorProfile) as ImageProvider)
                       : null,
-                  child: authorProfile == null || authorProfile.isEmpty
+                  child: authorProfile.isEmpty || authorProfile == 'null'
                       ? Text(
-                      authorName.isNotEmpty ? authorName[0].toUpperCase() : 'U',
+                      authorName.isNotEmpty
+                          ? authorName[0].toUpperCase()
+                          : 'U',
                       style: TextStyle(
                           fontSize: 12,
-                          color: _isMe ? Colors.white : Colors.grey[700]))
+                          color: _isMe
+                              ? Colors.white
+                              : Colors.grey[700]))
                       : null,
                 ),
                 const SizedBox(width: 7),
@@ -534,7 +760,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: _isMe ? Colors.white : Colors.black87),
+                          color:
+                          _isMe ? Colors.white : Colors.black87),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                 ),
@@ -578,7 +805,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                 Text('$likesCount',
                     style: TextStyle(
                         fontSize: 11,
-                        color: _isMe ? Colors.white70 : Colors.grey[600])),
+                        color: _isMe
+                            ? Colors.white70
+                            : Colors.grey[600])),
                 const SizedBox(width: 12),
                 Icon(Icons.comment,
                     size: 13,
@@ -587,13 +816,17 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                 Text('$commentsCount',
                     style: TextStyle(
                         fontSize: 11,
-                        color: _isMe ? Colors.white70 : Colors.grey[600])),
+                        color: _isMe
+                            ? Colors.white70
+                            : Colors.grey[600])),
                 const Spacer(),
                 Text('Tap to view',
                     style: TextStyle(
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
-                        color: _isMe ? Colors.white60 : Colors.blue[600])),
+                        color: _isMe
+                            ? Colors.white60
+                            : Colors.blue[600])),
               ]),
             ),
           ],
@@ -617,119 +850,339 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     }
 
     if (imageUrl == null || imageUrl.isEmpty) {
-      return Container(
-        color: Colors.grey[200],
-        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
-      );
+      return _buildBrokenImage();
     }
 
-    // Prepend base URL for relative paths
     if (!imageUrl.startsWith('http://') &&
         !imageUrl.startsWith('https://') &&
         !imageUrl.startsWith('data:image/')) {
       imageUrl = 'https://api.ixes.ai/$imageUrl';
     }
 
-    // Handle base64
     if (imageUrl.startsWith('data:image/')) {
       try {
         return Image.memory(
           base64Decode(imageUrl.split(',')[1]),
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            color: Colors.grey[200],
-            child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
-          ),
+          errorBuilder: (_, __, ___) => _buildBrokenImage(),
         );
       } catch (_) {
-        return Container(
-          color: Colors.grey[200],
-          child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
-        );
+        return _buildBrokenImage();
       }
     }
 
-    // Network image — at this point imageUrl is guaranteed to be http/https
-    return Image.network(
-      imageUrl,
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
       fit: BoxFit.cover,
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return Center(child: CircularProgressIndicator(strokeWidth: 2));
-      },
-      errorBuilder: (_, __, ___) => Container(
+      placeholder: (_, __) => Container(
         color: Colors.grey[200],
-        child: Icon(Icons.broken_image, size: 36, color: Colors.grey[400]),
+        child: const Center(
+            child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+      errorWidget: (_, __, ___) => _buildBrokenImage(),
+    );
+  }
+
+  Widget _buildBrokenImage() {
+    return Container(
+      color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.broken_image,
+                size: 36,
+                color: _isMe ? Colors.white38 : Colors.grey[400]),
+            const SizedBox(height: 8),
+            Text('Image unavailable',
+                style: TextStyle(
+                    color: _isMe ? Colors.white60 : Colors.grey[500],
+                    fontSize: 12)),
+          ],
+        ),
       ),
     );
   }
 
-  void _parseMessage() {
-// Extract valid postId from forwerdUrl
-    String extractedPostId = '';
-    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
-    if (fUrl.isNotEmpty) {
-      final segment = fUrl.split('/').last.trim();
-      if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
-        extractedPostId = segment;
-      }
-    }
-    final hasValidPostId = extractedPostId.isNotEmpty;
-
-// Show label for plain text forwards AND non-navigable post cards
-// Hide only when it's a navigable shared post
-    _isForwardedMsg = widget.message['forwerd'] == true && !hasValidPostId;
-    final rawSender = widget.message['senderId'];
-    if (widget.message['forwerd'] == true) {
-      print('🔥 GROUP FORWARDED MESSAGE: ${jsonEncode(widget.message)}');
-    }
-    if (rawSender is Map<String, dynamic>) {
-      _senderMap = rawSender;
-      _senderName = rawSender['profile']?['name']?.toString() ?? 'Unknown';
-      _senderId = rawSender['_id']?.toString() ?? '';
-    } else {
-      _senderMap = null;
-      _senderName = 'Unknown';
-      _senderId = rawSender?.toString() ?? '';
-    }
-    _isMe = widget.currentUserId != null && widget.currentUserId == _senderId;
-    _isAudio = widget.message['isAudio'] == true;
-    _isFile = widget.message['isFile'] == true ||
-        (widget.message['fileUrl'] != null && !_isAudio);
-    _isSharedPost =
-        widget.message['isSharedPost'] == true ||
-            widget.message['sharedPost'] != null ||
-            (widget.message['forwerdUrl'] != null &&
-                (widget.message['forwerdUrl']?.toString() ?? '').isNotEmpty) ||
-            (widget.message['forwerd'] == true &&
-                widget.message['image'] != null &&
-                (widget.message['image']?.toString() ?? '').isNotEmpty &&
-                widget.message['isAudio'] != true &&
-                widget.message['isFile'] != true);
-
-    _isForwardedMsg = widget.message['forwerd'] == true && !_isSharedPost;
+  Widget _buildForwardedLabel() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.reply_rounded,
+              size: 13,
+              color: _isMe ? Colors.white60 : Colors.grey[500]),
+          const SizedBox(width: 4),
+          Text(
+            'Forwarded',
+            style: TextStyle(
+              fontSize: 11,
+              fontStyle: FontStyle.italic,
+              fontWeight: FontWeight.w500,
+              color: _isMe ? Colors.white60 : Colors.grey[500],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  @override
-  void deactivate() {
-    _playerSub?.cancel();
-    _playerSub = null;
-    if (_isPlaying && _player != null) {
-      _player!.pausePlayer().catchError((_) {});
-      _isPlaying = false;
+  // ════════════════════════════════════════════════════════════════════════
+  //  MESSAGE OPTIONS
+  // ════════════════════════════════════════════════════════════════════════
+  void _showMessageOptions() {
+    final List<Widget> options = [];
+
+    options.add(ListTile(
+      leading: Icon(Icons.reply, color: _purple),
+      title: const Text('Reply'),
+      onTap: () {
+        Navigator.pop(context);
+        if (widget.onReply != null) {
+          widget.onReply!({
+            '_id': widget.message['_id'],
+            'text': widget.message['text'],
+            'isFile': _isFile,
+            'fileName': widget.message['fileName'],
+            'isAudio': _isAudio,
+            'senderName': _senderName,
+            'senderId': _senderId,
+          });
+        }
+      },
+    ));
+
+    options.add(ListTile(
+      leading: Icon(Icons.reply_rounded, color: _purple),
+      title: const Text('Forward'),
+      onTap: () {
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                ForwardMessageScreen(message: widget.message),
+          ),
+        );
+      },
+    ));
+
+    final isOptimistic = widget.message['isOptimistic'] == true;
+    final status = widget.message['status']?.toString();
+    if (_isMe &&
+        !_isFile &&
+        !_isAudio &&
+        (widget.message['text'] ?? '').toString().isNotEmpty &&
+        !isOptimistic &&
+        status != 'sending') {
+      options.add(ListTile(
+        leading: Icon(Icons.edit, color: _purple),
+        title: const Text('Edit Message'),
+        onTap: () {
+          Navigator.pop(context);
+          _showEditDialog();
+        },
+      ));
     }
-    super.deactivate();
+
+    if (_isMe &&
+        !isOptimistic &&
+        status != 'sending' &&
+        status != 'failed') {
+      options.add(ListTile(
+        leading: const Icon(Icons.delete, color: Colors.red),
+        title: const Text('Delete Message',
+            style: TextStyle(color: Colors.red)),
+        onTap: () {
+          Navigator.pop(context);
+          _showDeleteConfirmation();
+        },
+      ));
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius:
+          const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 20),
+          ...options,
+          const SizedBox(height: 10),
+        ]),
+      ),
+    );
   }
 
-  @override
-  void dispose() {
-    _playerSub?.cancel();
-    if (_player != null) {
-      if (_isPlaying) _player!.stopPlayer().catchError((_) {});
-      _player!.closePlayer().catchError((_) {});
-      _player = null;
+  void _showEditDialog() {
+    final ctrl =
+    TextEditingController(text: widget.message['text']);
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Edit Message'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+              hintText: 'Enter new message...',
+              border: OutlineInputBorder()),
+          maxLines: null,
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+              onPressed: () => _handleEdit(ctrl.text.trim()),
+              child: const Text('Save')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleEdit(String newText) async {
+    if (newText.isEmpty || newText == widget.message['text']) {
+      Navigator.pop(context);
+      return;
     }
-    super.dispose();
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Row(children: [
+        SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+        SizedBox(width: 16),
+        Text('Editing message...'),
+      ]),
+      duration: Duration(seconds: 2),
+    ));
+    try {
+      final ok = await context.read<GroupChatProvider>().editGroupMessage(
+        messageId: widget.message['_id'],
+        newText: newText,
+        groupId: widget.groupId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'Message edited successfully'
+            : 'Failed to edit message'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 2),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error editing message: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  void _showDeleteConfirmation() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete Message'),
+        content: const Text(
+            'Are you sure you want to delete this message? This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: _handleDelete,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleDelete() async {
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Row(children: [
+        SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2)),
+        SizedBox(width: 16),
+        Text('Deleting message...'),
+      ]),
+      duration: Duration(seconds: 2),
+    ));
+    try {
+      final ok =
+      await context.read<GroupChatProvider>().deleteGroupMessage(
+        messageId: widget.message['_id'],
+        groupId: widget.groupId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(ok
+            ? 'Message deleted successfully'
+            : 'Failed to delete message'),
+        backgroundColor: ok ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 2),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Error deleting message: $e'),
+          backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _handleFileOpen() async {
+    var fileUrl = widget.message['fileUrl']?.toString() ?? '';
+    final fileName = widget.message['fileName']?.toString() ?? 'file';
+    if (fileUrl.isEmpty || fileName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('File information is missing'),
+          backgroundColor: Colors.red));
+      return;
+    }
+    if (!fileUrl.startsWith('http://') &&
+        !fileUrl.startsWith('https://')) {
+      fileUrl = 'https://api.ixes.ai/$fileUrl';
+    }
+    final status = widget.message['status']?.toString();
+    if (status == 'sending') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('File is still uploading, please wait'),
+          backgroundColor: Colors.orange));
+      return;
+    }
+    if (status == 'failed') {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('File upload failed, cannot open'),
+          backgroundColor: Colors.red));
+      return;
+    }
+    await FileViewerHelper.openFile(
+      context: context,
+      fileUrl: fileUrl,
+      fileName: fileName,
+      localFilePath: widget.message['localFilePath']?.toString(),
+    );
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -739,7 +1192,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     try {
       _player = FlutterSoundPlayer();
       await _player!.openPlayer();
-      await _player!.setSubscriptionDuration(const Duration(milliseconds: 80));
+      await _player!
+          .setSubscriptionDuration(const Duration(milliseconds: 80));
       if (mounted) setState(() => _isPlayerInitialized = true);
     } catch (e) {
       debugPrint('💥 GroupBubble player init: $e');
@@ -762,7 +1216,11 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
         await _player!.startPlayer(
           fromURI: path,
           whenFinished: () {
-            if (mounted) setState(() { _isPlaying = false; _position = Duration.zero; });
+            if (mounted)
+              setState(() {
+                _isPlaying = false;
+                _position = Duration.zero;
+              });
           },
         );
         if (mounted) setState(() => _isPlaying = true);
@@ -778,31 +1236,42 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     } catch (e) {
       debugPrint('💥 GroupBubble playback: $e');
       if (mounted) {
-        setState(() { _isPlaying = false; _position = Duration.zero; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error playing audio: $e'), backgroundColor: Colors.red),
-        );
+        setState(() {
+          _isPlaying = false;
+          _position = Duration.zero;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error playing audio: $e'),
+            backgroundColor: Colors.red));
       }
     }
   }
 
   Future<String?> _resolveAudioPath() async {
     final localPath = widget.message['localFilePath']?.toString();
-    if (localPath != null && localPath.isNotEmpty && File(localPath).existsSync()) return localPath;
-    if (_localAudioPath != null && File(_localAudioPath!).existsSync()) return _localAudioPath;
+    if (localPath != null &&
+        localPath.isNotEmpty &&
+        File(localPath).existsSync()) return localPath;
+    if (_localAudioPath != null && File(_localAudioPath!).existsSync())
+      return _localAudioPath;
 
     var audioUrl = widget.message['audioUrl']?.toString() ?? '';
     if (audioUrl.isEmpty) return null;
-    if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
+    if (!audioUrl.startsWith('http://') &&
+        !audioUrl.startsWith('https://')) {
       audioUrl = 'https://api.ixes.ai/$audioUrl';
     }
 
     if (mounted) setState(() => _isLoadingAudio = true);
     try {
       final tmpDir = await getTemporaryDirectory();
-      final msgId = widget.message['_id']?.toString() ?? 'grp_${DateTime.now().millisecondsSinceEpoch}';
+      final msgId = widget.message['_id']?.toString() ??
+          'grp_${DateTime.now().millisecondsSinceEpoch}';
       final cachedPath = '${tmpDir.path}/grp_voice_$msgId.aac';
-      if (File(cachedPath).existsSync()) { _localAudioPath = cachedPath; return _localAudioPath; }
+      if (File(cachedPath).existsSync()) {
+        _localAudioPath = cachedPath;
+        return _localAudioPath;
+      }
       final res = await http.get(Uri.parse(audioUrl));
       if (res.statusCode == 200) {
         await File(cachedPath).writeAsBytes(res.bodyBytes);
@@ -816,353 +1285,44 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     }
     return null;
   }
-  Widget _buildForwardedLabel() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.reply_rounded,
-            size: 13,
-            color: _isMe ? Colors.white60 : Colors.grey[500],
-          ),
-          const SizedBox(width: 4),
-          Text(
-            'Forwarded',
-            style: TextStyle(
-              fontSize: 11,
-              fontStyle: FontStyle.italic,
-              fontWeight: FontWeight.w500,
-              color: _isMe ? Colors.white60 : Colors.grey[500],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  MESSAGE OPTIONS (Reply / Edit / Delete)
+  //  REPLY PREVIEW
   // ════════════════════════════════════════════════════════════════════════
-  void _showMessageOptions() {
-    final List<Widget> options = [];
-
-    // ── Reply — always available ─────────────────────────────────────────
-    options.add(ListTile(
-      leading: Icon(Icons.reply, color: _purple),
-      title: const Text('Reply'),
-      onTap: () {
-        Navigator.pop(context);
-        if (widget.onReply != null) {
-          // FIX: pass senderName explicitly so the reply preview can show it
-          widget.onReply!({
-            '_id': widget.message['_id'],
-            'text': widget.message['text'],
-            'isFile': _isFile,
-            'fileName': widget.message['fileName'],
-            'isAudio': _isAudio,
-            // FIX: always include senderName from the parsed field
-            'senderName': _senderName,
-            // FIX: include senderId so reply preview knows who was replied to
-            'senderId': _senderId,
-          });
-        }
-      },
-    ));
-    options.add(ListTile(
-      leading: Icon(Icons.reply_rounded, color: _purple),
-      title: const Text('Forward'),
-      onTap: () {
-        Navigator.pop(context);
-        // Pass the FULL message map — the screen handles both post and text types
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ForwardMessageScreen(message: widget.message),
-          ),
-        );
-      },
-    ));
-
-
-    final isOptimistic = widget.message['isOptimistic'] == true;
-    final status = widget.message['status']?.toString();
-    if (_isMe &&
-        !_isFile &&
-        !_isAudio &&
-        (widget.message['text'] ?? '').toString().isNotEmpty &&
-        !isOptimistic &&
-        status != 'sending') {
-      options.add(ListTile(
-        leading: Icon(Icons.edit, color: _purple),
-        title: const Text('Edit Message'),
-        onTap: () { Navigator.pop(context); _showEditDialog(); },
-      ));
-    }
-
-    // ── Delete — all my non-optimistic, non-sending/failed messages ──────
-    if (_isMe && !isOptimistic && status != 'sending' && status != 'failed') {
-      options.add(ListTile(
-        leading: const Icon(Icons.delete, color: Colors.red),
-        title: const Text('Delete Message', style: TextStyle(color: Colors.red)),
-        onTap: () { Navigator.pop(context); _showDeleteConfirmation(); },
-      ));
-    }
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 40, height: 4,
-            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-          ),
-          const SizedBox(height: 20),
-          ...options,
-          const SizedBox(height: 10),
-        ]),
-      ),
-    );
-  }
-
-  void _showEditDialog() {
-    final ctrl = TextEditingController(text: widget.message['text']);
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Edit Message'),
-        content: TextField(
-          controller: ctrl,
-          decoration: const InputDecoration(hintText: 'Enter new message...', border: OutlineInputBorder()),
-          maxLines: null,
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => _handleEdit(ctrl.text.trim()), child: const Text('Save')),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleEdit(String newText) async {
-    if (newText.isEmpty || newText == widget.message['text']) { Navigator.pop(context); return; }
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Row(children: [
-        SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-        SizedBox(width: 16), Text('Editing message...'),
-      ]),
-      duration: Duration(seconds: 2),
-    ));
-    try {
-      final ok = await context.read<GroupChatProvider>().editGroupMessage(
-        messageId: widget.message['_id'], newText: newText, groupId: widget.groupId,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok ? 'Message edited successfully' : 'Failed to edit message'),
-        backgroundColor: ok ? Colors.green : Colors.red,
-        duration: const Duration(seconds: 2),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error editing message: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
-  void _showDeleteConfirmation() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete Message'),
-        content: const Text('Are you sure you want to delete this message? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: _handleDelete,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleDelete() async {
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-      content: Row(children: [
-        SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-        SizedBox(width: 16), Text('Deleting message...'),
-      ]),
-      duration: Duration(seconds: 2),
-    ));
-    try {
-      final ok = await context.read<GroupChatProvider>().deleteGroupMessage(
-        messageId: widget.message['_id'], groupId: widget.groupId,
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok ? 'Message deleted successfully' : 'Failed to delete message'),
-        backgroundColor: ok ? Colors.green : Colors.red,
-        duration: const Duration(seconds: 2),
-      ));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting message: $e'), backgroundColor: Colors.red),
-      );
-    }
-  }
-
-  Future<void> _handleFileOpen() async {
-    var fileUrl = widget.message['fileUrl']?.toString() ?? '';
-    final fileName = widget.message['fileName']?.toString() ?? 'file';
-    if (fileUrl.isEmpty || fileName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File information is missing'), backgroundColor: Colors.red));
-      return;
-    }
-    if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
-      fileUrl = 'https://api.ixes.ai/$fileUrl';
-    }
-    final status = widget.message['status']?.toString();
-    if (status == 'sending') {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File is still uploading, please wait'), backgroundColor: Colors.orange));
-      return;
-    }
-    if (status == 'failed') {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('File upload failed, cannot open'), backgroundColor: Colors.red));
-      return;
-    }
-    await FileViewerHelper.openFile(
-      context: context, fileUrl: fileUrl, fileName: fileName,
-      localFilePath: widget.message['localFilePath']?.toString(),
-    );
-  }
-
-  // ════════════════════════════════════════════════════════════════════════
-  //  HELPERS
-  // ════════════════════════════════════════════════════════════════════════
-  String _formatDuration(Duration d) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
-  }
-
-  String _durationLabel() {
-    if (_isPlaying || _position.inSeconds > 0) return '${_formatDuration(_position)} / ${_formatDuration(_duration)}';
-    if (_duration.inSeconds > 0) return _formatDuration(_duration);
-    return '0:00';
-  }
-
-  String _formatTime(String timestamp) {
-    try {
-      final local = DateTime.parse(timestamp).toLocal();
-      final hour = local.hour;
-      final minute = local.minute.toString().padLeft(2, '0');
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
-      return '$displayHour:$minute $period';
-    } catch (_) { return ''; }
-  }
-
-  static const _nameColors = [
-    Color(0xFF6C5CE7), Color(0xFF00B894), Color(0xFF0984E3),
-    Color(0xFFE17055), Color(0xFF74B9FF), Color(0xFFFD79A8),
-    Color(0xFF55EFC4), Color(0xFFA29BFE), Color(0xFFFF7675), Color(0xFF00CEC9),];
-
-  Color _colorForName(String name) {
-    final seed = name.codeUnits.fold(0, (a, b) => a + b);
-    return _nameColors[seed % _nameColors.length];
-  }
-
-  ImageProvider? _imageProvider(String? src) {
-    if (src == null || src.isEmpty || src == 'null') return null;
-    try {
-      if (src.startsWith('data:image') || src.startsWith('/9j/') || src.startsWith('iVBORw0KGgo')) {
-        return MemoryImage(base64Decode(src.startsWith('data:image') ? src.split(',')[1] : src));
-      }
-      return NetworkImage(src);
-    } catch (_) { return null; }
-  }
-
-  Widget _buildAvatar() {
-    if (_senderMap == null) {
-      return CircleAvatar(radius: 16, backgroundColor: Colors.grey[300],
-          child: Icon(Icons.person, size: 16, color: Colors.grey[600]));
-    }
-    final profile = _senderMap!['profile'];
-    final imgProv = _imageProvider(profile?['profileImage']?.toString());
-    return CircleAvatar(
-      radius: 16,
-      backgroundColor: _colorForName(_senderName),
-      backgroundImage: imgProv,
-      child: imgProv == null
-          ? Text(_senderName.isNotEmpty ? _senderName[0].toUpperCase() : '?',
-          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold))
-          : null,
-    );
-  }
-
-  // ── Reply preview (inside bubble) ────────────────────────────────────────
-  // FIX: Completely rewritten to match MessageBubble's working implementation.
-  // Key changes:
-  //   1. Reads senderName from BOTH 'senderName' key AND nested senderId map
-  //   2. Falls back gracefully to "Someone" if neither is available
-  //   3. Label format matches personal chat ("Replied to X")
   Widget _buildReplyPreview() {
-// Try replyToMessage first (optimistic/preserved)
     Map<String, dynamic>? replyMsg =
     widget.message['replyToMessage'] as Map<String, dynamic>?;
 
-    // If not available, try to find the original message by ID from provider
     if (replyMsg == null) {
       final replyId = widget.message['replyTo'];
       if (replyId == null || replyId is! String || replyId.isEmpty) {
         return const SizedBox.shrink();
       }
-      // Look up the message from current group messages
       final provider = context.read<GroupChatProvider>();
       final allMsgs = provider.getMessagesForGroup(widget.groupId);
       try {
         final found = allMsgs.firstWhere((m) => m['_id'] == replyId);
         replyMsg = Map<String, dynamic>.from(found);
       } catch (_) {
-        // Message not found in local cache — show minimal preview
         replyMsg = {'_id': replyId, 'text': 'Original message'};
       }
     }
 
     if (replyMsg == null) return const SizedBox.shrink();
 
-    // FIX: Try multiple paths to get the sender name — the reply map may be
-    // structured differently depending on how it was saved.
     String replySender = 'Someone';
     final rawSenderName = replyMsg['senderName'];
     if (rawSenderName != null && rawSenderName.toString().isNotEmpty) {
       replySender = rawSenderName.toString();
     } else {
-      // Fallback: try nested senderId map (same structure as message itself)
       final nestedSender = replyMsg['senderId'];
       if (nestedSender is Map) {
-        final name = nestedSender['profile']?['name']?.toString() ?? '';
+        final name =
+            nestedSender['profile']?['name']?.toString() ?? '';
         if (name.isNotEmpty) replySender = name;
       }
     }
 
-    // FIX: Build preview text the same way MessageBubble does
     final replyText = replyMsg['text']?.toString() ?? '';
     String preview;
     if (replyText.isNotEmpty) {
@@ -1179,16 +1339,19 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
       padding: const EdgeInsets.all(8),
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: _isMe ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.08),
+        color: _isMe
+            ? Colors.white.withOpacity(0.2)
+            : Colors.black.withOpacity(0.08),
         borderRadius: BorderRadius.circular(8),
         border: Border(
-          left: BorderSide(color: _isMe ? Colors.white : Colors.grey[800]!, width: 2),
+          left: BorderSide(
+              color: _isMe ? Colors.white : Colors.grey[800]!,
+              width: 2),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // FIX: label now consistently shows "Replied to <name>"
           Text(
             'Replied to $replySender',
             style: TextStyle(
@@ -1212,135 +1375,277 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     );
   }
 
-  // ── Voice bubble ─────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════
+  //  VOICE BUBBLE
+  // ════════════════════════════════════════════════════════════════════════
   Widget _buildVoiceBubble() {
     double progress = 0;
     if (_duration.inMilliseconds > 0) {
-      progress = (_position.inMilliseconds / _duration.inMilliseconds).clamp(0.0, 1.0);
+      progress = (_position.inMilliseconds / _duration.inMilliseconds)
+          .clamp(0.0, 1.0);
     }
     const waveHeights = [
       20.0, 15.0, 10.0, 18.0, 12.0, 16.0, 14.0, 20.0,
-      11.0, 15.0, 17.0, 13.0, 19.0, 10.0, 16.0, 14.0, 18.0, 12.0, 15.0, 20.0
+      11.0, 15.0, 17.0, 13.0, 19.0, 10.0, 16.0, 14.0, 18.0, 12.0,
+      15.0, 20.0
     ];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _isMe ? Colors.white.withOpacity(0.12) : Colors.black.withOpacity(0.06),
+        color: _isMe
+            ? Colors.white.withOpacity(0.12)
+            : Colors.black.withOpacity(0.06),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         GestureDetector(
           onTap: _isLoadingAudio ? null : _playPauseAudio,
           child: Container(
-            width: 40, height: 40,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-                color: _isMe ? Colors.white : Colors.grey[800], shape: BoxShape.circle),
+                color:
+                _isMe ? Colors.white : Colors.grey[800],
+                shape: BoxShape.circle),
             child: _isLoadingAudio
                 ? Padding(
                 padding: const EdgeInsets.all(10),
                 child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation(_isMe ? _purple : Colors.white)))
+                    valueColor: AlwaysStoppedAnimation(
+                        _isMe ? _purple : Colors.white)))
                 : Icon(_isPlaying ? Icons.pause : Icons.play_arrow,
-                size: 24, color: _isMe ? _purple : Colors.white),
+                size: 24,
+                color: _isMe ? _purple : Colors.white),
           ),
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SizedBox(
-              height: 24,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(20, (i) {
-                  final isActive = progress >= (i / 20);
-                  return Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      height: waveHeights[i],
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? (_isMe ? Colors.white : _purple)
-                            : (_isMe ? Colors.white38 : Colors.grey[350]),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(_durationLabel(),
-                style: TextStyle(
-                    fontSize: 11, fontWeight: FontWeight.w500,
-                    color: _isMe ? Colors.white70 : Colors.grey[600])),
-          ]),
+          child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: 24,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(20, (i) {
+                      final isActive = progress >= (i / 20);
+                      return Expanded(
+                        child: Container(
+                          margin:
+                          const EdgeInsets.symmetric(horizontal: 1),
+                          height: waveHeights[i],
+                          decoration: BoxDecoration(
+                            color: isActive
+                                ? (_isMe ? Colors.white : _purple)
+                                : (_isMe
+                                ? Colors.white38
+                                : Colors.grey[350]),
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(_durationLabel(),
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: _isMe
+                            ? Colors.white70
+                            : Colors.grey[600])),
+              ]),
         ),
         if (widget.message['status'] == 'sending') ...[
           const SizedBox(width: 8),
           SizedBox(
-            width: 14, height: 14,
+            width: 14,
+            height: 14,
             child: CircularProgressIndicator(
                 strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation(_isMe ? Colors.white70 : Colors.grey[500]!)),
+                valueColor: AlwaysStoppedAnimation(
+                    _isMe ? Colors.white70 : Colors.grey[500]!)),
           ),
         ],
       ]),
     );
   }
 
+  // ════════════════════════════════════════════════════════════════════════
+  //  FILE BUBBLE
+  // ════════════════════════════════════════════════════════════════════════
+  bool get _isImageFile {
+    final type = widget.message['fileType']?.toString();
+    if (type != null && type.toLowerCase().contains('image')) return true;
+    final fileName = widget.message['fileName']?.toString();
+    if (fileName != null) {
+      final ext = fileName.toLowerCase();
+      return ext.endsWith('.png') ||
+          ext.endsWith('.jpg') ||
+          ext.endsWith('.jpeg') ||
+          ext.endsWith('.gif') ||
+          ext.endsWith('.webp');
+    }
+    return false;
+  }
+
   Widget _buildFileBubble() {
-    var fileUrl = widget.message['fileUrl']?.toString() ?? '';
-    final fileName = widget.message['fileName']?.toString() ?? 'file';
+    final fileUrl = widget.message['fileUrl']?.toString() ?? '';
+    final fileName = widget.message['fileName']?.toString() ?? '';
+
+    if (fileUrl.isEmpty && fileName.isEmpty) return const SizedBox.shrink();
+    if (_isImageFile) return _buildChatMessageImage();
+
     final status = widget.message['status']?.toString();
-    if (fileUrl.isNotEmpty && !fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
-      fileUrl = 'https://api.ixes.ai/$fileUrl';
-    }
-    final fileType = FileViewerHelper.getFileType(fileUrl.isNotEmpty ? fileUrl : fileName);
-    if (fileType == 'image' && fileUrl.isNotEmpty && status != 'sending') {
-      return GestureDetector(
-        onTap: _handleFileOpen,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(10),
-          child: Image.network(fileUrl, width: 200, height: 180, fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _buildGenericFileTile(fileType, fileName, status),
-          ),
-        ),
-      );
-    }
+    final fileType =
+    FileViewerHelper.getFileType(fileUrl.isNotEmpty ? fileUrl : fileName);
     return _buildGenericFileTile(fileType, fileName, status);
   }
 
-  Widget _buildGenericFileTile(String fileType, String fileName, String? status) {
+  Widget _buildChatMessageImage() {
+    String fileUrl = widget.message['fileUrl']?.toString() ?? '';
+    final localPath = widget.message['localFilePath']?.toString();
+
+    Widget imageWidget;
+    if (localPath != null && localPath.isNotEmpty) {
+      final file = File(localPath);
+      if (file.existsSync()) {
+        imageWidget = Image.file(file,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _buildBrokenImage());
+      } else {
+        imageWidget = _buildBrokenImage();
+      }
+    } else if (fileUrl.isNotEmpty) {
+      if (!fileUrl.startsWith('http://') &&
+          !fileUrl.startsWith('https://')) {
+        fileUrl = 'https://api.ixes.ai/$fileUrl';
+      }
+      imageWidget = CachedNetworkImage(
+        imageUrl: fileUrl,
+        fit: BoxFit.cover,
+        placeholder: (context, url) => Container(
+          color: _isMe
+              ? Colors.white.withOpacity(0.1)
+              : Colors.grey[200],
+          child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+        errorWidget: (context, url, error) => _buildBrokenImage(),
+      );
+    } else {
+      imageWidget = _buildBrokenImage();
+    }
+
+    return GestureDetector(
+      onTap:
+      widget.message['status'] == 'sending' ? null : _handleFileOpen,
+      child: Container(
+        constraints: const BoxConstraints(
+          maxHeight: 300,
+          maxWidth: 250,
+          minWidth: 150,
+          minHeight: 150,
+        ),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18).copyWith(
+            bottomRight:
+            _isMe ? const Radius.circular(4) : null,
+            bottomLeft: !_isMe ? const Radius.circular(4) : null,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18).copyWith(
+            bottomRight:
+            _isMe ? const Radius.circular(4) : null,
+            bottomLeft: !_isMe ? const Radius.circular(4) : null,
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              imageWidget,
+              if (widget.message['status'] == 'sending')
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black45,
+                    child: const Center(
+                      child: SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGenericFileTile(
+      String fileType, String fileName, String? status) {
     return GestureDetector(
       onTap: _handleFileOpen,
       child: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
-          color: _isMe ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1),
+          color: _isMe
+              ? Colors.white.withOpacity(0.1)
+              : Colors.black.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(_getFileIcon(fileType), color: _isMe ? Colors.white : Colors.black87, size: 24),
+          Icon(_getFileIcon(fileType),
+              color: _isMe ? Colors.white : Colors.black87, size: 24),
           const SizedBox(width: 8),
           Flexible(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(fileName,
-                  style: TextStyle(color: _isMe ? Colors.white : Colors.black87,
-                      fontSize: 14, fontWeight: FontWeight.w500),
-                  maxLines: 2, overflow: TextOverflow.ellipsis),
-              if (status == 'sending')
-                Text('Uploading...', style: TextStyle(fontSize: 12, color: _isMe ? Colors.white70 : Colors.grey[600]))
-              else if (status == 'failed')
-                Text('Failed to upload', style: TextStyle(fontSize: 12, color: _isMe ? Colors.white70 : Colors.red[600]))
-              else
-                Text('Tap to open', style: TextStyle(fontSize: 12, color: _isMe ? Colors.white70 : Colors.grey[600])),
-            ]),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(fileName,
+                      style: TextStyle(
+                          color: _isMe ? Colors.white : Colors.black87,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                  if (status == 'sending')
+                    Text('Uploading...',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: _isMe
+                                ? Colors.white70
+                                : Colors.grey[600]))
+                  else if (status == 'failed')
+                    Text('Failed to upload',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: _isMe
+                                ? Colors.white70
+                                : Colors.red[600]))
+                  else
+                    Text('Tap to open',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: _isMe
+                                ? Colors.white70
+                                : Colors.grey[600])),
+                ]),
           ),
           if (status != 'sending' && status != 'failed') ...[
             const SizedBox(width: 6),
-            Icon(Icons.open_in_new, size: 16, color: _isMe ? Colors.white70 : Colors.grey[600]),
+            Icon(Icons.open_in_new,
+                size: 16,
+                color: _isMe ? Colors.white70 : Colors.grey[600]),
           ],
         ]),
       ),
@@ -1349,56 +1654,150 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
 
   IconData _getFileIcon(String fileType) {
     switch (fileType) {
-      case 'image': return Icons.image;
-      case 'video': return Icons.videocam;
-      case 'audio': return Icons.audiotrack;
-      case 'pdf':   return Icons.picture_as_pdf;
-      default:      return Icons.insert_drive_file;
+      case 'image':
+        return Icons.image;
+      case 'video':
+        return Icons.videocam;
+      case 'audio':
+        return Icons.audiotrack;
+      case 'pdf':
+        return Icons.picture_as_pdf;
+      default:
+        return Icons.insert_drive_file;
     }
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  STATUS TICK
+  // ════════════════════════════════════════════════════════════════════════
   Widget _buildStatusTick() {
     final status = widget.message['status']?.toString();
     final isOptimistic = widget.message['isOptimistic'] == true;
-    final readers = List<String>.from(widget.message['readers'] ?? []);
+    final readers =
+    List<String>.from(widget.message['readers'] ?? []);
 
     if (status == 'sending' || isOptimistic) {
       return SizedBox(
-        width: 12, height: 12,
+        width: 12,
+        height: 12,
         child: CircularProgressIndicator(
           strokeWidth: 1.5,
           valueColor: AlwaysStoppedAnimation(Colors.white60),
         ),
       );
     }
-
     if (status == 'failed') {
-      return const Icon(Icons.error_outline, size: 13, color: Colors.redAccent);
+      return const Icon(Icons.error_outline,
+          size: 13, color: Colors.redAccent);
     }
 
     final readByOthers = readers.length > 1;
     if (readByOthers) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.done_all, size: 13, color: Colors.lightBlueAccent),
+        const Icon(Icons.done_all,
+            size: 13, color: Colors.lightBlueAccent),
         const SizedBox(width: 2),
         Text('${readers.length - 1}',
-            style: const TextStyle(fontSize: 11, color: Colors.white60)),
+            style: const TextStyle(
+                fontSize: 11, color: Colors.white60)),
       ]);
     }
-
     if (readers.isNotEmpty) {
-      return const Icon(Icons.done_all, size: 13, color: Colors.white60);
+      return const Icon(Icons.done_all,
+          size: 13, color: Colors.white60);
     }
-
     return const Icon(Icons.done, size: 13, color: Colors.white60);
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  HELPERS
+  // ════════════════════════════════════════════════════════════════════════
+  String _formatDuration(Duration d) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(d.inMinutes.remainder(60))}:${two(d.inSeconds.remainder(60))}';
+  }
+
+  String _durationLabel() {
+    if (_isPlaying || _position.inSeconds > 0)
+      return '${_formatDuration(_position)} / ${_formatDuration(_duration)}';
+    if (_duration.inSeconds > 0) return _formatDuration(_duration);
+    return '0:00';
+  }
+
+  String _formatTime(String timestamp) {
+    try {
+      final local = DateTime.parse(timestamp).toLocal();
+      final hour = local.hour;
+      final minute = local.minute.toString().padLeft(2, '0');
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+      return '$displayHour:$minute $period';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  static const _nameColors = [
+    Color(0xFF6C5CE7), Color(0xFF00B894), Color(0xFF0984E3),
+    Color(0xFFE17055), Color(0xFF74B9FF), Color(0xFFFD79A8),
+    Color(0xFF55EFC4), Color(0xFFA29BFE), Color(0xFFFF7675),
+    Color(0xFF00CEC9),
+  ];
+
+  Color _colorForName(String name) {
+    final seed = name.codeUnits.fold(0, (a, b) => a + b);
+    return _nameColors[seed % _nameColors.length];
+  }
+
+  ImageProvider? _imageProvider(String? src) {
+    if (src == null || src.isEmpty || src == 'null') return null;
+    try {
+      if (src.startsWith('data:image') ||
+          src.startsWith('/9j/') ||
+          src.startsWith('iVBORw0KGgo')) {
+        return MemoryImage(base64Decode(
+            src.startsWith('data:image') ? src.split(',')[1] : src));
+      }
+      return NetworkImage(src);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Widget _buildAvatar() {
+    if (_senderMap == null) {
+      return CircleAvatar(
+          radius: 16,
+          backgroundColor: Colors.grey[300],
+          child: Icon(Icons.person, size: 16, color: Colors.grey[600]));
+    }
+    final profile = _senderMap!['profile'];
+    final imgProv =
+    _imageProvider(profile?['profileImage']?.toString());
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: _colorForName(_senderName),
+      backgroundImage: imgProv,
+      child: imgProv == null
+          ? Text(
+          _senderName.isNotEmpty ? _senderName[0].toUpperCase() : '?',
+          style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.bold))
+          : null,
+    );
+  }
+
   // ════════════════════════════════════════════════════════════════════════
   //  BUILD
   // ════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
+    super.build(context); // required by AutomaticKeepAliveClientMixin
+
     final text = widget.message['text']?.toString() ?? '';
     final timestamp = widget.message['createdAt']?.toString() ?? '';
-    final readers = List<String>.from(widget.message['readers'] ?? []);
     final hasReply = widget.message['replyToMessage'] != null ||
         (widget.message['replyTo'] != null &&
             widget.message['replyTo'] is String &&
@@ -1407,13 +1806,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Align(
-        alignment: _isMe ? Alignment.centerRight : Alignment.centerLeft,
+        alignment:
+        _isMe ? Alignment.centerRight : Alignment.centerLeft,
         child: Row(
-          mainAxisAlignment: _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+          mainAxisAlignment:
+          _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-
-            // ── Left avatar ─────────────────────────────────────────────
+            // ── Left avatar ──────────────────────────────────────────
             if (!_isMe) ...[
               SizedBox(
                 width: 36,
@@ -1430,23 +1830,32 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
               const SizedBox(width: 6),
             ],
 
-            // ── Bubble ──────────────────────────────────────────────────
+            // ── Bubble ───────────────────────────────────────────────
             Flexible(
               child: GestureDetector(
                 onTap: !_isMe ? _showMemberProfile : null,
                 onLongPress: _showMessageOptions,
                 child: Container(
                   constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.72),
-                  padding:
-                  const EdgeInsets.symmetric(vertical: 9, horizontal: 13),
+                      maxWidth:
+                      MediaQuery.of(context).size.width * 0.72),
+                  padding: EdgeInsets.symmetric(
+                    horizontal:
+                    (_isFile && _isImageFile) ? 0 : 13,
+                    vertical:
+                    (_isFile && _isImageFile) ? 0 : 9,
+                  ),
                   decoration: BoxDecoration(
-                    color: _isMe ? _purple : Colors.white,
+                    color: (_isFile && _isImageFile)
+                        ? Colors.transparent
+                        : (_isMe ? _purple : Colors.white),
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(18),
                       topRight: const Radius.circular(18),
-                      bottomLeft: Radius.circular(_isMe ? 18 : 4),
-                      bottomRight: Radius.circular(_isMe ? 4 : 18),
+                      bottomLeft:
+                      Radius.circular(_isMe ? 18 : 4),
+                      bottomRight:
+                      Radius.circular(_isMe ? 4 : 18),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -1459,7 +1868,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Forwarded label (only for non-post forwards)
                       if (_isForwardedMsg) _buildForwardedLabel(),
+
                       // Sender name
                       if (!_isMe && widget.showAvatar) ...[
                         Text(_senderName,
@@ -1473,41 +1884,77 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
                       // Reply preview
                       if (hasReply) _buildReplyPreview(),
 
-                      // Content
-                      if (_isSharedPost)
-                        _buildSharedPost()
+                      // ── Content: single decision tree, no fallbacks ──
+                      if (_isSharedPost && _cachedPostData != null)
+                        _buildSharedPostFromCache()
                       else if (_isAudio)
                         _buildVoiceBubble()
                       else if (_isFile)
                           _buildFileBubble()
-                        else if (text.isNotEmpty)
-                            GroupClickableText(text: text, isMe: _isMe),
+                        else if (text.isNotEmpty) ...[
+                            GroupClickableText(
+                                text: text, isMe: _isMe),
+                            if (_hasValidLinkMeta()) _buildLinkPreview(),
+                          ],
 
                       const SizedBox(height: 4),
 
-                      // Time + status ticks
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Text(_formatTime(timestamp),
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: _isMe
-                                    ? Colors.white60
-                                    : Colors.grey[500])),
-                        if (_isMe) ...[
-                          const SizedBox(width: 5),
-                          _buildStatusTick(),
-                        ],
-                        if (widget.message['isEdited'] == true) ...[
-                          const SizedBox(width: 5),
-                          Text('edited',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  fontStyle: FontStyle.italic,
-                                  color: _isMe
-                                      ? Colors.white54
-                                      : Colors.grey[400])),
-                        ],
-                      ]),
+                      // Time + status
+                      Padding(
+                        padding: EdgeInsets.only(
+                          bottom:
+                          (_isFile && _isImageFile) ? 4.0 : 0,
+                          right:
+                          (_isFile && _isImageFile) ? 8.0 : 0,
+                          left:
+                          (_isFile && _isImageFile) ? 8.0 : 0,
+                        ),
+                        child: Container(
+                          padding: (_isFile && _isImageFile)
+                              ? const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2)
+                              : EdgeInsets.zero,
+                          decoration: (_isFile && _isImageFile)
+                              ? BoxDecoration(
+                            color: Colors.black.withOpacity(0.45),
+                            borderRadius:
+                            BorderRadius.circular(10),
+                          )
+                              : null,
+                          child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _formatTime(timestamp),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: (_isFile && _isImageFile)
+                                          ? Colors.white
+                                          : (_isMe
+                                          ? Colors.white60
+                                          : Colors.grey[500])),
+                                ),
+                                if (_isMe) ...[
+                                  const SizedBox(width: 5),
+                                  _buildStatusTick(),
+                                ],
+                                if (widget.message['isEdited'] ==
+                                    true) ...[
+                                  const SizedBox(width: 5),
+                                  Text('edited',
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontStyle: FontStyle.italic,
+                                          color: (_isFile &&
+                                              _isImageFile)
+                                              ? Colors.white70
+                                              : (_isMe
+                                              ? Colors.white54
+                                              : Colors.grey[400]))),
+                                ],
+                              ]),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1522,14 +1969,19 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble> {
   }
 }
 
-
+// ════════════════════════════════════════════════════════════════════════
+//  CLICKABLE TEXT
+// ════════════════════════════════════════════════════════════════════════
 class GroupClickableText extends StatelessWidget {
   final String text;
   final bool isMe;
-  const GroupClickableText({Key? key, required this.text, required this.isMe}) : super(key: key);
+  const GroupClickableText(
+      {Key? key, required this.text, required this.isMe})
+      : super(key: key);
 
   @override
-  Widget build(BuildContext context) => RichText(text: _buildSpans());
+  Widget build(BuildContext context) =>
+      RichText(text: _buildSpans());
 
   TextSpan _buildSpans() {
     final urlPattern = RegExp(
@@ -1546,7 +1998,9 @@ class GroupClickableText extends StatelessWidget {
       if (m.start > pos) {
         spans.add(TextSpan(
           text: text.substring(pos, m.start),
-          style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 15),
+          style: TextStyle(
+              color: isMe ? Colors.white : Colors.black87,
+              fontSize: 15),
         ));
       }
       final url = m.group(0)!;
@@ -1556,30 +2010,35 @@ class GroupClickableText extends StatelessWidget {
           color: isMe ? Colors.lightBlueAccent : Colors.blue[800],
           fontSize: 15,
           decoration: TextDecoration.underline,
-          decorationColor: isMe ? Colors.lightBlueAccent : Colors.blue[800],
+          decorationColor:
+          isMe ? Colors.lightBlueAccent : Colors.blue[800],
           decorationThickness: 2,
           fontWeight: FontWeight.w600,
         ),
-        recognizer: TapGestureRecognizer()..onTap = () => _launchURL(url),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () => _launchURL(url),
       ));
       pos = m.end;
     }
     if (pos < text.length) {
       spans.add(TextSpan(
         text: text.substring(pos),
-        style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 15),
+        style: TextStyle(
+            color: isMe ? Colors.white : Colors.black87, fontSize: 15),
       ));
     }
     return TextSpan(children: spans);
   }
 
   Future<void> _launchURL(String urlString) async {
-    if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+    if (!urlString.startsWith('http://') &&
+        !urlString.startsWith('https://')) {
       urlString = 'https://$urlString';
     }
     final uri = Uri.parse(urlString);
     try {
-      if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (await canLaunchUrl(uri))
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
     } catch (e) {
       debugPrint('Error launching URL: $e');
     }

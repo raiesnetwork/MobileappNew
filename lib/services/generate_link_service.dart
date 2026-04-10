@@ -66,6 +66,7 @@ class MeetService {
     List<Map<String, String>>? members,
     List<Map<String, String>>? mail,
     Map<String, dynamic>? recurrenceSettings,
+    String? message, // ✅ Added parameter
   }) async {
     try {
       final requestBody = {
@@ -77,6 +78,7 @@ class MeetService {
         if (members != null && members.isNotEmpty) 'members': members,
         if (mail != null && mail.isNotEmpty) 'mail': mail,
         if (recurrenceSettings != null) 'recurrenceSettings': recurrenceSettings,
+        if (message != null && message.isNotEmpty) 'message': message, // ✅ Added here
       };
 
       print('Request body: $requestBody');

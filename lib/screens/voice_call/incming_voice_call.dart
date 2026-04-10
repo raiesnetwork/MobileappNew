@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:ixes.app/screens/voice_call/voice_call_room_screen.dart';
 import 'package:provider/provider.dart';
@@ -15,9 +16,10 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     with SingleTickerProviderStateMixin {
   late final VoiceCallProvider _provider;
   late AnimationController _animationController;
+  final AudioPlayer _ringPlayer = AudioPlayer();
 
-  bool _isActioning = false; // prevent double-tap
-  bool _isPopping   = false; // prevent double-pop (the red screen bug)
+  bool _isActioning = false;
+  bool _isPopping = false;
 
   @override
   void initState() {
@@ -29,33 +31,25 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
+
+    _ringPlayer.setReleaseMode(ReleaseMode.loop);
+    _ringPlayer.play(AssetSource('sounds/ringtone.mp3'));
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Called when provider state changes (e.g. caller cancelled)
-  // ─────────────────────────────────────────────────────────────────────────
   void _handleCallStateChange() {
-    // ✅ Guard 1: don't act if we're already in the middle of an action
     if (!mounted || _isActioning || _isPopping) return;
 
-    // ✅ Only pop on 'ended' — NOT on 'idle'.
-    // The provider auto-resets ended → idle after 2s. If we also pop on idle
-    // we get a second pop which causes the "Unknown" reappearing screen bug.
     if (_provider.callState == VoiceCallState.ended) {
       debugPrint('📵 IncomingVoiceCallDialog: caller cancelled → popping safely');
       _safePop();
     }
   }
 
-  /// Pops the screen safely, even if called during a build frame.
   void _safePop() {
     if (_isPopping || !mounted) return;
     _isPopping = true;
-
-    // Remove listener immediately so no further state changes trigger us
     _provider.removeListener(_handleCallStateChange);
-
-    // ✅ Use addPostFrameCallback so we never pop mid-build (avoids red screen)
+    _ringPlayer.stop();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop();
     });
@@ -65,36 +59,26 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
   void dispose() {
     _provider.removeListener(_handleCallStateChange);
     _animationController.dispose();
+    _ringPlayer.stop();
+    _ringPlayer.dispose();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Decline
-  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _onDecline() async {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
-
-    // Remove listener BEFORE rejecting so the resulting state change
-    // to 'ended' doesn't trigger _handleCallStateChange → double-pop
     _provider.removeListener(_handleCallStateChange);
-
+    _ringPlayer.stop();
     await _provider.rejectVoiceCall();
-
     if (mounted) Navigator.of(context).pop();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Accept
-  // ─────────────────────────────────────────────────────────────────────────
   Future<void> _onAccept() async {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
-
     _provider.removeListener(_handleCallStateChange);
-
+    _ringPlayer.stop();
     await _provider.acceptVoiceCall();
-
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const VoiceRoomScreen()),
@@ -102,9 +86,6 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -123,7 +104,8 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white70, size: 28),
+                      icon: const Icon(Icons.close,
+                          color: Colors.white70, size: 28),
                       onPressed: _onDecline,
                     ),
                   ],
@@ -153,7 +135,8 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                           ),
                         ],
                       ),
-                      child: const Icon(Icons.phone, size: 60, color: Colors.white),
+                      child: const Icon(Icons.phone,
+                          size: 60, color: Colors.white),
                     ),
                   );
                 },
@@ -179,10 +162,14 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: LinearGradient(
-                          colors: [Colors.blue[300]!, Colors.purple[300]!],
+                          colors: [
+                            Colors.blue[300]!,
+                            Colors.purple[300]!
+                          ],
                         ),
                       ),
-                      child: const Icon(Icons.person, color: Colors.white, size: 40),
+                      child: const Icon(Icons.person,
+                          color: Colors.white, size: 40),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -195,7 +182,9 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      provider.isConference ? 'Conference Call' : 'Voice Call',
+                      provider.isConference
+                          ? 'Conference Call'
+                          : 'Voice Call',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.7),
                         fontSize: 16,
@@ -208,7 +197,8 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
               const Spacer(),
 
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 40, vertical: 40),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -231,7 +221,8 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                           ),
                           child: IconButton(
                             onPressed: _onDecline,
-                            icon: const Icon(Icons.call_end, size: 36, color: Colors.white),
+                            icon: const Icon(Icons.call_end,
+                                size: 36, color: Colors.white),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -262,7 +253,8 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                           ),
                           child: IconButton(
                             onPressed: _onAccept,
-                            icon: const Icon(Icons.call, size: 36, color: Colors.white),
+                            icon: const Icon(Icons.call,
+                                size: 36, color: Colors.white),
                           ),
                         ),
                         const SizedBox(height: 12),

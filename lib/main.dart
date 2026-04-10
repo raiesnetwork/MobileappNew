@@ -308,11 +308,13 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp();
-  DeepLinkService.init();
+
   FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
   await _initFCM();
   await _checkActiveCallsOnStartup();
   const androidConfig = FlutterBackgroundAndroidConfig(
+
+
     notificationTitle: 'Screen Sharing',
     notificationText: 'Ixes meeting is running in background',
     notificationImportance: AndroidNotificationImportance.normal,
@@ -421,6 +423,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
   @override
   void initState() {
     super.initState();
+    DeepLinkService.init();
     WidgetsBinding.instance.addObserver(this);
 
     // If _checkActiveCallsOnStartup already stored a pending call,
