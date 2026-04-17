@@ -14,20 +14,18 @@ class VoiceCallingScreen extends StatefulWidget {
 class _VoiceCallingScreenState extends State<VoiceCallingScreen>
     with SingleTickerProviderStateMixin {
 
-  // ✅ CRITICAL: save provider ref in initState — NEVER use context.read() in dispose()
   late final VoiceCallProvider _provider;
-  // Add these state variables at the top of _VoiceCallingScreenState:
   bool _isMuted = false;
   bool _isSpeakerOn = false;
   final AudioPlayer _ringPlayer = AudioPlayer();
 
   late AnimationController _pulseController;
-  bool _isActioning = false; // prevents double-pop from button + listener
+  bool _isActioning = false;
 
   @override
   void initState() {
     super.initState();
-    _provider = context.read<VoiceCallProvider>(); // ✅ safe here
+    _provider = context.read<VoiceCallProvider>();
     _provider.addListener(_handleCallStateChange);
 
     _pulseController = AnimationController(
@@ -41,10 +39,9 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
   void _handleCallStateChange() {
     if (!mounted || _isActioning) return;
 
-    // Receiver accepted → go to room
     if (_provider.callState == VoiceCallState.connected) {
       _isActioning = true;
-      _provider.removeListener(_handleCallStateChange); // stop listening first
+      _provider.removeListener(_handleCallStateChange);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const VoiceRoomScreen()),
@@ -52,11 +49,10 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
       return;
     }
 
-    // Receiver rejected / call ended → pop back to home
     if (_provider.callState == VoiceCallState.ended ||
         _provider.callState == VoiceCallState.idle) {
       _isActioning = true;
-      _provider.removeListener(_handleCallStateChange); // stop listening first
+      _provider.removeListener(_handleCallStateChange);
 
       final errorMsg = _provider.errorMessage;
       Navigator.of(context).pop();
@@ -76,17 +72,13 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
   Future<void> _cancelCall() async {
     if (_isActioning) return;
     _isActioning = true;
-
-    // ✅ Remove listener BEFORE state changes to prevent double-pop
     _provider.removeListener(_handleCallStateChange);
-
     await _provider.endVoiceCall();
     if (mounted) Navigator.of(context).pop();
   }
 
   @override
   void dispose() {
-    // ✅ Use saved _provider ref — context.read() is UNSAFE here
     _provider.removeListener(_handleCallStateChange);
     _pulseController.dispose();
     _ringPlayer.stop();
@@ -99,55 +91,64 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
     return WillPopScope(
       onWillPop: () async {
         await _cancelCall();
-        return false; // we handle the pop ourselves
+        return false;
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF1A1A2E),
         body: SafeArea(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center, // ✅ center everything
             children: [
               const Spacer(),
 
-              // Animated Avatar
-              AnimatedBuilder(
-                animation: _pulseController,
-                builder: (_, __) {
-                  return Container(
-                    width: 140 + (_pulseController.value * 20),
-                    height: 140 + (_pulseController.value * 20),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Colors.blue[400]!, Colors.purple[400]!],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
-                          blurRadius: 30,
-                          spreadRadius: 10,
+              // ── Animated Avatar ──────────────────────────────
+              Center(
+                child: AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (_, __) {
+                    return Container(
+                      width: 140 + (_pulseController.value * 20),
+                      height: 140 + (_pulseController.value * 20),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Colors.blue[400]!, Colors.purple[400]!],
                         ),
-                      ],
-                    ),
-                    child: const Icon(Icons.person, size: 70, color: Colors.white),
-                  );
-                },
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.3),
+                            blurRadius: 30,
+                            spreadRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.person, size: 70, color: Colors.white),
+                    );
+                  },
+                ),
               ),
               const SizedBox(height: 40),
 
-              // Receiver Name
-              Text(
-                _provider.currentReceiverName ?? 'Unknown',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
+              // ── Receiver Name — centered, wraps cleanly ──────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  _provider.currentReceiverName ?? 'Unknown',
+                  textAlign: TextAlign.center, // ✅ center the text
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
 
-              // Calling dots
+              // ── Calling dots ─────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -165,7 +166,7 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
               ),
               const Spacer(),
 
-              // Voice Call label
+              // ── Voice Call label ─────────────────────────────
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 decoration: BoxDecoration(
@@ -185,13 +186,10 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
               ),
               const SizedBox(height: 60),
 
-              // Controls
-              // Controls
-              // Replace the two _buildControlButton calls in Row:
+              // ── Controls ─────────────────────────────────────
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Mute button
                   _buildControlButton(
                     icon: _provider.isMuted ? Icons.mic_off : Icons.mic,
                     color: _provider.isMuted
@@ -204,15 +202,19 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
                   ),
                   const SizedBox(width: 40),
 
-                  // End Call
                   Container(
-                    width: 75, height: 75,
+                    width: 75,
+                    height: 75,
                     decoration: BoxDecoration(
-                      color: Colors.red, shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(
-                        color: Colors.red.withOpacity(0.5),
-                        blurRadius: 25, spreadRadius: 5,
-                      )],
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.5),
+                          blurRadius: 25,
+                          spreadRadius: 5,
+                        )
+                      ],
                     ),
                     child: IconButton(
                       onPressed: _cancelCall,
@@ -221,7 +223,6 @@ class _VoiceCallingScreenState extends State<VoiceCallingScreen>
                   ),
                   const SizedBox(width: 40),
 
-                  // Speaker button
                   _buildControlButton(
                     icon: _provider.isSpeakerOn
                         ? Icons.volume_up

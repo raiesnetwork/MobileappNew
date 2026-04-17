@@ -1,12 +1,12 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:ixes.app/screens/campaigns_page/share_campaign.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/campaign_provider.dart';
 import 'campaign_members.dart';
 import 'campaigns_info screen.dart';
 import 'create_campaign_screen.dart';
+import '../home/feedpage/sharepost_screen.dart';
 
 class CampaignsScreen extends StatefulWidget {
   final Widget Function(String?, {bool isProfileImage}) buildImageWidget;
@@ -28,6 +28,19 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   bool _isLoadingMore = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+
+  // ── Design tokens (mirrors AnnouncementScreen _T) ──────────────────────────
+  static const _accent = Color(0xFF6366F1);
+  static const _accentLight = Color(0xFFEEF0FD);
+  static const _textPrimary = Color(0xFF1A1A2E);
+  static const _textSecondary = Color(0xFF6B7280);
+  static const _textTertiary = Color(0xFF9CA3AF);
+  static const _divider = Color(0xFFF0F1F5);
+  static const _red = Color(0xFFE53935);
+  static const _redLight = Color(0xFFFFEEEE);
+  static const _green = Color(0xFF10B981);
+  static const _surface = Colors.white;
+  static const _bg = Color(0xFFF7F8FC);
 
   @override
   void initState() {
@@ -68,11 +81,15 @@ class _CampaignsScreenState extends State<CampaignsScreen>
     });
   }
 
-  void _shareCampaign(String campaignId) {
+  void _shareCampaign(String campaignId, String campaignTitle) {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ShareCampaignScreen(campaignId: campaignId),
+        builder: (_) => SharePostScreen(
+          postId: campaignTitle,
+          shareContext: 'campaign',
+          contextId: campaignId,
+        ),
       ),
     );
   }
@@ -106,136 +123,55 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   void _confirmDelete(String campaignId) {
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        backgroundColor: Colors.white,
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFEEEE),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: Color(0xFFE53935),
-                  size: 32,
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                'Delete Campaign?',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF1A1A2E),
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'This action cannot be undone. All campaign data will be permanently removed.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Color(0xFF6B7280),
-                  height: 1.5,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 28),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        backgroundColor: const Color(0xFFF3F4F6),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(
-                          color: Color(0xFF374151),
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        final response = await context
-                            .read<CampaignProvider>()
-                            .deleteCampaign(campaignId);
-                        if (mounted) {
-                          final isError = response['error'] ?? true;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Row(
-                                children: [
-                                  Icon(
-                                    isError
-                                        ? Icons.error_outline
-                                        : Icons.check_circle_outline,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      isError
-                                          ? 'Error: ${response['message'] ?? 'Unknown error'}'
-                                          : response['message'] ?? 'Deleted',
-                                      style: const TextStyle(
-                                          fontSize: 14, color: Colors.white),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              backgroundColor: isError
-                                  ? const Color(0xFFE53935)
-                                  : const Color(0xFF10B981),
-                              behavior: SnackBarBehavior.floating,
-                              margin: const EdgeInsets.all(16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                            ),
-                          );
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFE53935),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        elevation: 0,
-                      ),
-                      child: const Text(
-                        'Delete',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete Campaign',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17),
         ),
+        content: const Text(
+          'This will permanently remove this campaign and all its data.',
+          style: TextStyle(color: _textSecondary, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: _textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _red,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              final response = await context
+                  .read<CampaignProvider>()
+                  .deleteCampaign(campaignId);
+              if (mounted) {
+                final isError = response['error'] ?? true;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      isError
+                          ? 'Error: ${response['message'] ?? 'Unknown error'}'
+                          : response['message'] ?? 'Deleted',
+                    ),
+                    backgroundColor: isError ? _red : _green,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                );
+              }
+            },
+            child: const Text('Delete'),
+          ),
+        ],
       ),
     );
   }
@@ -256,13 +192,12 @@ class _CampaignsScreenState extends State<CampaignsScreen>
               color: const Color(0xFFF3F4F6),
               child: const Center(
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Primary,
-                ),
+                    strokeWidth: 2, color: Primary),
               ),
             );
           },
-          errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(),
+          errorBuilder: (context, error, stackTrace) =>
+              _buildImagePlaceholder(),
         );
       } else {
         return widget.buildImageWidget(imageUrl, isProfileImage: false);
@@ -274,16 +209,9 @@ class _CampaignsScreenState extends State<CampaignsScreen>
 
   Widget _buildImagePlaceholder() {
     return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F4FF),
-        borderRadius: BorderRadius.circular(16),
-      ),
+      decoration: const BoxDecoration(color: _accentLight),
       child: const Center(
-        child: Icon(
-          Icons.campaign_outlined,
-          color: Primary,
-          size: 36,
-        ),
+        child: Icon(Icons.campaign_outlined, color: _accent, size: 36),
       ),
     );
   }
@@ -291,19 +219,28 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FC),
+      backgroundColor: _bg,
       appBar: AppBar(
         scrolledUnderElevation: 0,
-        backgroundColor: const Color(0xFFF7F8FC),
+        backgroundColor: _surface,
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded,
+              size: 20, color: _textPrimary),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text(
           'Campaigns',
           style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF1A1A2E),
-            letterSpacing: -0.5,
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: _textPrimary,
+            letterSpacing: -0.3,
           ),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: _divider),
         ),
       ),
       body: Consumer<CampaignProvider>(
@@ -311,7 +248,8 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           if (provider.isLoading && provider.campaigns.isEmpty) {
             return _buildLoadingState();
           }
-          if (provider.campaigns.isEmpty && provider.errorMessage != null) {
+          if (provider.campaigns.isEmpty &&
+              provider.errorMessage != null) {
             return _buildErrorState(provider);
           }
           if (provider.campaigns.isEmpty) {
@@ -322,19 +260,31 @@ class _CampaignsScreenState extends State<CampaignsScreen>
             opacity: _fadeAnimation,
             child: RefreshIndicator(
               onRefresh: provider.refreshCampaigns,
-              color: Primary,
+              color: _accent,
               backgroundColor: Colors.white,
               child: ListView.builder(
                 controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                const EdgeInsets.fromLTRB(16, 14, 16, 100),
                 itemCount: provider.campaigns.length +
                     (provider.hasMoreCampaigns ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index < provider.campaigns.length) {
-                    return _buildCampaignCard(
-                        provider.campaigns[index], index);
+                    return TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0, end: 1),
+                      duration: Duration(
+                          milliseconds: 350 + index * 60),
+                      curve: Curves.easeOutCubic,
+                      builder: (_, v, child) => Opacity(
+                        opacity: v,
+                        child: Transform.translate(
+                            offset: Offset(0, 16 * (1 - v)),
+                            child: child),
+                      ),
+                      child: _buildCampaignCard(
+                          provider.campaigns[index], index),
+                    );
                   }
                   return _buildLoadingMoreIndicator();
                 },
@@ -352,31 +302,24 @@ class _CampaignsScreenState extends State<CampaignsScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 72,
-            height: 72,
+            width: 64,
+            height: 64,
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: Primary.withOpacity(0.15),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
-                ),
-              ],
+              color: _accentLight,
+              shape: BoxShape.circle,
             ),
             child: const Center(
-              child: CircularProgressIndicator(color: Primary, strokeWidth: 2.5),
+              child: CircularProgressIndicator(
+                  color: _accent, strokeWidth: 2.5),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           const Text(
             'Loading campaigns...',
             style: TextStyle(
-              fontSize: 15,
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w500,
-            ),
+                fontSize: 14,
+                color: _textSecondary,
+                fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -386,44 +329,42 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   Widget _buildErrorState(CampaignProvider provider) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFEEEE),
-                borderRadius: BorderRadius.circular(24),
-              ),
+              width: 64,
+              height: 64,
+              decoration: const BoxDecoration(
+                  color: _redLight, shape: BoxShape.circle),
               child: const Icon(Icons.wifi_off_rounded,
-                  size: 40, color: Color(0xFFE53935)),
+                  color: _red, size: 28),
             ),
+            const SizedBox(height: 16),
+            const Text('Couldn\'t load',
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: _textPrimary)),
+            const SizedBox(height: 6),
+            Text(provider.errorMessage ?? '',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 13, color: _textSecondary)),
             const SizedBox(height: 20),
-            Text(
-              provider.errorMessage!,
-              style: const TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF374151),
-                  fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
+            ElevatedButton(
               onPressed: () => provider.refreshCampaigns(),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Primary,
+                backgroundColor: _accent,
                 foregroundColor: Colors.white,
-                padding:
-                const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
                 elevation: 0,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 28, vertical: 12),
               ),
-              icon: const Icon(Icons.refresh_rounded, size: 18),
-              label: const Text('Try Again',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              child: const Text('Retry'),
             ),
           ],
         ),
@@ -433,40 +374,28 @@ class _CampaignsScreenState extends State<CampaignsScreen>
 
   Widget _buildEmptyState() {
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(40),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF0F4FF),
-                borderRadius: BorderRadius.circular(30),
-              ),
-              child: const Icon(Icons.campaign_outlined,
-                  size: 52, color: Primary),
-            ),
-            const SizedBox(height: 24),
-            const Text(
-              'No Campaigns Yet',
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: const BoxDecoration(
+                color: _accentLight, shape: BoxShape.circle),
+            child: const Icon(Icons.campaign_outlined,
+                color: _accent, size: 32),
+          ),
+          const SizedBox(height: 16),
+          const Text('No campaigns yet',
               style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                color: Color(0xFF1A1A2E),
-                letterSpacing: -0.3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Create your first campaign to engage\nyour community',
-              style: TextStyle(
-                  fontSize: 15, color: Color(0xFF6B7280), height: 1.6),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: _textPrimary)),
+          const SizedBox(height: 6),
+          const Text('Check back later or create one',
+              style:
+              TextStyle(fontSize: 13, color: _textSecondary)),
+        ],
       ),
     );
   }
@@ -477,190 +406,269 @@ class _CampaignsScreenState extends State<CampaignsScreen>
     (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
     final String communityName =
         campaign['community']?['name'] ?? 'Unknown';
-    // FIX BUG 7: isUserAdmin comes from campaign['isUserAdmin'], not a community field
-    final bool isAdmin = campaign['isUserAdmin'] == true;
+    // ── Fix: handle both bool true and string "true" ──────────────
+    final bool isAdmin = campaign['isUserAdmin'] == true ||
+        campaign['isUserAdmin'].toString() == 'true';
     final String type =
     (campaign['type'] ?? 'MANDATORY').toString().toUpperCase();
     final bool isCompleted = campaign['isCompleted'] == true;
 
-    return TweenAnimationBuilder<double>(
-      duration: Duration(milliseconds: 400 + (index * 60).clamp(0, 400)),
-      tween: Tween(begin: 0.0, end: 1.0),
-      curve: Curves.easeOut,
-      builder: (context, value, child) => Opacity(
-        opacity: value,
-        child: Transform.translate(
-          offset: Offset(0, 20 * (1 - value)),
-          child: child,
-        ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _divider),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x0A000000),
+              blurRadius: 8,
+              offset: Offset(0, 2))
+        ],
       ),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF1A1A2E).withOpacity(0.06),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          child: InkWell(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => CampaignDetailsScreen(
-                  campaignId: campaign['_id'],
-                  buildImageWidget: widget.buildImageWidget,
-                  communityName: communityName,
-                ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CampaignDetailsScreen(
+                campaignId: campaign['_id'],
+                buildImageWidget: widget.buildImageWidget,
+                communityName: communityName,
               ),
             ),
-            borderRadius: BorderRadius.circular(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Cover image full-width ──────────────────────────
-                if (coverImage.isNotEmpty)
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(20)),
-                    child: SizedBox(
-                      height: 160,
-                      width: double.infinity,
-                      child: _buildCampaignImage(coverImage),
-                    ),
-                  )
-                else
-                  Container(
-                    height: 120,
-                    decoration: BoxDecoration(
-                      color: _getTypeColor(type).withOpacity(0.08),
-                      borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(20)),
-                    ),
-                    child: Center(
-                      child: Icon(Icons.campaign_outlined,
-                          size: 48, color: _getTypeColor(type)),
-                    ),
+          ),
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Cover image ──────────────────────────────────────
+              if (coverImage.isNotEmpty)
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(16)),
+                  child: SizedBox(
+                    height: 150,
+                    width: double.infinity,
+                    child: _buildCampaignImage(coverImage),
                   ),
+                )
+              else
+                Container(
+                  height: 110,
+                  decoration: BoxDecoration(
+                    color: _getTypeColor(type).withOpacity(0.08),
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(16)),
+                  ),
+                  child: Center(
+                    child: Icon(Icons.campaign_outlined,
+                        size: 40, color: _getTypeColor(type)),
+                  ),
+                ),
 
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // ── Title row + menu ──────────────────────
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              campaign['title'] ?? 'Untitled Campaign',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1A1A2E),
-                                letterSpacing: -0.2,
-                                height: 1.3,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Title row + ⋮ menu ───────────────────────
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Icon badge
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: _getTypeColor(type)
+                                .withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(11),
                           ),
-                          _buildPopupMenu(campaign, isAdmin),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-
-                      // ── Community name ──────────────────────────
-                      Row(
-                        children: [
-                          const Icon(Icons.group_outlined,
-                              size: 13, color: Color(0xFF9CA3AF)),
-                          const SizedBox(width: 4),
-                          Text(
-                            communityName,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFF9CA3AF),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-
-                      // ── Description ────────────────────────────
-                      Text(
-                        campaign['description'] ?? '',
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF6B7280),
-                          height: 1.5,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 14),
-
-                      // ── Progress bar (only for payment campaigns) ──
-                      if ((campaign['totalAmountNeeded'] ?? 0) > 0)
-                        _buildProgressBar(campaign),
-
-                      if ((campaign['totalAmountNeeded'] ?? 0) > 0)
-                        const SizedBox(height: 14),
-
-                      // ── Chips row ──────────────────────────────
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _buildChip(
-                            icon: Icons.schedule_rounded,
-                            label: _formatSchedule(schedule),
-                            color: _getScheduleColor(schedule),
-                          ),
-                          _buildChip(
-                            icon: _getTypeIcon(type),
-                            label: type,
+                          child: Icon(
+                            _getTypeIcon(type),
                             color: _getTypeColor(type),
+                            size: 20,
                           ),
-                          if (isCompleted)
-                            _buildChip(
-                              icon: Icons.check_circle_rounded,
-                              label: 'Completed',
-                              color: const Color(0xFF10B981),
-                            ),
-                          if (isAdmin)
-                            GestureDetector(
-                              onTap: () => Navigator.push(
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                campaign['title'] ??
+                                    'Untitled Campaign',
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: _textPrimary,
+                                  letterSpacing: -0.2,
+                                  height: 1.3,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  const Icon(Icons.group_outlined,
+                                      size: 12, color: _textTertiary),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    communityName,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: _textTertiary,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        // ── ⋮ PopupMenuButton ────────────────────
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert_rounded,
+                              color: _textTertiary, size: 20),
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          elevation: 4,
+                          onSelected: (v) {
+                            if (v == 'share')
+                              _shareCampaign(campaign['_id'], campaign['title'] ?? 'Campaign');
+                            if (v == 'edit') _editCampaign(campaign);
+                            if (v == 'delete')
+                              _confirmDelete(campaign['_id']);
+                            if (v == 'members')
+                              Navigator.push(
                                 context,
                                 MaterialPageRoute(
                                   builder: (_) => CampaignMembersScreen(
                                     campaignId: campaign['_id'],
                                   ),
                                 ),
-                              ),
-                              child: _buildChip(
-                                icon: Icons.people_alt_outlined,
-                                label:
-                                'Members${campaign['totalMembers'] != null ? ' · ${campaign['totalMembers']}' : ''}',
-                                color: const Color(0xFF6366F1),
-                              ),
+                              );
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'share',
+                              height: 42,
+                              child: Row(children: const [
+                                Icon(Icons.share_outlined,
+                                    color: _accent, size: 18),
+                                SizedBox(width: 10),
+                                Text('Share',
+                                    style: TextStyle(fontSize: 14)),
+                              ]),
                             ),
-                        ],
+                            if (isAdmin) ...[
+                              PopupMenuItem(
+                                value: 'members',
+                                height: 42,
+                                child: Row(children: [
+                                  const Icon(
+                                      Icons.people_alt_outlined,
+                                      color: _accent,
+                                      size: 18),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Members${campaign['totalMembers'] != null ? ' · ${campaign['totalMembers']}' : ''}',
+                                    style: const TextStyle(
+                                        fontSize: 14),
+                                  ),
+                                ]),
+                              ),
+                              PopupMenuItem(
+                                value: 'edit',
+                                height: 42,
+                                child: Row(children: const [
+                                  Icon(Icons.edit_outlined,
+                                      color: _accent, size: 18),
+                                  SizedBox(width: 10),
+                                  Text('Edit',
+                                      style: TextStyle(fontSize: 14)),
+                                ]),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                height: 42,
+                                child: Row(children: const [
+                                  Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: _red,
+                                      size: 18),
+                                  SizedBox(width: 10),
+                                  Text('Delete',
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          color: _red)),
+                                ]),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+
+                    // ── Description ──────────────────────────────
+                    if ((campaign['description'] ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        campaign['description'],
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: _textSecondary,
+                          height: 1.45,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
-                  ),
+
+                    // ── Progress bar ─────────────────────────────
+                    if ((campaign['totalAmountNeeded'] ?? 0) > 0) ...[
+                      const SizedBox(height: 12),
+                      _buildProgressBar(campaign),
+                    ],
+
+                    // ── Status chips (non-action, info only) ─────
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: _buildChip(
+                            icon: Icons.schedule_rounded,
+                            label: _formatSchedule(schedule),
+                            color: _getScheduleColor(schedule),
+                            shrink: true,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChip(
+                          icon: _getTypeIcon(type),
+                          label: type,
+                          color: _getTypeColor(type),
+                        ),
+                        if (isCompleted) ...[
+                          const SizedBox(width: 8),
+                          _buildChip(
+                            icon: Icons.check_circle_rounded,
+                            label: 'Completed',
+                            color: _green,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -684,17 +692,14 @@ class _CampaignsScreenState extends State<CampaignsScreen>
             Text(
               '$currency${collected.toInt()} raised',
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF10B981),
-              ),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _green),
             ),
             Text(
               'of $currency${needed.toInt()}',
               style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF9CA3AF),
-              ),
+                  fontSize: 12, color: _textTertiary),
             ),
           ],
         ),
@@ -703,11 +708,9 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
             value: progress,
-            backgroundColor: const Color(0xFFF3F4F6),
+            backgroundColor: _divider,
             valueColor: AlwaysStoppedAnimation<Color>(
-              progress >= 1.0
-                  ? const Color(0xFF10B981)
-                  : Primary,
+              progress >= 1.0 ? _green : _accent,
             ),
             minHeight: 6,
           ),
@@ -720,83 +723,42 @@ class _CampaignsScreenState extends State<CampaignsScreen>
     required IconData icon,
     required String label,
     required Color color,
+    bool shrink = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withOpacity(0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 12, color: color),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: color,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPopupMenu(dynamic campaign, bool isAdmin) {
-    return PopupMenuButton<String>(
-      onSelected: (value) {
-        if (value == 'edit') _editCampaign(campaign);
-        if (value == 'delete') _confirmDelete(campaign['_id']);
-        if (value == 'share') _shareCampaign(campaign['_id']);
-      },
-      padding: EdgeInsets.zero,
-      itemBuilder: (context) {
-        final items = <PopupMenuEntry<String>>[];
-        if (isAdmin)
-          items.add(_menuItem('edit', 'Edit', Icons.edit_outlined,
-              const Color(0xFF6366F1)));
-        items.add(_menuItem('share', 'Share', Icons.share_outlined,
-            const Color(0xFF10B981)));
-        if (isAdmin)
-          items.add(_menuItem('delete', 'Delete', Icons.delete_outline_rounded,
-              const Color(0xFFE53935)));
-        return items;
-      },
-      color: Colors.white,
-      shape:
-      RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      elevation: 8,
-      icon: Icon(Icons.more_horiz_rounded,
-          size: 20, color: const Color(0xFF9CA3AF)),
-    );
-  }
-
-  PopupMenuItem<String> _menuItem(
-      String value, String label, IconData icon, Color color) {
-    return PopupMenuItem(
-      value: value,
-      height: 48,
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 15, color: color),
-          ),
-          const SizedBox(width: 12),
-          Text(label,
-              style: TextStyle(
+          const SizedBox(width: 4),
+          if (shrink)
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
                   color: color,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            )
+          else
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                color: color,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
         ],
       ),
     );
@@ -813,7 +775,7 @@ class _CampaignsScreenState extends State<CampaignsScreen>
       case 'yearly':
         return const Color(0xFFEC4899);
       default:
-        return const Color(0xFF10B981);
+        return _green;
     }
   }
 
@@ -822,9 +784,9 @@ class _CampaignsScreenState extends State<CampaignsScreen>
       case 'MARKETING':
         return const Color(0xFFF59E0B);
       case 'MANDATORY':
-        return const Color(0xFFE53935);
+        return _red;
       default:
-        return Primary;
+        return _accent;
     }
   }
 
@@ -840,20 +802,19 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   }
 
   String _formatSchedule(String schedule) {
-    return schedule.replaceAll('_', ' ').toUpperCase();
+    return schedule[0].toUpperCase() +
+        schedule.substring(1).replaceAll('_', ' ');
   }
 
   Widget _buildLoadingMoreIndicator() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: const Center(
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 20),
+      child: Center(
         child: SizedBox(
-          width: 24,
-          height: 24,
+          width: 22,
+          height: 22,
           child: CircularProgressIndicator(
-            color: Primary,
-            strokeWidth: 2.5,
-          ),
+              color: _accent, strokeWidth: 2.5),
         ),
       ),
     );

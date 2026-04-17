@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/chats_page/view_file_screen.dart';
 import 'package:open_file/open_file.dart';
@@ -272,221 +273,169 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 
   Widget _buildSharedPost() {
-    // sharedPostData is already resolved by _resolveSharedPostData
-    // in chat_detail_screen.dart before being passed here
     if (widget.sharedPostData == null) {
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: widget.isMe
-              ? Colors.white.withOpacity(0.1)
-              : Colors.black.withOpacity(0.1),
+          color: widget.isMe ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.share,
-              color: widget.isMe ? Colors.white70 : Colors.grey[600],
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Shared a post',
-              style: TextStyle(
-                color: widget.isMe ? Colors.white : Colors.black87,
-                fontSize: 14,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ),
+        child: Row(children: [
+          Icon(Icons.share, color: widget.isMe ? Colors.white70 : Colors.grey[600], size: 20),
+          const SizedBox(width: 8),
+          Text('Shared a post', style: TextStyle(
+              color: widget.isMe ? Colors.white : Colors.black87,
+              fontSize: 14, fontStyle: FontStyle.italic)),
+        ]),
       );
     }
 
     final postData = widget.sharedPostData!;
+    final shareType = postData['shareType']?.toString() ?? 'feed';
     final postContent = postData['text'] ?? '';
     final postImages = _resolvePostImages(postData);
-    final authorName = postData['authorName'] ?? 'Unknown User';
+    final authorName = postData['authorName'] ?? 'Unknown';
     final authorProfile = postData['authorProfile'];
     final likesCount = postData['likesCount'] ?? 0;
     final commentsCount = postData['commentsCount'] ?? 0;
-    print('🖼️ sharedPost data: ${jsonEncode(postData)}');
-    print('🖼️ images field: ${postData['images']}');
+    final forwerdUrl = postData['forwerdUrl']?.toString() ?? '';
+
+    // ── icon and label per share type ─────────────────────────
+    IconData headerIcon;
+    String headerLabel;
+    switch (shareType) {
+      case 'announcement':
+        headerIcon = Icons.campaign_rounded;
+        headerLabel = 'Shared Announcement';
+        break;
+      case 'campaign':
+        headerIcon = Icons.flag_rounded;
+        headerLabel = 'Shared Campaign';
+        break;
+      case 'service':
+        headerIcon = Icons.miscellaneous_services_rounded;
+        headerLabel = 'Shared Service';
+        break;
+      default:
+        headerIcon = Icons.share;
+        headerLabel = 'Shared Post';
+    }
 
     return GestureDetector(
       onTap: () {
-        // Navigate to full post view
-        _navigateToPost(postData);
+        if (shareType == 'feed') {
+          _navigateToPost(postData);
+        } else if (forwerdUrl.isNotEmpty) {
+          // open the URL in browser for non-feed types
+          launchUrl(Uri.parse(forwerdUrl), mode: LaunchMode.externalApplication);
+        }
       },
       child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.7,
-        ),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
         decoration: BoxDecoration(
-          color: widget.isMe
-              ? Colors.white.withOpacity(0.15)
-              : Colors.white,
+          color: widget.isMe ? Colors.white.withOpacity(0.15) : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: widget.isMe
-                ? Colors.white.withOpacity(0.3)
-                : Colors.grey[300]!,
-            width: 1,
+            color: widget.isMe ? Colors.white.withOpacity(0.3) : Colors.grey[300]!,
           ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with share icon
+            // Header
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: widget.isMe
-                    ? Colors.white.withOpacity(0.1)
-                    : Colors.grey[50],
+                color: widget.isMe ? Colors.white.withOpacity(0.1) : Colors.grey[50],
                 borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  topRight: Radius.circular(12),
-                ),
+                    topLeft: Radius.circular(12), topRight: Radius.circular(12)),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.share,
-                    size: 16,
+              child: Row(children: [
+                Icon(headerIcon,
+                    size: 16, color: widget.isMe ? Colors.white70 : Colors.grey[600]),
+                const SizedBox(width: 6),
+                Text(headerLabel, style: TextStyle(
                     color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Shared Post',
-                    style: TextStyle(
-                      color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+                    fontSize: 12, fontWeight: FontWeight.w500)),
+              ]),
             ),
 
-            // Author info
+            // Author
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: widget.isMe
-                        ? Colors.white.withOpacity(0.3)
-                        : Colors.grey[300],
-                    backgroundImage: authorProfile != null &&
-                        authorProfile.isNotEmpty
-                        ? (authorProfile.startsWith('data:image/')
-                        ? MemoryImage(
-                        base64Decode(authorProfile.split(',')[1]))
-                        : NetworkImage(authorProfile) as ImageProvider)
-                        : null,
-                    child: authorProfile == null || authorProfile.isEmpty
-                        ? Text(
-                      authorName.isNotEmpty ? authorName[0].toUpperCase() : 'U',
+              child: Row(children: [
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: widget.isMe
+                      ? Colors.white.withOpacity(0.3) : Colors.grey[300],
+                  backgroundImage: authorProfile != null && authorProfile.isNotEmpty
+                      ? (authorProfile.startsWith('data:image/')
+                      ? MemoryImage(base64Decode(authorProfile.split(',')[1]))
+                      : NetworkImage(authorProfile) as ImageProvider)
+                      : null,
+                  child: authorProfile == null || authorProfile.isEmpty
+                      ? Text(authorName.isNotEmpty ? authorName[0].toUpperCase() : 'U',
                       style: TextStyle(
-                        color: widget.isMe ? Colors.white : Colors.grey[700],
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                        : null,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      authorName,
-                      style: TextStyle(
-                        color: widget.isMe ? Colors.white : Colors.black87,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+                          color: widget.isMe ? Colors.white : Colors.grey[700],
+                          fontSize: 14, fontWeight: FontWeight.bold))
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(authorName, style: TextStyle(
+                      color: widget.isMe ? Colors.white : Colors.black87,
+                      fontSize: 14, fontWeight: FontWeight.w600),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ),
+              ]),
             ),
 
-            // Post content
+            // Content
             if (postContent.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  postContent,
-                  style: TextStyle(
+                child: Text(postContent, style: TextStyle(
                     color: widget.isMe ? Colors.white : Colors.black87,
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                    fontSize: 14, height: 1.4),
+                    maxLines: 3, overflow: TextOverflow.ellipsis),
               ),
 
-            // Post image (first image only)
+            // Image
             if (postImages.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: AspectRatio(
-                    aspectRatio: 16 / 9,
-                    child: _buildPostImage(postImages[0]),
-                  ),
+                      aspectRatio: 16 / 9,
+                      child: _buildPostImage(postImages[0])),
                 ),
               ),
 
-            // Post stats
+            // Footer
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.favorite,
-                    size: 14,
-                    color: widget.isMe ? Colors.white60 : Colors.grey[500],
-                  ),
+              child: Row(children: [
+                if (shareType == 'feed') ...[
+                  Icon(Icons.favorite, size: 14,
+                      color: widget.isMe ? Colors.white60 : Colors.grey[500]),
                   const SizedBox(width: 4),
-                  Text(
-                    '$likesCount',
-                    style: TextStyle(
+                  Text('$likesCount', style: TextStyle(
                       color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
+                      fontSize: 12)),
                   const SizedBox(width: 16),
-                  Icon(
-                    Icons.comment,
-                    size: 14,
-                    color: widget.isMe ? Colors.white60 : Colors.grey[500],
-                  ),
+                  Icon(Icons.comment, size: 14,
+                      color: widget.isMe ? Colors.white60 : Colors.grey[500]),
                   const SizedBox(width: 4),
-                  Text(
-                    '$commentsCount',
-                    style: TextStyle(
+                  Text('$commentsCount', style: TextStyle(
                       color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                      fontSize: 12,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    'Tap to view',
-                    style: TextStyle(
-                      color: widget.isMe ? Colors.white70 : Colors.blue[600],
-                      fontSize: 11,
-                      fontStyle: FontStyle.italic,
-                    ),
-                  ),
+                      fontSize: 12)),
                 ],
-              ),
+                const Spacer(),
+                Text('Tap to view', style: TextStyle(
+                    color: widget.isMe ? Colors.white70 : Colors.blue[600],
+                    fontSize: 11, fontStyle: FontStyle.italic)),
+              ]),
             ),
           ],
         ),
@@ -1359,6 +1308,30 @@ class _MessageBubbleState extends State<MessageBubble> {
         );
       },
     ));
+    // Copy Link — only for shared post / forwarded URL messages
+    if (widget.isSharedPost &&
+        widget.sharedPostData != null &&
+        (widget.sharedPostData!['forwerdUrl'] ?? '').toString().isNotEmpty) {
+      options.add(ListTile(
+        leading: Icon(Icons.link, color: Theme.of(context).colorScheme.primary),
+        title: const Text('Copy Link'),
+        onTap: () {
+          Navigator.pop(context);
+          Clipboard.setData(
+            ClipboardData(
+              text: widget.sharedPostData!['forwerdUrl'].toString(),
+            ),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copied to clipboard'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
+      ));
+    }
 
     // EDIT option - only for MY TEXT messages
     if (widget.isMe &&
@@ -1405,6 +1378,33 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       );
     }
+    // Copy Link — for link preview messages
+    if (widget.isLink &&
+        widget.linkMeta != null &&
+        (widget.linkMeta!['url'] ?? '').toString().isNotEmpty) {
+      options.add(ListTile(
+        leading: Icon(Icons.link, color: Theme.of(context).colorScheme.primary),
+        title: const Text('Copy Link'),
+        onTap: () {
+          Navigator.pop(context);
+          Clipboard.setData(
+            ClipboardData(
+              text: widget.linkMeta!['url'].toString(),
+            ),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copied to clipboard'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
+      ));
+    }
+
+
+
 
     // Show the bottom sheet
     showModalBottomSheet(

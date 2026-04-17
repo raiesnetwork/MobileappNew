@@ -105,7 +105,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
                         labelText: 'Meeting ID',
                         labelStyle:
                         TextStyle(fontSize: 15, color: Colors.grey[700]),
-                        hintText: 'e.g., meeting-1234567890',
+                        hintText: 'ID or https://ixes.ai/meeting/...',
                         hintStyle:
                         TextStyle(fontSize: 14, color: Colors.grey[400]),
                         prefixIcon: Icon(Icons.tag, color: Colors.grey[600]),
@@ -255,7 +255,28 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     setState(() => _isJoining = true);
 
     final provider = context.read<MeetingProvider>();
-    final meetingId = _meetingIdController.text.trim();
+
+    // ← Extract ID from full link or use as-is
+    String input = _meetingIdController.text.trim();
+    String meetingId = input;
+
+    // If user pasted a full URL, extract just the ID
+    if (input.startsWith('http://') || input.startsWith('https://')) {
+      try {
+        final uri = Uri.parse(input);
+        final segments = uri.pathSegments;
+        // URL format: https://ixes.ai/meeting/MEETING_ID
+        if (segments.length >= 2 && segments[0] == 'meeting') {
+          meetingId = segments[1];
+        } else if (segments.isNotEmpty) {
+          meetingId = segments.last;
+        }
+      } catch (e) {
+        meetingId = input;
+      }
+    }
+
+    print('🎯 Extracted meetingId: $meetingId from input: $input');
 
     provider.clearMessages();
     await provider.requestToJoinMeeting(meetingId);
@@ -287,8 +308,7 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
           ),
           backgroundColor: Colors.red[700],
           behavior: SnackBarBehavior.floating,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           margin: const EdgeInsets.all(16),
         ),
       );

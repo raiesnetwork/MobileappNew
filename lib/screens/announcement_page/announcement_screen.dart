@@ -4,6 +4,7 @@ import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import '../../providers/announcement_provider.dart';
 import 'package:intl/intl.dart';
+import '../home/feedpage/sharepost_screen.dart';
 import 'create_announcement_screen.dart';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -368,7 +369,17 @@ class _AnnouncementScreenState extends State<AnnouncementScreen> {
                           onTap: () => _showDetails(a),
                           onEdit: () => _goCreate(a: a),
                           onDelete: () => _confirmDelete(a['_id']),
-                        ),
+                          onShare: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => SharePostScreen(
+                                postId: a['title'] ?? '',
+                                shareContext: 'announcement',
+                                contextId: a['_id'],
+                              ),
+                            ),
+                          ),
+                        )
                       );
                     },
                   ),
@@ -384,12 +395,13 @@ class _AnnouncementScreenState extends State<AnnouncementScreen> {
 
 class _AnnouncementCard extends StatelessWidget {
   final Map<String, dynamic> announcement;
-  final VoidCallback onTap, onEdit, onDelete;
+  final VoidCallback onTap, onEdit, onDelete, onShare;
   const _AnnouncementCard(
       {required this.announcement,
-      required this.onTap,
-      required this.onEdit,
-      required this.onDelete});
+        required this.onTap,
+        required this.onEdit,
+        required this.onDelete,
+        required this.onShare});
 
   @override
   Widget build(BuildContext context) {
@@ -424,97 +436,140 @@ class _AnnouncementCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                      color: meta.bg, borderRadius: BorderRadius.circular(11)),
-                  child: Icon(meta.icon, color: meta.color, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                    child: Column(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                          color: meta.bg,
+                          borderRadius: BorderRadius.circular(11)),
+                      child: Icon(meta.icon, color: meta.color, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      Text(title,
-                          style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: _T.textPrimary,
-                              letterSpacing: -0.2,
-                              height: 1.3),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis),
-                      if (creator.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text('by $creator',
+                          Text(
+                            title,
                             style: const TextStyle(
-                                fontSize: 12,
-                                color: _T.textTertiary,
-                                fontWeight: FontWeight.w500)),
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: _T.textPrimary,
+                                letterSpacing: -0.2,
+                                height: 1.3),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (creator.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              'by $creator',
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: _T.textTertiary,
+                                  fontWeight: FontWeight.w500),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert_rounded,
+                          color: _T.textTertiary, size: 20),
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 4,
+                      onSelected: (v) {
+                        if (v == 'share') onShare();
+                        if (v == 'edit') onEdit();
+                        if (v == 'delete') onDelete();
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: 'share',
+                          height: 42,
+                          child: Row(
+                            children: const [
+                              Icon(Icons.share_outlined,
+                                  color: _T.accent, size: 18),
+                              SizedBox(width: 10),
+                              Text('Share',
+                                  style: TextStyle(fontSize: 14)),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'edit',
+                          height: 42,
+                          child: Row(
+                            children: const [
+                              Icon(Icons.edit_outlined,
+                                  color: _T.accent, size: 18),
+                              SizedBox(width: 10),
+                              Text('Edit',
+                                  style: TextStyle(fontSize: 14)),
+                            ],
+                          ),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          height: 42,
+                          child: Row(
+                            children: const [
+                              Icon(Icons.delete_outline_rounded,
+                                  color: _T.red, size: 18),
+                              SizedBox(width: 10),
+                              Text('Delete',
+                                  style: TextStyle(
+                                      fontSize: 14, color: _T.red)),
+                            ],
+                          ),
+                        ),
                       ],
-                    ])),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_horiz_rounded,
-                      color: _T.textTertiary, size: 20),
-                  padding: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 4,
-                  onSelected: (v) {
-                    if (v == 'edit') onEdit();
-                    if (v == 'delete') onDelete();
-                  },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                        value: 'edit',
-                        height: 42,
-                        child: Row(children: const [
-                          Icon(Icons.edit_outlined, color: _T.accent, size: 18),
-                          SizedBox(width: 10),
-                          Text('Edit', style: TextStyle(fontSize: 14))
-                        ])),
-                    PopupMenuItem(
-                        value: 'delete',
-                        height: 42,
-                        child: Row(children: const [
-                          Icon(Icons.delete_outline_rounded,
-                              color: _T.red, size: 18),
-                          SizedBox(width: 10),
-                          Text('Delete',
-                              style: TextStyle(fontSize: 14, color: _T.red))
-                        ])),
+                    ),
                   ],
                 ),
-              ]),
-              if (description.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Text(description,
+                if (description.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    description,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        fontSize: 13, color: _T.textSecondary, height: 1.45)),
+                        fontSize: 13,
+                        color: _T.textSecondary,
+                        height: 1.45),
+                  ),
+                ],
+                if (location.isNotEmpty || dateStr != null) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (location.isNotEmpty)
+                        _Chip(
+                            icon: Icons.location_on_rounded,
+                            label: location,
+                            color: _T.textSecondary),
+                      if (dateStr != null)
+                        _Chip(
+                            icon: Icons.calendar_today_rounded,
+                            label: dateStr,
+                            color: meta.color,
+                            bg: meta.bg),
+                    ],
+                  ),
+                ],
               ],
-              if (location.isNotEmpty || dateStr != null) ...[
-                const SizedBox(height: 12),
-                Wrap(spacing: 8, runSpacing: 6, children: [
-                  if (location.isNotEmpty)
-                    _Chip(
-                        icon: Icons.location_on_rounded,
-                        label: location,
-                        color: _T.textSecondary),
-                  if (dateStr != null)
-                    _Chip(
-                        icon: Icons.calendar_today_rounded,
-                        label: dateStr,
-                        color: meta.color,
-                        bg: meta.bg),
-                ]),
-              ],
-            ]),
+            ),
           ),
         ),
       ),

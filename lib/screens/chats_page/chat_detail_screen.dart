@@ -970,15 +970,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       itemBuilder: (context, index) {
                         final message = messages[index];
-                        final resolvedPost =
-                        _resolveSharedPostData(message);
-                        final forwardedPostId =
-                            resolvedPost?['_id']?.toString() ?? '';
+                        final resolvedPost = _resolveSharedPostData(message);
+                        final shareType = resolvedPost?['shareType']?.toString() ?? 'feed';
+                        final forwardedPostId = resolvedPost?['_id']?.toString() ?? '';
+                        final hasValidPostId = forwardedPostId.length == 24 &&
+                            RegExp(r'^[a-f0-9]{24}$').hasMatch(forwardedPostId);
 
-                        final hasValidPostId =
-                            forwardedPostId.length == 24 &&
-                                RegExp(r'^[a-f0-9]{24}$')
-                                    .hasMatch(forwardedPostId);
+                        final isSharedCard = message['forwerd'] == true &&
+                            (message['forwerdUrl'] != null &&
+                                (message['forwerdUrl']?.toString() ?? '').isNotEmpty) &&
+                            message['isAudio'] != true &&
+                            message['isFile'] != true;
 
                         if (message['isDelete'] == true) {
                           return const SizedBox.shrink();
@@ -1046,24 +1048,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 isAudio:
                                 message['isAudio'] ?? false,
                                 audioUrl: message['audioUrl'],
-                                isForwarded:
-                                message['forwerd'] == true &&
-                                    !hasValidPostId,
-                                isSharedPost: (message[
-                                'forwerdUrl'] !=
-                                    null &&
-                                    (message['forwerdUrl']
-                                        ?.toString() ??
-                                        '')
-                                        .isNotEmpty) ||
-                                    (message['forwerd'] == true &&
-                                        message['image'] != null &&
-                                        (message['image']
-                                            ?.toString() ??
-                                            '')
-                                            .isNotEmpty &&
-                                        message['isAudio'] != true &&
-                                        message['isFile'] != true),
+                                isSharedPost: isSharedCard,
+                                isForwarded: message['forwerd'] == true && !isSharedCard,
                                 sharedPostData: resolvedPost,
                               ),
                             ),
@@ -1112,14 +1098,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Map<String, dynamic>? _resolveSharedPostData(
-      Map<String, dynamic> message) {
-    if (message['sharedPost'] is Map &&
-        message['sharedPost']['_id'] != null) {
+  Map<String, dynamic>? _resolveSharedPostData(Map<String, dynamic> message) {
+    if (message['sharedPost'] is Map && message['sharedPost']['_id'] != null) {
       final post = Map<String, dynamic>.from(message['sharedPost']);
       final id = post['_id']?.toString() ?? '';
-      if (id.length != 24 ||
-          !RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
+      if (id.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
         post['_id'] = '';
       }
       return post;
@@ -1127,29 +1110,52 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     if (message['forwerd'] == true) {
       final forwerdUrl = message['forwerdUrl']?.toString() ?? '';
+      final forwerdMessage = message['forwerdMessage']?.toString() ?? '';
+      final image = message['image']?.toString() ?? '';
+      final text = message['text']?.toString() ?? '';
+
+      // ── detect share type from URL ──────────────────────────────
+      String shareType = 'feed';
+      if (forwerdUrl.contains('/community/') && forwerdUrl.contains('/announcements')) {
+        shareType = 'announcement';
+      } else if (forwerdUrl.contains('/campaign/')) {
+        shareType = 'campaign';
+      } else if (forwerdUrl.contains('/services/')) {
+        shareType = 'service';
+      }
+
+      // ── try to extract a valid post ID (only for feed) ──────────
       String postId = '';
-      if (forwerdUrl.isNotEmpty) {
+      if (shareType == 'feed' && forwerdUrl.isNotEmpty) {
         final segment = forwerdUrl.split('/').last.trim();
-        if (segment.length == 24 &&
-            RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+        if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
           postId = segment;
         }
       }
-      if (postId.isEmpty) {
-        postId = message['sharedPostId']?.toString() ?? '';
-        if (postId.length != 24 ||
-            !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
-          postId = '';
+
+      // ── extract contextId from URL for non-feed types ───────────
+      String contextId = '';
+      if (shareType != 'feed' && forwerdUrl.isNotEmpty) {
+        final parts = forwerdUrl.split('/');
+        // e.g. /community/{communityId}/announcements → communityId at index -2
+        // e.g. /campaign/{campaignId} → campaignId at last
+        // e.g. /services/{serviceId} → serviceId at last
+        if (shareType == 'announcement' && parts.length >= 3) {
+          // URL: /community/{communityId}/announcements
+          contextId = parts[parts.length - 2]; // communityId
+        } else {
+          contextId = parts.last;
         }
       }
 
-      final image = message['image']?.toString() ?? '';
       return {
-        '_id': postId,
-        'text': message['text']?.toString() ?? '',
+        '_id': postId,         // empty for non-feed — disables post navigation
+        'shareType': shareType,
+        'contextId': contextId,
+        'forwerdUrl': forwerdUrl,
+        'text': text,
         'images': image.isNotEmpty ? [image] : [],
-        'authorName':
-        message['forwerdMessage']?.toString() ?? 'Forwarded',
+        'authorName': forwerdMessage.isNotEmpty ? forwerdMessage : 'Shared',
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
@@ -1452,66 +1458,64 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final receiverName = widget.chatTitle;
     if (receiverId == null || receiverId.isEmpty) return;
 
-    showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) =>
-        const Center(child: CircularProgressIndicator()));
-    try {
-      final isBusy = await videoCallProvider.checkUserBusy(receiverId);
-      if (mounted) Navigator.of(context).pop();
-      if (isBusy) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('$receiverName is currently in another call'),
-            backgroundColor: Colors.orange));
-        return;
-      }
-      await videoCallProvider.initiateCall(
-          receiverId: receiverId, receiverName: receiverName);
-      if (videoCallProvider.errorMessage != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(videoCallProvider.errorMessage!),
-            backgroundColor: Colors.red));
-        videoCallProvider.clearMessages();
-        return;
-      }
+    // ✅ Clear stale data from previous call (fixes wrong name showing)
+    videoCallProvider.resetCallState();
 
-      // FIX: start ringing for initiator
+    // ✅ initiateCall() handles busy check internally — no need to call it here
+    await videoCallProvider.initiateCall(
+      receiverId: receiverId,
+      receiverName: receiverName,
+    );
+
+    if (!mounted) return;
+
+    if (videoCallProvider.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(videoCallProvider.errorMessage!),
+          backgroundColor: Colors.red));
+      videoCallProvider.clearMessages();
+      return;
+    }
+
+    if (videoCallProvider.callState == CallState.calling) {
       await _startRinging();
-
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => CallingScreen()),
-      ).then((_) => _stopRinging()); // stop when screen pops
-    } catch (e) {
-      if (mounted) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed: $e'), backgroundColor: Colors.red));
+      ).then((_) => _stopRinging());
     }
   }
 
   Future<void> _initiateVoiceCall() async {
     final voiceCallProvider = context.read<VoiceCallProvider>();
     final receiverId = widget.userProfile['_id'];
+    final receiverName = widget.chatTitle;
     if (receiverId == null || receiverId.isEmpty) return;
-    voiceCallProvider.clearMessages();
-    await voiceCallProvider.initiateVoiceCall(
-        receiverId: receiverId,
-        receiverName: widget.chatTitle,
-        isConference: false);
-    if (voiceCallProvider.callState == VoiceCallState.calling &&
-        mounted) {
-      // FIX: start ringing for initiator
-      await _startRinging();
 
+    // ✅ Clear stale data from previous call (fixes wrong name showing)
+    voiceCallProvider.resetCallState();
+    voiceCallProvider.clearMessages();
+
+    // ✅ initiateVoiceCall() handles busy check internally
+    await voiceCallProvider.initiateVoiceCall(
+      receiverId: receiverId,
+      receiverName: receiverName,
+      isConference: false,
+    );
+
+    if (!mounted) return;
+
+    if (voiceCallProvider.callState == VoiceCallState.calling) {
+      await _startRinging();
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const VoiceCallingScreen()),
-      ).then((_) => _stopRinging()); // stop when screen pops
-    } else if (voiceCallProvider.errorMessage != null && mounted) {
+      ).then((_) => _stopRinging());
+    } else if (voiceCallProvider.errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(voiceCallProvider.errorMessage!),
           backgroundColor: Colors.red));
+      voiceCallProvider.clearMessages();
     }
   }
 

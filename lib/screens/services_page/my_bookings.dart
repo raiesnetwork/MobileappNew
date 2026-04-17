@@ -492,14 +492,7 @@ class _BookingCard extends StatelessWidget {
                       secondary: true,
                     ),
                   const Spacer(),
-                  Text(
-                    'View details',
-                    style: TextStyle(
-                      color: const Color(0xFF6C63FF).withOpacity(0.7),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+
                   const SizedBox(width: 2),
                   Icon(
                     Icons.arrow_forward_ios_rounded,

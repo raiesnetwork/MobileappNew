@@ -8,15 +8,17 @@ class IncomingVoiceCallDialog extends StatefulWidget {
   const IncomingVoiceCallDialog({Key? key}) : super(key: key);
 
   @override
-  State<IncomingVoiceCallDialog> createState() =>
-      _IncomingVoiceCallDialogState();
+  State<IncomingVoiceCallDialog> createState() => _IncomingVoiceCallDialogState();
 }
 
 class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     with SingleTickerProviderStateMixin {
   late final VoiceCallProvider _provider;
   late AnimationController _animationController;
-  final AudioPlayer _ringPlayer = AudioPlayer();
+
+  // ✅ BUG 7 FIX: nullable player + guard prevents double stop/dispose
+  AudioPlayer? _ringPlayer;
+  bool _isRinging = false;
 
   bool _isActioning = false;
   bool _isPopping = false;
@@ -32,8 +34,33 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
       duration: const Duration(milliseconds: 1500),
     )..repeat(reverse: true);
 
-    _ringPlayer.setReleaseMode(ReleaseMode.loop);
-    _ringPlayer.play(AssetSource('sounds/ringtone.mp3'));
+    _initAndStartRinging();
+  }
+
+  Future<void> _initAndStartRinging() async {
+    if (_isRinging) return;
+    _isRinging = true;
+    try {
+      _ringPlayer = AudioPlayer();
+      await _ringPlayer!.setReleaseMode(ReleaseMode.loop);
+      await _ringPlayer!.play(AssetSource('sounds/ringtone.mp3'));
+    } catch (e) {
+      debugPrint('⚠️ IncomingVoiceCallDialog: could not play ringtone: $e');
+      _isRinging = false;
+    }
+  }
+
+  Future<void> _stopRinging() async {
+    if (!_isRinging || _ringPlayer == null) return;
+    _isRinging = false;
+    try {
+      await _ringPlayer!.stop();
+      await _ringPlayer!.dispose();
+    } catch (e) {
+      debugPrint('⚠️ IncomingVoiceCallDialog: could not stop ringtone: $e');
+    } finally {
+      _ringPlayer = null; // ✅ Null out — dispose() is a no-op after this
+    }
   }
 
   void _handleCallStateChange() {
@@ -49,7 +76,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     if (_isPopping || !mounted) return;
     _isPopping = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
+    _stopRinging();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop();
     });
@@ -59,8 +86,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
   void dispose() {
     _provider.removeListener(_handleCallStateChange);
     _animationController.dispose();
-    _ringPlayer.stop();
-    _ringPlayer.dispose();
+    _stopRinging(); // ✅ No-op if already stopped and nulled
     super.dispose();
   }
 
@@ -68,7 +94,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     if (_isActioning || _isPopping) return;
     _isActioning = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
+    await _stopRinging();
     await _provider.rejectVoiceCall();
     if (mounted) Navigator.of(context).pop();
   }
@@ -77,8 +103,9 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
     if (_isActioning || _isPopping) return;
     _isActioning = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
-    await _provider.acceptVoiceCall();
+    await _stopRinging();
+    // ✅ acceptVoiceCall() is handled inside VoiceRoomScreen._joinRoom()
+    // Do NOT call it here — would cause double-emit
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const VoiceRoomScreen()),
@@ -104,8 +131,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.close,
-                          color: Colors.white70, size: 28),
+                      icon: const Icon(Icons.close, color: Colors.white70, size: 28),
                       onPressed: _onDecline,
                     ),
                   ],
@@ -135,8 +161,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                           ),
                         ],
                       ),
-                      child: const Icon(Icons.phone,
-                          size: 60, color: Colors.white),
+                      child: const Icon(Icons.phone, size: 60, color: Colors.white),
                     ),
                   );
                 },
@@ -162,33 +187,21 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: LinearGradient(
-                          colors: [
-                            Colors.blue[300]!,
-                            Colors.purple[300]!
-                          ],
+                          colors: [Colors.blue[300]!, Colors.purple[300]!],
                         ),
                       ),
-                      child: const Icon(Icons.person,
-                          color: Colors.white, size: 40),
+                      child: const Icon(Icons.person, color: Colors.white, size: 40),
                     ),
                     const SizedBox(height: 16),
                     Text(
                       provider.currentCallerName ?? 'Unknown',
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w600,
-                      ),
+                          color: Colors.white, fontSize: 24, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      provider.isConference
-                          ? 'Conference Call'
-                          : 'Voice Call',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 16,
-                      ),
+                      provider.isConference ? 'Conference Call' : 'Voice Call',
+                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 16),
                     ),
                   ],
                 ),
@@ -197,8 +210,7 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
               const Spacer(),
 
               Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 40, vertical: 40),
+                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
@@ -213,16 +225,14 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.red.withOpacity(0.4),
-                                blurRadius: 20,
-                                spreadRadius: 3,
-                              )
+                                  color: Colors.red.withOpacity(0.4),
+                                  blurRadius: 20,
+                                  spreadRadius: 3)
                             ],
                           ),
                           child: IconButton(
                             onPressed: _onDecline,
-                            icon: const Icon(Icons.call_end,
-                                size: 36, color: Colors.white),
+                            icon: const Icon(Icons.call_end, size: 36, color: Colors.white),
                           ),
                         ),
                         const SizedBox(height: 12),
@@ -245,16 +255,14 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.green.withOpacity(0.4),
-                                blurRadius: 20,
-                                spreadRadius: 3,
-                              )
+                                  color: Colors.green.withOpacity(0.4),
+                                  blurRadius: 20,
+                                  spreadRadius: 3)
                             ],
                           ),
                           child: IconButton(
                             onPressed: _onAccept,
-                            icon: const Icon(Icons.call,
-                                size: 36, color: Colors.white),
+                            icon: const Icon(Icons.call, size: 36, color: Colors.white),
                           ),
                         ),
                         const SizedBox(height: 12),

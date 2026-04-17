@@ -11,7 +11,10 @@ class IncomingCallScreen extends StatefulWidget {
 
 class _IncomingCallScreenState extends State<IncomingCallScreen> {
   late final VideoCallProvider _provider;
-  final AudioPlayer _ringPlayer = AudioPlayer();
+
+  // ✅ BUG 7 FIX: nullable player + _isRinging guard prevents double stop/dispose
+  AudioPlayer? _ringPlayer;
+  bool _isRinging = false;
 
   bool _isActioning = false;
   bool _isPopping = false;
@@ -21,9 +24,33 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     super.initState();
     _provider = context.read<VideoCallProvider>();
     _provider.addListener(_handleCallStateChange);
+    _initAndStartRinging();
+  }
 
-    _ringPlayer.setReleaseMode(ReleaseMode.loop);
-    _ringPlayer.play(AssetSource('sounds/ringtone.mp3'));
+  Future<void> _initAndStartRinging() async {
+    if (_isRinging) return;
+    _isRinging = true;
+    try {
+      _ringPlayer = AudioPlayer();
+      await _ringPlayer!.setReleaseMode(ReleaseMode.loop);
+      await _ringPlayer!.play(AssetSource('sounds/ringtone.mp3'));
+    } catch (e) {
+      debugPrint('⚠️ IncomingCallScreen: could not play ringtone: $e');
+      _isRinging = false;
+    }
+  }
+
+  Future<void> _stopRinging() async {
+    if (!_isRinging || _ringPlayer == null) return;
+    _isRinging = false;
+    try {
+      await _ringPlayer!.stop();
+      await _ringPlayer!.dispose();
+    } catch (e) {
+      debugPrint('⚠️ IncomingCallScreen: could not stop ringtone: $e');
+    } finally {
+      _ringPlayer = null; // ✅ Null out — dispose() won't touch it again
+    }
   }
 
   void _handleCallStateChange() {
@@ -39,7 +66,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     if (_isPopping || !mounted) return;
     _isPopping = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
+    _stopRinging(); // safe — guarded by _isRinging
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) Navigator.of(context).pop();
     });
@@ -48,8 +75,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   @override
   void dispose() {
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
-    _ringPlayer.dispose();
+    _stopRinging(); // ✅ No-op if already stopped
     super.dispose();
   }
 
@@ -57,7 +83,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
+    await _stopRinging();
     await _provider.rejectCall();
     if (mounted) Navigator.of(context).pop();
   }
@@ -66,8 +92,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     if (_isActioning || _isPopping) return;
     _isActioning = true;
     _provider.removeListener(_handleCallStateChange);
-    _ringPlayer.stop();
-    await _provider.acceptCall();
+    await _stopRinging();
+    // ✅ acceptCall() is now handled inside VideoCallScreen._joinRoom()
+    // so we do NOT call _provider.acceptCall() here — it would double-emit
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => VideoCallScreen()),
@@ -112,9 +139,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                         ),
                         child: Center(
                           child: Text(
-                            callerName.isNotEmpty
-                                ? callerName[0].toUpperCase()
-                                : '?',
+                            callerName.isNotEmpty ? callerName[0].toUpperCase() : '?',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 48,
@@ -151,7 +176,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
                   const Spacer(),
 
-                  // Accept / Decline buttons
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 60),
                     child: Row(
@@ -168,22 +192,19 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.red.withOpacity(0.4),
-                                    blurRadius: 20,
-                                    spreadRadius: 2,
-                                  )
+                                      color: Colors.red.withOpacity(0.4),
+                                      blurRadius: 20,
+                                      spreadRadius: 2)
                                 ],
                               ),
                               child: IconButton(
                                 onPressed: _onDecline,
-                                icon: const Icon(Icons.call_end,
-                                    size: 32, color: Colors.white),
+                                icon: const Icon(Icons.call_end, size: 32, color: Colors.white),
                               ),
                             ),
                             const SizedBox(height: 12),
                             const Text('Decline',
-                                style: TextStyle(
-                                    color: Colors.white70, fontSize: 16)),
+                                style: TextStyle(color: Colors.white70, fontSize: 16)),
                           ],
                         ),
 
@@ -198,22 +219,19 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                                 shape: BoxShape.circle,
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.green.withOpacity(0.4),
-                                    blurRadius: 20,
-                                    spreadRadius: 2,
-                                  )
+                                      color: Colors.green.withOpacity(0.4),
+                                      blurRadius: 20,
+                                      spreadRadius: 2)
                                 ],
                               ),
                               child: IconButton(
                                 onPressed: _onAccept,
-                                icon: const Icon(Icons.videocam,
-                                    size: 32, color: Colors.white),
+                                icon: const Icon(Icons.videocam, size: 32, color: Colors.white),
                               ),
                             ),
                             const SizedBox(height: 12),
                             const Text('Accept',
-                                style: TextStyle(
-                                    color: Colors.white70, fontSize: 16)),
+                                style: TextStyle(color: Colors.white70, fontSize: 16)),
                           ],
                         ),
                       ],
@@ -230,9 +248,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pulse ring animation
-// ─────────────────────────────────────────────────────────────────────────────
 class _PulseAnimation extends StatefulWidget {
   const _PulseAnimation();
 

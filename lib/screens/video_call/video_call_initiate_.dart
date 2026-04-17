@@ -95,53 +95,62 @@ class _CallingScreenState extends State<CallingScreen>
         backgroundColor: const Color(0xFF1A1A2E),
         body: SafeArea(
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center, // ✅ center everything
             children: [
               const Spacer(),
 
               // ── Animated Avatar ──────────────────────────────
-              AnimatedBuilder(
-                animation: _pulseController,
-                builder: (_, __) {
-                  return Container(
-                    width: 140 + (_pulseController.value * 20),
-                    height: 140 + (_pulseController.value * 20),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Colors.blue[400]!, Colors.purple[400]!],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
-                          blurRadius: 30,
-                          spreadRadius: 10,
+              Center(
+                child: AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (_, __) {
+                    return Container(
+                      width: 140 + (_pulseController.value * 20),
+                      height: 140 + (_pulseController.value * 20),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Colors.blue[400]!, Colors.purple[400]!],
                         ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        (_provider.currentReceiverName ?? 'U')[0].toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 52,
-                          fontWeight: FontWeight.bold,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.blue.withOpacity(0.3),
+                            blurRadius: 30,
+                            spreadRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          (_provider.currentReceiverName ?? 'U')[0].toUpperCase(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 52,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
               const SizedBox(height: 40),
 
-              // ── Receiver Name ────────────────────────────────
-              Text(
-                _provider.currentReceiverName ?? 'Unknown',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
+              // ── Receiver Name — centered, wraps cleanly ──────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  _provider.currentReceiverName ?? 'Unknown',
+                  textAlign: TextAlign.center, // ✅ center the text
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -167,13 +176,11 @@ class _CallingScreenState extends State<CallingScreen>
 
               // ── Video Call label ─────────────────────────────
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(30),
-                  border:
-                  Border.all(color: Colors.white.withOpacity(0.2)),
+                  border: Border.all(color: Colors.white.withOpacity(0.2)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -181,19 +188,16 @@ class _CallingScreenState extends State<CallingScreen>
                     Icon(Icons.videocam, color: Colors.blue[300], size: 20),
                     const SizedBox(width: 8),
                     const Text('Video Call',
-                        style: TextStyle(
-                            color: Colors.white, fontSize: 16)),
+                        style: TextStyle(color: Colors.white, fontSize: 16)),
                   ],
                 ),
               ),
               const SizedBox(height: 60),
 
               // ── Controls ─────────────────────────────────────
-              // Replace the two _buildControlButton calls in Row:
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Mute button
                   _buildControlButton(
                     icon: _provider.isMuted ? Icons.mic_off : Icons.mic,
                     color: _provider.isMuted
@@ -206,15 +210,19 @@ class _CallingScreenState extends State<CallingScreen>
                   ),
                   const SizedBox(width: 40),
 
-                  // End Call
                   Container(
-                    width: 75, height: 75,
+                    width: 75,
+                    height: 75,
                     decoration: BoxDecoration(
-                      color: Colors.red, shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(
-                        color: Colors.red.withOpacity(0.5),
-                        blurRadius: 25, spreadRadius: 5,
-                      )],
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withOpacity(0.5),
+                          blurRadius: 25,
+                          spreadRadius: 5,
+                        )
+                      ],
                     ),
                     child: IconButton(
                       onPressed: _cancelCall,
@@ -223,7 +231,6 @@ class _CallingScreenState extends State<CallingScreen>
                   ),
                   const SizedBox(width: 40),
 
-                  // Speaker button
                   _buildControlButton(
                     icon: _provider.isSpeakerOn
                         ? Icons.volume_up

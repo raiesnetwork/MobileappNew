@@ -575,7 +575,7 @@ ${widget.description}
                                 );
                               }
                               return SizedBox(
-                                height: 300,
+                                height: 210,
                                 child: ListView.separated(
                                   controller: _userScrollController,
                                   shrinkWrap: true,
@@ -766,9 +766,10 @@ ${widget.description}
                               }
 
                               return SizedBox(
-                                height: 300,
+                                height: 210,
                                 child: ListView.separated(
                                   shrinkWrap: true,
+
                                   itemCount: groups.length,
                                   separatorBuilder: (_, __) =>
                                   const Divider(height: 1),

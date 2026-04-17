@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
@@ -134,7 +135,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
             widget.message['fileUrl'].toString().isNotEmpty &&
             !_isAudio);
 
-    // ── Shared post detection ────────────────────────────────────────────
+    // Replace the _isSharedPost detection block inside _parseMessage():
+
     final sharedPost = widget.message['sharedPost'];
     final hasValidSharedPost = sharedPost is Map &&
         sharedPost.isNotEmpty &&
@@ -142,32 +144,31 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         sharedPost['_id'].toString().length == 24 &&
         RegExp(r'^[a-f0-9]{24}$').hasMatch(sharedPost['_id'].toString());
 
-    String extractedPostId = '';
     final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
-    if (fUrl.isNotEmpty && fUrl != 'null') {
+
+// ── non-feed shares (announcement, campaign, service) ──────
+    final isNonFeedShare = widget.message['forwerd'] == true &&
+        fUrl.isNotEmpty &&
+        (fUrl.contains('/announcements') ||
+            fUrl.contains('/campaign/') ||
+            fUrl.contains('/services/'));
+
+// ── feed shares (valid post ID at end of URL) ───────────────
+    String extractedPostId = '';
+    if (fUrl.isNotEmpty && !isNonFeedShare) {
       final segment = fUrl.split('/').last.trim();
-      if (segment.length == 24 &&
-          RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+      if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
         extractedPostId = segment;
       }
     }
 
-    // ── NEW: detect forwarded post via forwardedFrom + image ────────────
-    // Backend sends: forwardedFrom:{messageId,senderId}, image: url, text: content
     final forwardedFrom = widget.message['forwardedFrom'];
     final hasForwardedFrom = forwardedFrom is Map && forwardedFrom.isNotEmpty;
-    final hasImage = () {
-      final img = widget.message['image']?.toString() ?? '';
-      return img.isNotEmpty && img != 'null';
-    }();
 
-    // A message is a shared post card if ANY of these are true:
-    // 1. Has a valid sharedPost object
-    // 2. Has forwerd:true + valid post ID from forwerdUrl
-    // 3. Has forwardedFrom object (new backend format)
     _isSharedPost = !_isAudio &&
         !_isFile &&
         (hasValidSharedPost ||
+            isNonFeedShare ||                          // ← NEW
             (widget.message['forwerd'] == true && extractedPostId.isNotEmpty) ||
             hasForwardedFrom);
 
@@ -178,6 +179,32 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   //  RESOLVE POST DATA
   // ════════════════════════════════════════════════════════════════════════
   Map<String, dynamic>? _resolvePostData() {
+    // Add this block at the TOP of _resolvePostData(), before Priority 1:
+
+// ── Non-feed share (announcement / campaign / service) ──────
+    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
+    if (widget.message['forwerd'] == true && fUrl.isNotEmpty &&
+        (fUrl.contains('/announcements') ||
+            fUrl.contains('/campaign/') ||
+            fUrl.contains('/services/'))) {
+
+      String shareType = 'announcement';
+      if (fUrl.contains('/campaign/')) shareType = 'campaign';
+      if (fUrl.contains('/services/')) shareType = 'service';
+
+      final image = widget.message['image']?.toString() ?? '';
+      return {
+        '_id': '',               // no post navigation for these
+        'shareType': shareType,
+        'forwerdUrl': fUrl,
+        'text': widget.message['text']?.toString() ?? '',
+        'images': image.isNotEmpty ? [_normalizeSingleUrl(image)] : [],
+        'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+        'authorProfile': '',
+        'likesCount': 0,
+        'commentsCount': 0,
+      };
+    }
     // Priority 1: real sharedPost object with valid MongoDB ObjectId
     final sharedPost = widget.message['sharedPost'];
     if (sharedPost is Map && sharedPost.isNotEmpty) {
@@ -217,7 +244,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     // Priority 2: forwerdUrl with valid post ID
     String postId = '';
-    final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
+
     if (fUrl.isNotEmpty && fUrl != 'null') {
       final segment = fUrl.split('/').last.trim();
       if (segment.length == 24 &&
@@ -643,7 +670,29 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     final commentsCount = postData['commentsCount'] ?? 0;
 
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
+        final shareType = postData['shareType']?.toString() ?? 'feed';
+        final forwerdUrl = postData['forwerdUrl']?.toString() ?? '';
+
+        // ── non-feed: open in browser ──────────────────────────
+        if (shareType != 'feed') {
+          if (forwerdUrl.isNotEmpty) {
+            final uri = Uri.parse(forwerdUrl);
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            }
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Link not available'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+          return;
+        }
+
+        // ── feed: navigate to post screen ──────────────────────
         if (postId.isEmpty ||
             postId.length != 24 ||
             !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
@@ -681,9 +730,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         constraints: BoxConstraints(
             maxWidth: MediaQuery.of(context).size.width * 0.65),
         decoration: BoxDecoration(
-          color: _isMe
-              ? Colors.white.withOpacity(0.15)
-              : Colors.grey[100],
+          color: _isMe ? Colors.white.withOpacity(0.15) : Colors.grey[100],
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
               color: _isMe
@@ -693,10 +740,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // ── Header ────────────────────────────────────────────
             Container(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: _isMe
                     ? Colors.white.withOpacity(0.1)
@@ -705,28 +751,47 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     topLeft: Radius.circular(10),
                     topRight: Radius.circular(10)),
               ),
-              child: Row(children: [
-                Icon(
-                    (widget.message['forwardedFrom'] is Map &&
-                        (widget.message['forwardedFrom'] as Map).isNotEmpty)
-                        ? Icons.reply_rounded
-                        : Icons.share,
-                    size: 14,
-                    color: _isMe ? Colors.white60 : Colors.grey[600]),
-                const SizedBox(width: 5),
-                Text(
-                    (widget.message['forwardedFrom'] is Map &&
-                        (widget.message['forwardedFrom'] as Map).isNotEmpty)
-                        ? 'Forwarded Post'
-                        : 'Shared Post',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _isMe ? Colors.white60 : Colors.grey[600])),
-              ]),
+              child: Builder(builder: (_) {
+                final shareType = postData['shareType']?.toString() ?? 'feed';
+                IconData shareIcon;
+                String shareLabel;
+                switch (shareType) {
+                  case 'announcement':
+                    shareIcon = Icons.campaign_rounded;
+                    shareLabel = 'Shared Announcement';
+                    break;
+                  case 'campaign':
+                    shareIcon = Icons.flag_rounded;
+                    shareLabel = 'Shared Campaign';
+                    break;
+                  case 'service':
+                    shareIcon = Icons.miscellaneous_services_rounded;
+                    shareLabel = 'Shared Service';
+                    break;
+                  default:
+                    final isForwardedFrom =
+                        widget.message['forwardedFrom'] is Map &&
+                            (widget.message['forwardedFrom'] as Map).isNotEmpty;
+                    shareIcon =
+                    isForwardedFrom ? Icons.reply_rounded : Icons.share;
+                    shareLabel =
+                    isForwardedFrom ? 'Forwarded Post' : 'Shared Post';
+                }
+                return Row(children: [
+                  Icon(shareIcon,
+                      size: 14,
+                      color: _isMe ? Colors.white60 : Colors.grey[600]),
+                  const SizedBox(width: 5),
+                  Text(shareLabel,
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: _isMe ? Colors.white60 : Colors.grey[600])),
+                ]);
+              }),
             ),
 
-            // Author
+            // ── Author ────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
               child: Row(children: [
@@ -738,8 +803,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                   backgroundImage:
                   authorProfile.isNotEmpty && authorProfile != 'null'
                       ? (authorProfile.startsWith('data:image/')
-                      ? MemoryImage(base64Decode(
-                      authorProfile.split(',')[1]))
+                      ? MemoryImage(
+                      base64Decode(authorProfile.split(',')[1]))
                       : NetworkImage(authorProfile) as ImageProvider)
                       : null,
                   child: authorProfile.isEmpty || authorProfile == 'null'
@@ -749,9 +814,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                           : 'U',
                       style: TextStyle(
                           fontSize: 12,
-                          color: _isMe
-                              ? Colors.white
-                              : Colors.grey[700]))
+                          color:
+                          _isMe ? Colors.white : Colors.grey[700]))
                       : null,
                 ),
                 const SizedBox(width: 7),
@@ -760,15 +824,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color:
-                          _isMe ? Colors.white : Colors.black87),
+                          color: _isMe ? Colors.white : Colors.black87),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
                 ),
               ]),
             ),
 
-            // Post text
+            // ── Post text ─────────────────────────────────────────
             if (postContent.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
@@ -781,7 +844,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     overflow: TextOverflow.ellipsis),
               ),
 
-            // Post image
+            // ── Post image ────────────────────────────────────────
             if (postImages.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
@@ -794,39 +857,40 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                 ),
               ),
 
-            // Stats
+            // ── Stats / Footer ────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               child: Row(children: [
-                Icon(Icons.favorite,
-                    size: 13,
-                    color: _isMe ? Colors.white60 : Colors.grey[500]),
-                const SizedBox(width: 3),
-                Text('$likesCount',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: _isMe
-                            ? Colors.white70
-                            : Colors.grey[600])),
-                const SizedBox(width: 12),
-                Icon(Icons.comment,
-                    size: 13,
-                    color: _isMe ? Colors.white60 : Colors.grey[500]),
-                const SizedBox(width: 3),
-                Text('$commentsCount',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: _isMe
-                            ? Colors.white70
-                            : Colors.grey[600])),
+                // only show likes/comments for feed posts
+                if (postData['shareType'] == null ||
+                    postData['shareType'] == 'feed') ...[
+                  Icon(Icons.favorite,
+                      size: 13,
+                      color: _isMe ? Colors.white60 : Colors.grey[500]),
+                  const SizedBox(width: 3),
+                  Text('$likesCount',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color:
+                          _isMe ? Colors.white70 : Colors.grey[600])),
+                  const SizedBox(width: 12),
+                  Icon(Icons.comment,
+                      size: 13,
+                      color: _isMe ? Colors.white60 : Colors.grey[500]),
+                  const SizedBox(width: 3),
+                  Text('$commentsCount',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color:
+                          _isMe ? Colors.white70 : Colors.grey[600])),
+                ],
                 const Spacer(),
                 Text('Tap to view',
                     style: TextStyle(
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
-                        color: _isMe
-                            ? Colors.white60
-                            : Colors.blue[600])),
+                        color:
+                        _isMe ? Colors.white60 : Colors.blue[600])),
               ]),
             ),
           ],
@@ -967,6 +1031,50 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         );
       },
     ));
+    // Copy Link — only for shared post / forwarded URL messages
+    if (_isSharedPost &&
+        _cachedPostData != null &&
+        (_cachedPostData!['forwerdUrl'] ?? '').toString().isNotEmpty) {
+      options.add(ListTile(
+        leading: Icon(Icons.link, color: _purple),
+        title: const Text('Copy Link'),
+        onTap: () {
+          Navigator.pop(context);
+          Clipboard.setData(
+            ClipboardData(
+              text: _cachedPostData!['forwerdUrl'].toString(),
+            ),
+          );
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copied to clipboard'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
+      ));
+    }
+    // Copy Link — for link preview messages
+    final _linkMeta = widget.message['linkMeta'];
+    final _linkUrl = (_linkMeta is Map) ? (_linkMeta['url'] ?? '').toString() : '';
+    if (_linkUrl.isNotEmpty) {
+      options.add(ListTile(
+        leading: Icon(Icons.link, color: _purple),
+        title: const Text('Copy Link'),
+        onTap: () {
+          Navigator.pop(context);
+          Clipboard.setData(ClipboardData(text: _linkUrl));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Link copied to clipboard'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        },
+      ));
+    }
 
     final isOptimistic = widget.message['isOptimistic'] == true;
     final status = widget.message['status']?.toString();
