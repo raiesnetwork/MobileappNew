@@ -41,6 +41,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
 import 'package:uuid/uuid.dart';
+import 'app_localisations.dart';           // ✅ ADDED
 import 'providers/auth_provider.dart';
 import 'providers/post_provider.dart';
 import 'screens/splash_screen.dart';
@@ -170,10 +171,6 @@ Future<void> _initFCM() async {
       final d = msg.data;
       final type = d['type'] ?? '';
       if (type == 'voice_call' || type == 'video_call') {
-        // ✅ App is FOREGROUND — socket handles in-app calls automatically.
-        // Do NOT show CallKit here. Do NOT stream it.
-        // Socket events (onIncomingVoiceCall / onIncomingVideoCall) already
-        // fire and VoiceCallListener/IncomingCallListener show your custom screen.
         debugPrint('📲 [FG FCM] $type received — app is foreground, socket handles it, ignoring FCM');
         return;
       }
@@ -188,15 +185,13 @@ Future<void> _checkActiveCallsOnStartup() async {
     final call = calls.last;
     final extra = call['extra'] as Map<dynamic, dynamic>? ??
         call['Extra'] as Map<dynamic, dynamic>? ?? {};
-    final roomName = extra['roomName']?.toString() ?? call['roomName']?.toString() ?? '';
-    final callerId = extra['callerId']?.toString() ?? call['callerId']?.toString() ?? call['handle']?.toString() ?? '';
+    final roomName   = extra['roomName']?.toString()   ?? call['roomName']?.toString()   ?? '';
+    final callerId   = extra['callerId']?.toString()   ?? call['callerId']?.toString()   ?? call['handle']?.toString() ?? '';
     final callerName = extra['callerName']?.toString() ?? call['callerName']?.toString() ?? call['nameCaller']?.toString() ?? 'Unknown';
-    final callType = extra['callType']?.toString() ?? call['callType']?.toString() ?? 'voice_call';
+    final callType   = extra['callType']?.toString()   ?? call['callType']?.toString()   ?? 'voice_call';
     if (roomName.isEmpty) return;
-    _storePendingCall({
-      'callType': callType, 'roomName': roomName,
-      'callerId': callerId, 'callerName': callerName, 'autoAccept': true,
-    });
+    _storePendingCall({'callType': callType, 'roomName': roomName,
+      'callerId': callerId, 'callerName': callerName, 'autoAccept': true});
     debugPrint('✅ [STARTUP] Stored pending call from activeCalls()');
   } catch (e) { debugPrint('❌ [STARTUP] activeCalls() error: $e'); }
 }
@@ -214,9 +209,12 @@ void main() async {
     notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
   );
   await FlutterBackground.initialize(androidConfig: androidConfig);
-  final prefs = await SharedPreferences.getInstance();
-  final token = prefs.getString('auth_token');
-  final userId = prefs.getString('user_id');
+
+  await AppLocalizations.load();    // ✅ ADDED — loads saved language before first frame
+
+  final prefs    = await SharedPreferences.getInstance();
+  final token    = prefs.getString('auth_token');
+  final userId   = prefs.getString('user_id');
   final language = prefs.getString('app_language');
   runApp(IxesApp(initialToken: token, initialUserId: userId, showLanguage: language == null));
 }
@@ -261,9 +259,6 @@ class IxesApp extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// CALL CONNECTING SPLASH — same gradient/logo/spinner as SplashScreen
-// ============================================================================
 class _CallConnectingSplash extends StatelessWidget {
   final String callerName;
   final String callType;
@@ -275,12 +270,8 @@ class _CallConnectingSplash extends StatelessWidget {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Color.fromARGB(165, 55, 0, 255),
-              Color.fromARGB(70, 179, 154, 219),
-            ],
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
+            colors: [Color.fromARGB(165, 55, 0, 255), Color.fromARGB(70, 179, 154, 219)],
           ),
         ),
         child: SafeArea(
@@ -291,32 +282,19 @@ class _CallConnectingSplash extends StatelessWidget {
               const SizedBox(height: 56),
               Container(
                 width: 110, height: 110,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.white.withOpacity(0.15),
-                  border: Border.all(color: Colors.white38, width: 2),
-                ),
-                child: Center(
-                  child: Text(
+                decoration: BoxDecoration(shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.15),
+                    border: Border.all(color: Colors.white38, width: 2)),
+                child: Center(child: Text(
                     callerName.isNotEmpty ? callerName[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                      color: Colors.white, fontSize: 44, fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
+                    style: const TextStyle(color: Colors.white, fontSize: 44, fontWeight: FontWeight.bold))),
               ),
               const SizedBox(height: 28),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
-                child: Text(
-                  callerName,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold,
-                  ),
-                ),
+                child: Text(callerName, textAlign: TextAlign.center, maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold)),
               ),
               const SizedBox(height: 12),
               Text(
@@ -324,9 +302,7 @@ class _CallConnectingSplash extends StatelessWidget {
                 style: const TextStyle(color: Colors.white70, fontSize: 16),
               ),
               const SizedBox(height: 48),
-              const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
+              const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
             ],
           ),
         ),
@@ -349,7 +325,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     with WidgetsBindingObserver {
   StreamSubscription<Map<String, dynamic>>? _callSub;
   bool _providersReady = false;
-  bool _initStarted = false;
+  bool _initStarted    = false;
   Timer? _retryTimer;
   String? _lastInitUserId;
 
@@ -376,51 +352,38 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
   }
 
   void _handleCallKitEvent(CallEvent event) {
-    final body = event.body as Map<dynamic, dynamic>? ?? {};
-    final extra = body['extra'] as Map<dynamic, dynamic>? ?? {};
-    final roomName = extra['roomName']?.toString() ?? '';
-    final callerId = extra['callerId']?.toString() ?? '';
+    final body       = event.body as Map<dynamic, dynamic>? ?? {};
+    final extra      = body['extra'] as Map<dynamic, dynamic>? ?? {};
+    final roomName   = extra['roomName']?.toString()   ?? '';
+    final callerId   = extra['callerId']?.toString()   ?? '';
     final callerName = extra['callerName']?.toString() ?? '';
-    final callType = extra['callType']?.toString() ?? 'voice_call';
+    final callType   = extra['callType']?.toString()   ?? 'voice_call';
     debugPrint('🎯 [CALLKIT] ${event.event} | room=$roomName | type=$callType | ready=$_providersReady');
 
     switch (event.event) {
-
-    // Tap notification body → show in-app incoming screen
       case Event.actionCallIncoming:
         if (roomName.isEmpty) return;
         final ctx = navigatorKey.currentContext;
         if (ctx == null) {
-          _storePendingCall({
-            'callType': callType, 'roomName': roomName,
-            'callerId': callerId, 'callerName': callerName, 'autoAccept': false,
-          });
+          _storePendingCall({'callType': callType, 'roomName': roomName,
+            'callerId': callerId, 'callerName': callerName, 'autoAccept': false});
           _startRetryLoop();
           return;
         }
         if (callType == 'video_call') {
           ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
-            roomName: roomName, callerId: callerId, callerName: callerName,
-            acceptedViaCallKit: false,
-          );
+              roomName: roomName, callerId: callerId, callerName: callerName, acceptedViaCallKit: false);
         } else {
           ctx.read<VoiceCallProvider>().setIncomingCallFromFCM(
-            roomName: roomName, callerId: callerId, callerName: callerName,
-            acceptedViaCallKit: false,
-          );
+              roomName: roomName, callerId: callerId, callerName: callerName, acceptedViaCallKit: false);
         }
         break;
 
-    // Tap Answer button → store and wait for providers ready
       case Event.actionCallAccept:
         if (roomName.isEmpty) { debugPrint('❌ [ACCEPT] Empty roomName'); return; }
-        final callData = {
-          'callType': callType, 'roomName': roomName,
-          'callerId': callerId, 'callerName': callerName, 'autoAccept': true,
-        };
-        if (_providersReady && mounted &&
-            navigatorKey.currentContext != null &&
-            navigatorKey.currentState != null) {
+        final callData = {'callType': callType, 'roomName': roomName,
+          'callerId': callerId, 'callerName': callerName, 'autoAccept': true};
+        if (_providersReady && mounted && navigatorKey.currentContext != null && navigatorKey.currentState != null) {
           _navigate(callData);
         } else {
           _storePendingCall(callData);
@@ -428,26 +391,20 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         }
         break;
 
-    // Decline
       case Event.actionCallDecline:
         _clearCallState();
         _retryTimer?.cancel();
         final ctx = navigatorKey.currentContext;
         if (ctx == null) return;
         if (callType == 'video_call') {
-          ctx.read<VideoCallProvider>().setCallerForReject(
-            callerId: callerId, callerName: callerName, roomName: roomName,
-          );
+          ctx.read<VideoCallProvider>().setCallerForReject(callerId: callerId, callerName: callerName, roomName: roomName);
           ctx.read<VideoCallProvider>().rejectCall();
         } else {
-          ctx.read<VoiceCallProvider>().setCallerForReject(
-            callerId: callerId, callerName: callerName, roomName: roomName,
-          );
+          ctx.read<VoiceCallProvider>().setCallerForReject(callerId: callerId, callerName: callerName, roomName: roomName);
           ctx.read<VoiceCallProvider>().rejectVoiceCall();
         }
         break;
 
-    // Caller cancelled / timeout
       case Event.actionCallTimeout:
       case Event.actionCallEnded:
         _clearCallState();
@@ -463,8 +420,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         }
         break;
 
-      default:
-        break;
+      default: break;
     }
   }
 
@@ -499,35 +455,10 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     super.dispose();
   }
 
-  // ============================================================================
-  // ✅ FIX — _navigate for autoAccept calls
-  //
-  // PROBLEM 1 (call not connecting):
-  // Previous fix pushed MainScreen first via pushAndRemoveUntil which
-  // triggered MainScreen's provider init AGAIN, causing race conditions
-  // and losing the call data → VoiceRoomScreen had null userId → token failed.
-  //
-  // PROBLEM 2 (splash shows after call ends):
-  // Splash was the root route. Call screen pushed on top. Call ends → pop →
-  // splash appears again because it's still the root.
-  //
-  // CORRECT FIX:
-  // Step 1: Push call screen with nav.push() (simple, doesn't touch root)
-  //         Call connects correctly ✅
-  // Step 2: The splash (root) stays hidden BEHIND the call screen — invisible.
-  // Step 3: VoiceRoomScreen/_closeScreen() uses pushAndRemoveUntil(MainScreen)
-  //         instead of pop() — this replaces the entire stack with MainScreen.
-  //         User sees MainScreen after call, not the splash. ✅
-  //
-  // So the fix is split: _navigate stays simple (just push),
-  // and VoiceRoomScreen/VideoCallScreen handle the post-call navigation.
-  // We pass a flag `fromFcmAutoAccept` so those screens know to use
-  // pushAndRemoveUntil instead of pop.
-  // ============================================================================
   Future<void> _navigate(Map<String, dynamic> data) async {
-    final roomName = data['roomName'] ?? '';
-    final callType = data['callType'] ?? '';
-    final callerId = data['callerId'] ?? '';
+    final roomName   = data['roomName']   ?? '';
+    final callType   = data['callType']   ?? '';
+    final callerId   = data['callerId']   ?? '';
     final callerName = data['callerName'] ?? '';
     final autoAccept = data['autoAccept'] == true;
 
@@ -542,30 +473,16 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
     if (callType == 'video_call') {
       ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
-        roomName: roomName, callerId: callerId, callerName: callerName,
-        acceptedViaCallKit: autoAccept,
-      );
+          roomName: roomName, callerId: callerId, callerName: callerName, acceptedViaCallKit: autoAccept);
       if (autoAccept) {
-        // Simple push — call connects correctly.
-        // VideoCallScreen will use pushAndRemoveUntil(MainScreen) on close
-        // when fromFcmAutoAccept=true so splash doesn't show after call ends.
-        nav.push(MaterialPageRoute(
-          builder: (_) => VideoCallScreen(fromFcmAutoAccept: true),
-        ));
+        nav.push(MaterialPageRoute(builder: (_) => VideoCallScreen(fromFcmAutoAccept: true)));
         await _endAllCallKitCalls();
       }
     } else {
       ctx.read<VoiceCallProvider>().setIncomingCallFromFCM(
-        roomName: roomName, callerId: callerId, callerName: callerName,
-        acceptedViaCallKit: autoAccept,
-      );
+          roomName: roomName, callerId: callerId, callerName: callerName, acceptedViaCallKit: autoAccept);
       if (autoAccept) {
-        // Simple push — call connects correctly.
-        // VoiceRoomScreen will use pushAndRemoveUntil(MainScreen) on close
-        // when fromFcmAutoAccept=true so splash doesn't show after call ends.
-        nav.push(MaterialPageRoute(
-          builder: (_) => const VoiceRoomScreen(fromFcmAutoAccept: true),
-        ));
+        nav.push(MaterialPageRoute(builder: (_) => const VoiceRoomScreen(fromFcmAutoAccept: true)));
         await _endAllCallKitCalls();
       }
     }
@@ -609,7 +526,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     return Builder(builder: (ctx) {
       final auth = ctx.watch<AuthProvider>();
 
-      // Show connecting splash while providers init for autoAccept calls
       if (_pendingCallData != null &&
           _pendingCallData!['autoAccept'] == true &&
           auth.isAuthenticated) {
@@ -628,9 +544,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
               await ctx.read<PersonalChatProvider>().initialize();
               final sock = SocketService().socket;
               if (sock != null) ctx.read<GroupChatProvider>().setSocket(sock);
-              SocketService().onSocketReady.listen((s) {
-                if (mounted) ctx.read<GroupChatProvider>().setSocket(s);
-              });
+              SocketService().onSocketReady.listen((s) { if (mounted) ctx.read<GroupChatProvider>().setSocket(s); });
               ctx.read<VideoCallProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
               ctx.read<VoiceCallProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
               ctx.read<MeetingProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
@@ -645,7 +559,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildApp(
           home: _CallConnectingSplash(
             callerName: _pendingCallData!['callerName'] ?? '',
-            callType: _pendingCallData!['callType'] ?? 'voice_call',
+            callType:   _pendingCallData!['callType']   ?? 'voice_call',
           ),
         );
       }
@@ -661,7 +575,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         final user = auth.user!;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
-          // ✅ FIX: If different user logged in, reset and re-initialize
           if (_initStarted && _lastInitUserId == user.id) return;
           _initStarted = true;
           _providersReady = false;
@@ -673,9 +586,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
             await ctx.read<PersonalChatProvider>().initialize();
             final sock = SocketService().socket;
             if (sock != null) ctx.read<GroupChatProvider>().setSocket(sock);
-            SocketService().onSocketReady.listen((s) {
-              if (mounted) ctx.read<GroupChatProvider>().setSocket(s);
-            });
+            SocketService().onSocketReady.listen((s) { if (mounted) ctx.read<GroupChatProvider>().setSocket(s); });
             ctx.read<VideoCallProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
             ctx.read<VoiceCallProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
             ctx.read<MeetingProvider>().initialize(userId: user.id, userName: name, authToken: widget.initialToken);
@@ -691,7 +602,9 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       return _buildApp(
         home: auth.isAuthenticated
             ? VoiceCallListener(child: IncomingCallListener(child: const MainScreen(initialIndex: 0)))
-            : widget.showLanguage ? const LanguageSelectionScreen() : const SplashScreen(),
+            : widget.showLanguage
+            ? const LanguageSelectionScreen()
+            : const SplashScreen(),
       );
     });
   }
