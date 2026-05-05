@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../constants/constants.dart';
 import '../../../providers/auth_provider.dart';
 
@@ -39,15 +40,24 @@ class _ForwardMessageScreenState extends State<ForwardMessageScreen>
   static const Color _textMid = Color(0xFF6B6080);
   static const Color _border = Color(0xFFEDE8F5);
 
+  String _token = '';
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _fetchFriends();
-    _fetchGroups();
+    _loadToken();  // ✅ load token first
     _searchController.addListener(() {
       setState(() => _searchQuery = _searchController.text.toLowerCase());
     });
+  }
+
+  Future<void> _loadToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    _token = prefs.getString('auth_token') ?? '';
+    print('🔑 Forward token: $_token');
+    _fetchFriends();
+    _fetchGroups();
   }
 
   @override
@@ -57,21 +67,20 @@ class _ForwardMessageScreenState extends State<ForwardMessageScreen>
     super.dispose();
   }
 
-  String get _token {
-    try {
-      final auth = context.read<AuthProvider>();
-      return auth.user?.token ?? '';   // ✅ correct path
-    } catch (_) {
-      return '';
-    }
-  }
+
 
   Future<void> _fetchFriends() async {
     try {
+      print('🔍 Fetching friends with token: $_token');
       final res = await http.get(
         Uri.parse('https://api.ixes.ai/api/chat/friends'),
-        headers: {'Authorization': 'Bearer $_token'},
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'x-platform': 'mobile',  // ✅ ADD THIS
+        },
       );
+      print('📡 Friends status: ${res.statusCode}');
+      print('📦 Friends body: ${res.body}');
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final data = body['data'] as List? ?? [];
@@ -94,7 +103,11 @@ class _ForwardMessageScreenState extends State<ForwardMessageScreen>
     try {
       final res = await http.get(
         Uri.parse('https://api.ixes.ai/api/chat/mygroups'),
-        headers: {'Authorization': 'Bearer $_token'},
+        headers: {
+          'Authorization': 'Bearer $_token',
+          'x-platform': 'mobile',  // ✅ ADD THIS
+        },
+
       );
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);

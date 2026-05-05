@@ -4,10 +4,10 @@ import 'package:flutter/services.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/services_page/service_details.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/service_provider.dart';
 import '../my_products/my_products_screen.dart';
 import 'booking_screen.dart';
-import 'create_service_screen.dart';
 import 'my_bookings.dart';
 
 class ServicesScreen extends StatefulWidget {
@@ -28,6 +28,7 @@ class _ServicesScreenState extends State<ServicesScreen>
   final FocusNode _searchFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   late AnimationController _headerAnimController;
+  late TabController _tabController;
 
   final List<String> _categories = [
     'All',
@@ -40,7 +41,6 @@ class _ServicesScreenState extends State<ServicesScreen>
     'Organizational Services',
   ];
 
-  // Category icon mapping
   final Map<String, IconData> _categoryIcons = {
     'All': Icons.apps_rounded,
     'Rental Services': Icons.home_work_rounded,
@@ -55,6 +55,13 @@ class _ServicesScreenState extends State<ServicesScreen>
   @override
   void initState() {
     super.initState();
+
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      // Rebuild to update FAB visibility and title
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
+
     _headerAnimController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 800),
@@ -71,6 +78,7 @@ class _ServicesScreenState extends State<ServicesScreen>
 
   @override
   void dispose() {
+    _tabController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -83,7 +91,8 @@ class _ServicesScreenState extends State<ServicesScreen>
         _scrollController.position.maxScrollExtent - 200) {
       final provider = Provider.of<ServicesProvider>(context, listen: false);
       if (_searchQuery.isEmpty &&
-          (_selectedCategories.isEmpty || _selectedCategories.contains('All'))) {
+          (_selectedCategories.isEmpty ||
+              _selectedCategories.contains('All'))) {
         provider.loadMoreServices();
       }
     }
@@ -115,7 +124,8 @@ class _ServicesScreenState extends State<ServicesScreen>
         if (service is! Map<String, dynamic>) return false;
         final name = service['name']?.toString().toLowerCase() ?? '';
         final category = service['category']?.toString().toLowerCase() ?? '';
-        final description = service['description']?.toString().toLowerCase() ?? '';
+        final description =
+            service['description']?.toString().toLowerCase() ?? '';
         final query = _searchQuery.toLowerCase();
         return name.contains(query) ||
             category.contains(query) ||
@@ -147,7 +157,6 @@ class _ServicesScreenState extends State<ServicesScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Handle bar
                   Padding(
                     padding: const EdgeInsets.only(top: 12, bottom: 4),
                     child: Container(
@@ -159,7 +168,6 @@ class _ServicesScreenState extends State<ServicesScreen>
                       ),
                     ),
                   ),
-                  // Header
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                     child: Row(
@@ -170,7 +178,8 @@ class _ServicesScreenState extends State<ServicesScreen>
                             color: Primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.tune_rounded, color: Primary, size: 18),
+                          child: const Icon(Icons.tune_rounded,
+                              color: Primary, size: 18),
                         ),
                         const SizedBox(width: 12),
                         const Text(
@@ -199,7 +208,6 @@ class _ServicesScreenState extends State<ServicesScreen>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Category list
                   ConstrainedBox(
                     constraints: BoxConstraints(
                       maxHeight: MediaQuery.of(context).size.height * 0.45,
@@ -308,8 +316,9 @@ class _ServicesScreenState extends State<ServicesScreen>
                                   width: 20,
                                   height: 20,
                                   decoration: BoxDecoration(
-                                    color:
-                                    isSelected ? Primary : Colors.transparent,
+                                    color: isSelected
+                                        ? Primary
+                                        : Colors.transparent,
                                     shape: BoxShape.circle,
                                     border: Border.all(
                                       color: isSelected
@@ -330,7 +339,6 @@ class _ServicesScreenState extends State<ServicesScreen>
                       }).toList(),
                     ),
                   ),
-                  // Apply button
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                     child: SizedBox(
@@ -414,8 +422,8 @@ class _ServicesScreenState extends State<ServicesScreen>
         decoration: InputDecoration(
           hintText: 'Search services...',
           hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-          prefixIcon: Icon(Icons.search_rounded,
-              color: Colors.grey.shade400, size: 20),
+          prefixIcon:
+          Icon(Icons.search_rounded, color: Colors.grey.shade400, size: 20),
           suffixIcon: _searchQuery.isNotEmpty
               ? IconButton(
             icon: Container(
@@ -454,7 +462,6 @@ class _ServicesScreenState extends State<ServicesScreen>
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Row(
         children: [
-          // Filter button
           GestureDetector(
             onTap: _showFilterDialog,
             child: AnimatedContainer(
@@ -480,7 +487,8 @@ class _ServicesScreenState extends State<ServicesScreen>
                   Icon(
                     Icons.tune_rounded,
                     size: 15,
-                    color: hasActiveFilter ? Colors.white : Colors.grey.shade600,
+                    color:
+                    hasActiveFilter ? Colors.white : Colors.grey.shade600,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -517,7 +525,6 @@ class _ServicesScreenState extends State<ServicesScreen>
             ),
           ),
           const Spacer(),
-          // My Bookings button
           GestureDetector(
             onTap: () {
               Navigator.push(
@@ -671,7 +678,6 @@ class _ServicesScreenState extends State<ServicesScreen>
               ),
               child: Stack(
                 children: [
-                  // Image or placeholder
                   imageUrl != null && imageUrl.isNotEmpty
                       ? Image.network(
                     imageUrl,
@@ -720,7 +726,7 @@ class _ServicesScreenState extends State<ServicesScreen>
                     ),
                   ),
 
-                  // Category badge – top right
+                  // Category badge
                   if (serviceMap['category'] != null)
                     Positioned(
                       top: 10,
@@ -744,7 +750,7 @@ class _ServicesScreenState extends State<ServicesScreen>
                       ),
                     ),
 
-                  // Status chip – bottom left of image
+                  // Status chip
                   if (serviceMap['status'] != null)
                     Positioned(
                       bottom: 10,
@@ -762,7 +768,6 @@ class _ServicesScreenState extends State<ServicesScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Name
                   Text(
                     serviceMap['name']?.toString() ?? 'Unnamed Service',
                     style: const TextStyle(
@@ -776,7 +781,6 @@ class _ServicesScreenState extends State<ServicesScreen>
                     overflow: TextOverflow.ellipsis,
                   ),
 
-                  // Description
                   if (serviceMap['description'] != null) ...[
                     const SizedBox(height: 5),
                     Text(
@@ -793,11 +797,9 @@ class _ServicesScreenState extends State<ServicesScreen>
 
                   const SizedBox(height: 12),
 
-                  // ── Bottom row: price + book button ──
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // Price
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -844,7 +846,6 @@ class _ServicesScreenState extends State<ServicesScreen>
                         ],
                       ),
                       const Spacer(),
-                      // Book button
                       GestureDetector(
                         onTap: () {
                           HapticFeedback.mediumImpact();
@@ -853,9 +854,11 @@ class _ServicesScreenState extends State<ServicesScreen>
                             MaterialPageRoute(
                               builder: (context) => BookingScreen(
                                 serviceId: serviceMap['_id'] ?? '',
-                                serviceName: serviceMap['name'] ?? 'Service',
+                                serviceName:
+                                serviceMap['name'] ?? 'Service',
                                 costPerSlot: serviceMap['cost'] ?? 0,
-                                currency: serviceMap['currency'] ?? 'INR',
+                                currency:
+                                serviceMap['currency'] ?? 'INR',
                                 maxSlots: serviceMap['slots'] ?? 10,
                                 serviceImage:
                                 _getImageUrl(serviceMap['image']) ?? '',
@@ -1041,6 +1044,126 @@ class _ServicesScreenState extends State<ServicesScreen>
     );
   }
 
+  // ── Create Service Dialog ────────────────────────────────────────────────────
+  void _showCreateServiceDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 24),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: Primary.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.open_in_browser_rounded,
+                    color: Primary, size: 26),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Create a Service',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF1A1D2E),
+                  letterSpacing: -0.3,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'You\'ll be taken to the web to create your service. Your progress will be saved there.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey.shade500,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    final uri = Uri.parse(
+                        'https://.ixes.ai/api/service/create-service');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        'Continue to Web',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                      ),
+                      SizedBox(width: 8),
+                      Icon(Icons.arrow_forward_rounded, size: 16),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey.shade600,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // ── Build ────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -1052,6 +1175,8 @@ class _ServicesScreenState extends State<ServicesScreen>
             (_selectedCategories.isNotEmpty &&
                 !_selectedCategories.contains('All'));
 
+        final isServicesTab = _tabController.index == 0;
+
         return Scaffold(
           backgroundColor: const Color(0xFFF5F6FA),
           appBar: AppBar(
@@ -1062,16 +1187,16 @@ class _ServicesScreenState extends State<ServicesScreen>
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Services',
-                  style: TextStyle(
+                Text(
+                  isServicesTab ? 'Services' : 'Products',
+                  style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF1A1D2E),
                     letterSpacing: -0.5,
                   ),
                 ),
-                if (provider.services.isNotEmpty)
+                if (isServicesTab && provider.services.isNotEmpty)
                   Text(
                     '${filteredServices.length} available',
                     style: TextStyle(
@@ -1082,110 +1207,134 @@ class _ServicesScreenState extends State<ServicesScreen>
                   ),
               ],
             ),
-            actions: [
-              Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: IconButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (context) => MyProductsScreen()),
-                    );
-                  },
-                  icon: Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F6FA),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.trolley,
-                        color: Colors.grey.shade600, size: 20),
-                  ),
-                  tooltip: 'View Products',
-                ),
+            bottom: TabBar(
+              controller: _tabController,
+              labelColor: Primary,
+              unselectedLabelColor: Colors.grey.shade400,
+              labelStyle: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
               ),
-            ],
+              unselectedLabelStyle: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+              indicatorColor: Primary,
+              indicatorWeight: 2.5,
+              indicatorSize: TabBarIndicatorSize.label,
+              dividerColor: Colors.grey.shade100,
+              splashFactory: NoSplash.splashFactory,
+              overlayColor: WidgetStateProperty.all(Colors.transparent),
+              tabs: const [
+                Tab(text: 'Services'),
+                Tab(text: 'Products'),
+              ],
+            ),
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                  const CreateServiceScreen(communityId: ''),
+          floatingActionButton: AnimatedBuilder(
+            animation: _tabController,
+            builder: (context, child) {
+              return AnimatedSlide(
+                offset: isServicesTab
+                    ? Offset.zero
+                    : const Offset(0, 2.5),
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOutCubic,
+                child: AnimatedOpacity(
+                  opacity: isServicesTab ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 220),
+                  child: FloatingActionButton.extended(
+                    onPressed: isServicesTab
+                        ? _showCreateServiceDialog
+                        : null,
+                    backgroundColor: Primary,
+                    foregroundColor: Colors.white,
+                    icon: const Icon(Icons.add_rounded, size: 20),
+                    label: const Text(
+                      'Add Service',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 4,
+                  ),
                 ),
               );
             },
-            backgroundColor: Primary,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.add_rounded, size: 20),
-            label: const Text(
-              'Add Service',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-            ),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            elevation: 4,
           ),
-          body: Column(
+          body: TabBarView(
+            controller: _tabController,
+            physics: const BouncingScrollPhysics(),
             children: [
-              // White top section: search + filters
-              Container(
-                color: Colors.white,
-                child: Column(
-                  children: [
-                    _buildSearchBar(),
-                    const SizedBox(height: 4),
-                    _buildFilterChip(),
-                    const SizedBox(height: 14),
-                  ],
-                ),
-              ),
-              // Subtle divider
-              Container(
-                height: 1,
-                color: Colors.grey.shade100,
-              ),
-              // Content
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () async =>
-                  await provider.fetchServices(refresh: true),
-                  color: Primary,
-                  child: provider.isLoading
-                      ? _buildSkeletonList()
-                      : provider.hasError
-                      ? _buildErrorState(provider)
-                      : filteredServices.isEmpty
-                      ? _buildEmptyState(isFiltered)
-                      : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.fromLTRB(
-                        16, 16, 16, 100),
-                    itemCount: filteredServices.length +
-                        (provider.isLoadingMoreServices ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index == filteredServices.length) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(
-                              vertical: 20),
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              color: Primary,
-                              strokeWidth: 2,
-                            ),
-                          ),
-                        );
-                      }
-                      return _buildServiceCard(
-                          service: filteredServices[index]);
-                    },
+              // ── Tab 0: Services ──────────────────────────────────────────
+              Column(
+                children: [
+                  // White top section: search + filters
+                  Container(
+                    color: Colors.white,
+                    child: Column(
+                      children: [
+                        _buildSearchBar(),
+                        const SizedBox(height: 4),
+                        _buildFilterChip(),
+                        const SizedBox(height: 14),
+                      ],
+                    ),
                   ),
-                ),
+                  // Subtle divider
+                  Container(
+                    height: 1,
+                    color: Colors.grey.shade100,
+                  ),
+                  // Content
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: () async =>
+                      await provider.fetchServices(refresh: true),
+                      color: Primary,
+                      child: provider.isLoading
+                          ? _buildSkeletonList()
+                          : provider.hasError
+                          ? _buildErrorState(provider)
+                          : filteredServices.isEmpty
+                          ? _buildEmptyState(isFiltered)
+                          : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(
+                            16, 16, 16, 100),
+                        itemCount: filteredServices.length +
+                            (provider.isLoadingMoreServices
+                                ? 1
+                                : 0),
+                        itemBuilder: (context, index) {
+                          if (index ==
+                              filteredServices.length) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(
+                                  vertical: 20),
+                              child: Center(
+                                child:
+                                CircularProgressIndicator(
+                                  color: Primary,
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            );
+                          }
+                          return _buildServiceCard(
+                              service:
+                              filteredServices[index]);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
               ),
+
+              // ── Tab 1: Products ──────────────────────────────────────────
+              MyProductsScreen(),
             ],
           ),
         );
@@ -1236,8 +1385,8 @@ class _SkeletonServiceCardState extends State<_SkeletonServiceCard>
     return AnimatedBuilder(
       animation: _anim,
       builder: (_, __) {
-        final c =
-        Color.lerp(Colors.grey.shade200, Colors.grey.shade100, _anim.value)!;
+        final c = Color.lerp(
+            Colors.grey.shade200, Colors.grey.shade100, _anim.value)!;
         return Container(
           margin: const EdgeInsets.only(bottom: 14),
           decoration: BoxDecoration(
@@ -1247,7 +1396,6 @@ class _SkeletonServiceCardState extends State<_SkeletonServiceCard>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image skeleton
               Container(
                 height: 160,
                 width: double.infinity,

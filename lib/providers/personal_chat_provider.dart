@@ -224,23 +224,107 @@ class PersonalChatProvider with ChangeNotifier {
   void _handleMessageDeleted(Map<String, dynamic> data) {
     if (_isDisposed) return;
     try {
-      final messageId = data['messageId'];
-      if (messageId != null) {
-        _messages = _messages
-            .where((m) => m['_id']?.toString() != messageId.toString())
-            .toList();
-        _safeNotifyListeners();
+      print('🗑️ [Provider] handleMessageDeleted raw data: $data');
+
+      // ✅ Backend sends { messageId, conversationId }
+      final messageId = data['messageId']?.toString();
+
+      if (messageId != null && messageId.isNotEmpty) {
+        final idx = _messages.indexWhere(
+                (m) => m['_id']?.toString() == messageId);
+        if (idx >= 0) {
+          final List<dynamic> updated = List.from(_messages);
+          updated[idx] = {
+            ...Map<String, dynamic>.from(updated[idx]),
+            'isDelete': true,
+            'text': 'Message deleted',
+          };
+          _messages = updated;
+          _safeNotifyListeners();
+          print('✅ Message deleted in UI: $messageId');
+        } else {
+          print('⚠️ Message not found for deletion: $messageId');
+        }
       }
     } catch (e) {
       print('💥 Error handling message deletion: $e');
+    }
+  }
+  // ════════════════════════════════════════════════════════════════════════
+//  CALL HISTORY STATE
+// ════════════════════════════════════════════════════════════════════════
+  List<dynamic> _callHistory = [];
+  Map<String, dynamic> _callPagination = {};
+  bool _isCallHistoryLoading = false;
+
+  List<dynamic> get callHistory => _callHistory;
+  Map<String, dynamic> get callPagination => _callPagination;
+  bool get isCallHistoryLoading => _isCallHistoryLoading;
+
+  Future<void> fetchCallHistory({
+    int pageNo = 1,
+    int limit = 20,
+    String? communityId,
+  }) async {
+    if (_isDisposed) return;
+    _isCallHistoryLoading = true;
+    _safeNotifyListeners();
+    try {
+      final result = await _chatService.getCallHistory(
+        pageNo: pageNo,
+        limit: limit,
+        communityId: communityId,
+      );
+      if (result['error'] == false) {
+        if (pageNo == 1) {
+          _callHistory = result['data'] ?? [];
+        } else {
+          _callHistory = [..._callHistory, ...result['data'] ?? []];
+        }
+        _callPagination = result['pagination'] ?? {};
+      }
+    } catch (e) {
+      debugPrint('💥 Error fetching call history: $e');
+    }
+    _isCallHistoryLoading = false;
+    _safeNotifyListeners();
+  }
+
+  Future<Map<String, dynamic>?> saveCallHistory({
+    required String receiverId,
+    required String type,
+    required String status,
+    String? callerId,
+    int? duration,
+    String? communityId,
+  }) async {
+    if (_isDisposed) return null;
+    try {
+      final result = await _chatService.saveCallHistory(
+        receiverId: receiverId,
+        type: type,
+        status: status,
+        callerId: callerId,
+        duration: duration,
+        communityId: communityId,
+      );
+      return result;
+    } catch (e) {
+      debugPrint('💥 Error saving call history: $e');
+      return null;
     }
   }
 
   void _handleMessageEdited(Map<String, dynamic> data) {
     if (_isDisposed) return;
     try {
-      final messageId = data['messageId']?.toString();
-      final newText   = data['newText'];
+      final messageId = data['messageId']?.toString()
+          ?? data['message']?['_id']?.toString();
+
+      // ✅ Backend sends message.text not newText
+      final newText = data['message']?['text']?.toString()
+          ?? data['newText']?.toString();
+
       if (messageId != null && newText != null) {
         final idx = _messages.indexWhere(
                 (m) => m['_id']?.toString() == messageId);
@@ -326,14 +410,15 @@ class PersonalChatProvider with ChangeNotifier {
 
   Future<void> fetchConversation(String userId) async {
     if (_isDisposed) return;
-    
+
+    // Only clear if switching to a different conversation
     if (_currentReceiverId != userId) {
-      _messages = []; // Prevent split-second flash of old chat's messages
+      _messages = [];
+      _currentReceiverId = userId;
     }
 
     _isConversationLoading = true;
     _error = null;
-    _currentReceiverId = userId;
     _safeNotifyListeners();
 
     try {
@@ -344,22 +429,31 @@ class PersonalChatProvider with ChangeNotifier {
       final result = await _chatService.getMessages(userId: userId);
 
       if (result['error'] == false && result['data'] != null) {
-        final data        = result['data'];
-        _userData         = data['userData'] ?? {};
+        final data = result['data'];
+        _userData = data['userData'] ?? {};
         final rawMessages = data['messages'] as List<dynamic>? ?? [];
-        _messages = rawMessages
+        final fetched = rawMessages
             .map((m) => _processMessage(m as Map<String, dynamic>))
             .toList();
-        print('✅ Loaded ${_messages.length} messages');
+
+        // ✅ MERGE: keep existing messages not in fetched, add new ones
+        final fetchedIds = fetched.map((m) => m['_id'].toString()).toSet();
+        final preserved = _messages.where(
+                (m) => !fetchedIds.contains(m['_id'].toString())
+                && m['isOptimistic'] != true
+        ).toList();
+
+        _messages = [...preserved, ...fetched];
+        // Sort by createdAt ascending
+        _messages.sort((a, b) => DateTime.parse(a['createdAt'])
+            .compareTo(DateTime.parse(b['createdAt'])));
+
+        print('✅ Loaded ${_messages.length} messages (${fetched.length} from API, ${preserved.length} preserved)');
       } else {
-        _error    = result['message'] ?? 'Failed to fetch conversation';
-        _messages = [];
-        _userData = {};
+        _error = result['message'] ?? 'Failed to fetch conversation';
       }
     } catch (e) {
-      _error    = 'Error fetching conversation: $e';
-      _messages = [];
-      _userData = {};
+      _error = 'Error fetching conversation: $e';
     } finally {
       _isConversationLoading = false;
       _safeNotifyListeners();
@@ -650,17 +744,28 @@ class PersonalChatProvider with ChangeNotifier {
     required String receiverId,
   }) async {
     try {
-      final response = await _chatService.deleteMessage(
-        messageId:  messageId,
-        receiverId: receiverId,
-        useSocket:  _socketConnected,
-      );
-      if (response != null && response['error'] != true) {
-        _messages = _messages
-            .where((m) => m['_id']?.toString() != messageId)
-            .toList();
+      // ✅ Optimistic update first
+      final idx = _messages.indexWhere(
+              (m) => m['_id']?.toString() == messageId);
+      if (idx >= 0) {
+        final List<dynamic> updated = List.from(_messages);
+        updated[idx] = {
+          ...Map<String, dynamic>.from(updated[idx]),
+          'isDelete': true,
+          'text': 'Message deleted',
+        };
+        _messages = updated;
         notifyListeners();
       }
+
+      // ✅ No reconnect attempt — service handles socket/HTTP fallback
+      final response = await _chatService.deleteMessage(
+        messageId: messageId,
+        receiverId: receiverId,
+        useSocket: _socketConnected,
+      );
+
+      print('🗑️ Delete response: $response');
       return response;
     } catch (e) {
       return {'error': true, 'message': 'Error deleting message: $e'};
@@ -673,27 +778,30 @@ class PersonalChatProvider with ChangeNotifier {
     required String receiverId,
   }) async {
     try {
-      final response = await _chatService.editMessage(
-        messageId:  messageId,
-        newText:    newText,
-        receiverId: receiverId,
-        useSocket:  _socketConnected,
-      );
-      if (response != null && response['error'] != true) {
-        final idx = _messages.indexWhere(
-                (m) => m['_id']?.toString() == messageId);
-        if (idx >= 0) {
-          final List<dynamic> updated = List.from(_messages);
-          updated[idx] = {
-            ...Map<String, dynamic>.from(updated[idx]),
-            'text':     newText,
-            'isEdited': true,
-            'editedAt': DateTime.now().toIso8601String(),
-          };
-          _messages = updated;
-          notifyListeners();
-        }
+      // ✅ Optimistic update first
+      final idx = _messages.indexWhere(
+              (m) => m['_id']?.toString() == messageId);
+      if (idx >= 0) {
+        final List<dynamic> updated = List.from(_messages);
+        updated[idx] = {
+          ...Map<String, dynamic>.from(updated[idx]),
+          'text': newText,
+          'isEdited': true,
+          'editedAt': DateTime.now().toIso8601String(),
+        };
+        _messages = updated;
+        notifyListeners();
       }
+
+      // ✅ No reconnect attempt — service handles socket/HTTP fallback
+      final response = await _chatService.editMessage(
+        messageId: messageId,
+        newText: newText,
+        receiverId: receiverId,
+        useSocket: _socketConnected,
+      );
+
+      print('✏️ Edit response: $response');
       return response;
     } catch (e) {
       return {'error': true, 'message': 'Error editing message: $e'};

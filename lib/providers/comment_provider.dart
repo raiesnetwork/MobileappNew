@@ -8,10 +8,11 @@ import '../services/post_service.dart';
 class CommentProvider with ChangeNotifier {
   final Map<String, List<Map<String, dynamic>>> _commentsByPostId = {};
   bool _isLoading = false;
-  bool _isPosting = false; // Move this declaration before the getter
+  bool _isPosting = false;
   String _error = '';
   List<Post> _posts = [];
-  String _currentUserProfile = ''; // Add current user profile
+  List<Post> _injectedPosts = [];
+  String _currentUserProfile = '';
 
   // Getters
   bool get isLoading => _isLoading;
@@ -26,11 +27,8 @@ class CommentProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Get current user profile image
   String getCurrentUserProfile() => _currentUserProfile;
 
-
-  // Set current user profile (call this when user logs in)
   void setCurrentUserProfile(String profileImageUrl) {
     _currentUserProfile = profileImageUrl;
     notifyListeners();
@@ -54,7 +52,7 @@ class CommentProvider with ChangeNotifier {
   Future<Map<String, dynamic>?> fetchAllPosts({
     required int offset,
     required int limit,
-    bool isRefresh = false, // Add parameter to indicate refresh vs load more
+    bool isRefresh = false,
   }) async {
     final result = await PostService().getAllPosts(offset: offset, limit: limit);
 
@@ -65,10 +63,15 @@ class CommentProvider with ChangeNotifier {
       final newPosts = data.map((e) => Post.fromJson(e)).toList();
 
       if (isRefresh || offset == 0) {
-        // If refreshing or loading first page, replace the list
         _posts = newPosts;
+        // ✅ Re-inject any injected posts that are not in the fresh list
+        for (final injected in _injectedPosts) {
+          final exists = _posts.any((p) => p.id == injected.id);
+          if (!exists) {
+            _posts.add(injected);
+          }
+        }
       } else {
-        // If loading more, append to existing list
         _posts.addAll(newPosts);
       }
 
@@ -77,19 +80,22 @@ class CommentProvider with ChangeNotifier {
     } else {
       if (isRefresh || offset == 0) {
         _posts = [];
+        // ✅ Re-inject even when server returns nothing
+        for (final injected in _injectedPosts) {
+          _posts.add(injected);
+        }
       }
       notifyListeners();
       return null;
     }
   }
+
   List<Post> _communityPosts = [];
   String _currentCommunityId = '';
 
-// Getter for community posts
   List<Post> get communityPosts => _communityPosts;
   String get currentCommunityId => _currentCommunityId;
 
-// Fetch community posts method
   Future<Map<String, dynamic>?> fetchCommunityPosts({
     required String communityId,
     required int offset,
@@ -119,16 +125,22 @@ class CommentProvider with ChangeNotifier {
     }
   }
 
-
+  // ✅ FIXED: checks _injectedPosts first so comments survive feed refreshes
   List<Comment> getCommentsForPost(String postId) {
     try {
-      // First try regular posts
+      // Check injected posts FIRST — survives feed refreshes
+      final injectedIdx = _injectedPosts.indexWhere((p) => p.id == postId);
+      if (injectedIdx != -1) {
+        return _injectedPosts[injectedIdx].comments;
+      }
+
+      // Then regular posts
       final postInMain = _posts.indexWhere((p) => p.id == postId);
       if (postInMain != -1) {
         return _posts[postInMain].comments;
       }
 
-      // Then try community posts
+      // Then community posts
       final postInCommunity = _communityPosts.indexWhere((p) => p.id == postId);
       if (postInCommunity != -1) {
         return _communityPosts[postInCommunity].comments;
@@ -140,7 +152,6 @@ class CommentProvider with ChangeNotifier {
       return [];
     }
   }
-
 
   Future<bool> postComment({
     required String postId,
@@ -159,7 +170,6 @@ class CommentProvider with ChangeNotifier {
       );
 
       if (result['success']) {
-        // ✅ Extract real comment data from server response
         final newCommentData = result['newComment'];
 
         String userName = '';
@@ -183,22 +193,28 @@ class CommentProvider with ChangeNotifier {
           userId: newCommentData?['userId']?['_id']?.toString() ?? _currentUserId,
         );
 
-        // ✅ Add real comment instantly to community posts
+        // ✅ Add to community posts
         final cIndex = _communityPosts.indexWhere((p) => p.id == postId);
         if (cIndex != -1) {
           _communityPosts[cIndex].comments.add(realComment);
         }
 
-        // ✅ Add real comment instantly to regular posts
+        // ✅ Add to regular posts
         final pIndex = _posts.indexWhere((p) => p.id == postId);
         if (pIndex != -1) {
           _posts[pIndex].comments.add(realComment);
         }
 
-        _isPosting = false;
-        notifyListeners(); // ✅ UI updates immediately with correct name + photo
+        // ✅ Add to injected posts
+        final injIdx = _injectedPosts.indexWhere((p) => p.id == postId);
+        if (injIdx != -1) {
+          _injectedPosts[injIdx].comments.add(realComment);
+        }
 
-        // ✅ Background refresh to sync full post state
+        _isPosting = false;
+        notifyListeners();
+
+        // Background refresh
         if (communityId != null) {
           fetchCommunityPosts(
             communityId: communityId,
@@ -223,8 +239,6 @@ class CommentProvider with ChangeNotifier {
     }
   }
 
-
-  /// Update a post and refresh the feed
   Future<bool> updatePost({
     required BuildContext context,
     required String postId,
@@ -253,10 +267,8 @@ class CommentProvider with ChangeNotifier {
       _isLoading = false;
 
       if (result['success']) {
-        // ✅ NO SNACKBAR HERE - Let the screen handle it
         print('✅ Provider: Post updated successfully');
 
-        // Refresh the appropriate feed
         if (communityId != null) {
           await fetchCommunityPosts(
             communityId: communityId,
@@ -270,35 +282,29 @@ class CommentProvider with ChangeNotifier {
         notifyListeners();
         return true;
       } else {
-        // ❌ Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message'] ?? 'Failed to update post'),
             backgroundColor: Colors.red,
           ),
         );
-
         notifyListeners();
         return false;
       }
     } catch (e) {
       _isLoading = false;
       notifyListeners();
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error updating post: $e'),
           backgroundColor: Colors.red,
         ),
       );
-
       print('❌ Error in updatePost provider: $e');
       return false;
     }
   }
 
-
-  // Optional: Add this helper method for better state management
   void isloading(bool loading) {
     if (_isLoading != loading) {
       _isLoading = loading;
@@ -321,33 +327,32 @@ class CommentProvider with ChangeNotifier {
   }) async {
     final offset = currentPage * postsPerPage;
 
-    final response =
-        await fetchAllPosts(offset: offset, limit: postsPerPage); // ✅ Now works
+    final response = await fetchAllPosts(offset: offset, limit: postsPerPage);
 
     if (response != null &&
         response['posts'] != null &&
         response['posts']['transformedPosts'] != null) {
       final List<dynamic> data = response['posts']['transformedPosts'];
       final freshPosts = data.map((e) => Post.fromJson(e)).toList();
-
       print("✅ Updating posts for page $currentPage");
       onUpdate(freshPosts);
     }
   }
 
   Future<void> toggleLike(String postId) async {
-    // ✅ Check both _posts and _communityPosts
     final index = _posts.indexWhere((p) => p.id == postId);
     final cIndex = _communityPosts.indexWhere((p) => p.id == postId);
+    final injIndex = _injectedPosts.indexWhere((p) => p.id == postId);
 
-    if (index == -1 && cIndex == -1) return;
+    if (index == -1 && cIndex == -1 && injIndex == -1) return;
 
-    // ✅ Get the right post
     final bool isLiked = index != -1
         ? _posts[index].isLikedByUser
-        : _communityPosts[cIndex].isLikedByUser;
+        : cIndex != -1
+        ? _communityPosts[cIndex].isLikedByUser
+        : _injectedPosts[injIndex].isLikedByUser;
 
-    // 🔁 Optimistic UI update for both lists
+    // Optimistic update
     if (index != -1) {
       _posts[index].isLikedByUser = !isLiked;
       _posts[index].likes += isLiked ? -1 : 1;
@@ -356,6 +361,10 @@ class CommentProvider with ChangeNotifier {
       _communityPosts[cIndex].isLikedByUser = !isLiked;
       _communityPosts[cIndex].likes += isLiked ? -1 : 1;
     }
+    if (injIndex != -1) {
+      _injectedPosts[injIndex].isLikedByUser = !isLiked;
+      _injectedPosts[injIndex].likes += isLiked ? -1 : 1;
+    }
     notifyListeners();
 
     final result = isLiked
@@ -363,7 +372,7 @@ class CommentProvider with ChangeNotifier {
         : await CommentService.likePost(postId);
 
     if (!result['success']) {
-      // ❌ Revert on failure
+      // Revert on failure
       if (index != -1) {
         _posts[index].isLikedByUser = isLiked;
         _posts[index].likes += isLiked ? 1 : -1;
@@ -372,12 +381,16 @@ class CommentProvider with ChangeNotifier {
         _communityPosts[cIndex].isLikedByUser = isLiked;
         _communityPosts[cIndex].likes += isLiked ? 1 : -1;
       }
+      if (injIndex != -1) {
+        _injectedPosts[injIndex].isLikedByUser = isLiked;
+        _injectedPosts[injIndex].likes += isLiked ? 1 : -1;
+      }
       notifyListeners();
     }
   }
 
   Future<bool> reportPost({
-    required BuildContext context, // Add context here
+    required BuildContext context,
     required String postId,
     required String reportReason,
   }) async {
@@ -390,97 +403,67 @@ class CommentProvider with ChangeNotifier {
       final message = result['message'] ?? 'Something went wrong';
 
       if (message == "Post reported successfully") {
-        setError(''); // Clear errors on success
-
-        // ✅ Show success SnackBar
+        setError('');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.green,
-          ),
+          SnackBar(content: Text(message), backgroundColor: Colors.green),
         );
-
         return true;
       } else {
         setError(message);
-
-        // ❌ Optional: Show failure SnackBar
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(message),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text(message), backgroundColor: Colors.red),
         );
-
         return false;
       }
     } catch (e) {
       final error = 'Unexpected error: ${e.toString()}';
       setError(error);
-
-      // ❌ Show exception SnackBar
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
       );
-
       return false;
     }
   }
 
   Future<void> markPostNotInterested(
-    BuildContext context,
-    String postId,
-  ) async {
+      BuildContext context,
+      String postId,
+      ) async {
     final result = await CommentService.markAsNotInterested(postId: postId);
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result['message']),
         backgroundColor: result['success'] ? Colors.green : Colors.red,
       ),
     );
-
-    if (result['success']) {
-      // Optionally update state or refresh post list
-    }
   }
 
   Future<void> deletePost(BuildContext context, String postId) async {
     final result = await CommentService.deletePost(postId: postId);
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result['message']),
         backgroundColor: result['success'] ? Colors.green : Colors.red,
       ),
     );
-
     if (result['success']) {
       _posts.removeWhere((post) => post.id == postId);
-      print(
-          "Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
-
-
+      _injectedPosts.removeWhere((post) => post.id == postId);
+      print("Deleting post with URL: https://api.ixes.ai/api/post/delete/$postId");
       notifyListeners();
     }
   }
-  // Add these properties at the top with other declarations
-  // Add these properties at the top with other declarations
+
   List<Map<String, dynamic>> _allUsers = [];
   bool _isLoadingUsers = false;
   int _currentUserPage = 1;
   int _totalUserPages = 1;
 
-// Add these getters
   List<Map<String, dynamic>> get allUsers => _allUsers;
   bool get isLoadingUsers => _isLoadingUsers;
   int get currentUserPage => _currentUserPage;
   int get totalUserPages => _totalUserPages;
 
-  /// Fetch all users with pagination and search
   Future<bool> fetchAllUsers({
     String? search,
     int pageNo = 1,
@@ -497,18 +480,13 @@ class CommentProvider with ChangeNotifier {
 
       if (result['success']) {
         final List<dynamic> users = result['allUsers'] ?? [];
-
         if (isLoadMore) {
-          // Append users when loading more
           _allUsers.addAll(users.map((e) => e as Map<String, dynamic>).toList());
         } else {
-          // Replace users on new search or first load
           _allUsers = users.map((e) => e as Map<String, dynamic>).toList();
         }
-
         _currentUserPage = result['currentPage'] ?? 1;
         _totalUserPages = result['totalPage'] ?? 1;
-
         _isLoadingUsers = false;
         notifyListeners();
         return true;
@@ -524,6 +502,7 @@ class CommentProvider with ChangeNotifier {
       return false;
     }
   }
+
   Future<bool> editComment({
     required BuildContext context,
     required String commentId,
@@ -533,7 +512,7 @@ class CommentProvider with ChangeNotifier {
     required int limit,
     String? communityId,
   }) async {
-    // ✅ Optimistic update — change comment content instantly
+    // Optimistic update for _posts
     final postIndex = _posts.indexWhere((p) => p.id == postId);
     if (postIndex != -1) {
       final commentIndex = _posts[postIndex].comments.indexWhere((c) => c.id == commentId);
@@ -550,7 +529,8 @@ class CommentProvider with ChangeNotifier {
         notifyListeners();
       }
     }
-    // Same for communityPosts
+
+    // Optimistic update for _communityPosts
     final cPostIndex = _communityPosts.indexWhere((p) => p.id == postId);
     if (cPostIndex != -1) {
       final commentIndex = _communityPosts[cPostIndex].comments.indexWhere((c) => c.id == commentId);
@@ -563,6 +543,24 @@ class CommentProvider with ChangeNotifier {
           profileImage: _communityPosts[cPostIndex].comments[commentIndex].profileImage,
           isAdmin: _communityPosts[cPostIndex].comments[commentIndex].isAdmin,
           userId: _communityPosts[cPostIndex].comments[commentIndex].userId,
+        );
+        notifyListeners();
+      }
+    }
+
+    // ✅ Optimistic update for _injectedPosts
+    final injPostIndex = _injectedPosts.indexWhere((p) => p.id == postId);
+    if (injPostIndex != -1) {
+      final commentIndex = _injectedPosts[injPostIndex].comments.indexWhere((c) => c.id == commentId);
+      if (commentIndex != -1) {
+        _injectedPosts[injPostIndex].comments[commentIndex] = Comment(
+          id: commentId,
+          content: commentContent,
+          createdAt: _injectedPosts[injPostIndex].comments[commentIndex].createdAt,
+          userName: _injectedPosts[injPostIndex].comments[commentIndex].userName,
+          profileImage: _injectedPosts[injPostIndex].comments[commentIndex].profileImage,
+          isAdmin: _injectedPosts[injPostIndex].comments[commentIndex].isAdmin,
+          userId: _injectedPosts[injPostIndex].comments[commentIndex].userId,
         );
         notifyListeners();
       }
@@ -593,15 +591,24 @@ class CommentProvider with ChangeNotifier {
     required int limit,
     String? communityId,
   }) async {
-    // ✅ Optimistic update — remove comment instantly
+    // Optimistic update for _posts
     final postIndex = _posts.indexWhere((p) => p.id == postId);
     if (postIndex != -1) {
       _posts[postIndex].comments.removeWhere((c) => c.id == commentId);
       notifyListeners();
     }
+
+    // Optimistic update for _communityPosts
     final cPostIndex = _communityPosts.indexWhere((p) => p.id == postId);
     if (cPostIndex != -1) {
       _communityPosts[cPostIndex].comments.removeWhere((c) => c.id == commentId);
+      notifyListeners();
+    }
+
+    // ✅ Optimistic update for _injectedPosts
+    final injPostIndex = _injectedPosts.indexWhere((p) => p.id == postId);
+    if (injPostIndex != -1) {
+      _injectedPosts[injPostIndex].comments.removeWhere((c) => c.id == commentId);
       notifyListeners();
     }
 
@@ -619,14 +626,13 @@ class CommentProvider with ChangeNotifier {
     }
   }
 
-  /// Share a post
   Future<bool> sharePost({
     required BuildContext context,
     required String postId,
-    required String type, // "user" or "group"
-    required String userId, // Receiver ID
-    required String shareContext, // "feed", "campaign", "service", "announcement"
-    String? contextId, // Required if shareContext is not "feed"
+    required String type,
+    required String userId,
+    required String shareContext,
+    String? contextId,
   }) async {
     _isLoading = true;
     notifyListeners();
@@ -643,55 +649,67 @@ class CommentProvider with ChangeNotifier {
       _isLoading = false;
 
       if (result['success']) {
-        // ✅ Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message'] ?? 'Post shared successfully'),
             backgroundColor: Colors.green,
           ),
         );
-
         notifyListeners();
         return true;
       } else {
-        // ❌ Show error message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message'] ?? 'Failed to share post'),
             backgroundColor: Colors.red,
           ),
         );
-
         notifyListeners();
         return false;
       }
     } catch (e) {
       _isLoading = false;
       notifyListeners();
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error sharing post: $e'),
           backgroundColor: Colors.red,
         ),
       );
-
       print('❌ Error in sharePost provider: $e');
       return false;
     }
   }
 
-  /// Clear users list (useful when closing search or user selection dialog)
+  // ✅ FIXED: stores in _injectedPosts separately so it survives feed refreshes
+  void injectSinglePost(Post post) {
+    final idx = _injectedPosts.indexWhere((p) => p.id == post.id);
+    if (idx != -1) {
+      _injectedPosts[idx] = post;
+    } else {
+      _injectedPosts.add(post);
+    }
+    final mainIdx = _posts.indexWhere((p) => p.id == post.id);
+    if (mainIdx != -1) {
+      _posts[mainIdx] = post;
+    } else {
+      _posts.add(post);
+    }
+    notifyListeners();
+  }
+
   void clearUsersList() {
     _allUsers = [];
     _currentUserPage = 1;
     _totalUserPages = 1;
     notifyListeners();
   }
+
   void clearAllData() {
     _posts = [];
     _communityPosts = [];
-    _currentUserId = ''; // ✅ clears stale userId
+    _injectedPosts = [];
+    _currentUserId = '';
     _commentsByPostId.clear();
     notifyListeners();
   }

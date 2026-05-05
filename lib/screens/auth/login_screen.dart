@@ -145,7 +145,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleGoogleSignIn() async {
-    final prefs    = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
     final oldToken = prefs.getString('auth_token');
     if (oldToken != null) {
       await AuthService.logout();
@@ -168,14 +168,18 @@ class _LoginScreenState extends State<LoginScreen>
       );
       final resolvedId = authProvider.user?.id ?? '';
       if (resolvedId.isNotEmpty) {
-        Provider.of<CommentProvider>(context, listen: false).setCurrentUserId(resolvedId);
+        Provider.of<CommentProvider>(context, listen: false)
+            .setCurrentUserId(resolvedId);
       }
       await _saveFcmToken();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 0)));
+          MaterialPageRoute(
+              builder: (_) => const MainScreen(initialIndex: 0)));
     } else {
-      _showSnack(result.message ?? AppLocalizations.instance.googleSignInFailed, isError: true);
+      _showSnack(
+          result.message ?? AppLocalizations.instance.googleSignInFailed,
+          isError: true);
     }
   }
 

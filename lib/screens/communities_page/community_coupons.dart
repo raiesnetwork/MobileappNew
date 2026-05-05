@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../constants/constants.dart';
 import '../../providers/communities_provider.dart';
 
-
 class CommunityCouponsScreen extends StatefulWidget {
   final String communityId;
 
@@ -20,7 +19,6 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
   @override
   void initState() {
     super.initState();
-    // ← wrap in addPostFrameCallback to avoid setState during build
     WidgetsBinding.instance.addPostFrameCallback((_) {
       setState(() {
         _couponsFuture = context
@@ -29,12 +27,21 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
       });
     });
   }
+
+  void _refresh() {
+    setState(() {
+      _couponsFuture = context
+          .read<CommunityProvider>()
+          .fetchCommunityCoupons(widget.communityId);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<CommunityProvider>();
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color(0xFFF7F8FC),
       appBar: AppBar(
         scrolledUnderElevation: 0,
         backgroundColor: Colors.white,
@@ -54,28 +61,24 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
         actions: [
           IconButton(
             icon: Icon(Icons.refresh_rounded, color: Colors.grey[600]),
-            onPressed: () {
-              setState(() {
-                _couponsFuture = context
-                    .read<CommunityProvider>()
-                    .fetchCommunityCoupons(widget.communityId);
-              });
-            },
+            onPressed: _refresh,
           ),
           const SizedBox(width: 4),
         ],
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: Color(0xFFF0F1F5)),
+        ),
       ),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _couponsFuture,
         builder: (context, snapshot) {
-          // Loading
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(
+            return const Center(
               child: CircularProgressIndicator(color: Primary, strokeWidth: 2),
             );
           }
 
-          // Error
           if (snapshot.hasError || provider.couponsError != null) {
             return Center(
               child: Padding(
@@ -87,36 +90,40 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(20),
+                        shape: BoxShape.circle,
                       ),
                       child: Icon(Icons.wifi_off_rounded,
-                          color: Colors.red.shade400, size: 40),
+                          color: Colors.red.shade400, size: 36),
                     ),
                     const SizedBox(height: 20),
+                    const Text(
+                      'Couldn\'t load coupons',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
                     Text(
-                      provider.couponsError ?? 'Failed to load coupons',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      provider.couponsError ?? 'Something went wrong',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: () {
-                        setState(() {
-                          _couponsFuture = context
-                              .read<CommunityProvider>()
-                              .fetchCommunityCoupons(widget.communityId);
-                        });
-                      },
+                    ElevatedButton.icon(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Try Again'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Primary,
                         foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 32, vertical: 14),
+                            horizontal: 28, vertical: 13),
+                        elevation: 0,
                       ),
-                      child: const Text('Try Again',
-                          style: TextStyle(fontWeight: FontWeight.w600)),
                     ),
                   ],
                 ),
@@ -127,7 +134,6 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
           final coupons =
               provider.communityCoupons['coupons'] as List<dynamic>? ?? [];
 
-          // Empty
           if (coupons.isEmpty) {
             return Center(
               child: Padding(
@@ -165,27 +171,16 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
             );
           }
 
-          // List — reusing exact same _CouponCard from CouponListScreen
           return RefreshIndicator(
             color: Primary,
-            onRefresh: () async {
-              setState(() {
-                _couponsFuture = context
-                    .read<CommunityProvider>()
-                    .fetchCommunityCoupons(widget.communityId);
-              });
-            },
+            onRefresh: () async => _refresh(),
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               itemCount: coupons.length,
               itemBuilder: (context, index) {
                 final coupon =
                 Map<String, dynamic>.from(coupons[index] as Map);
-                return _CouponCard(
-                  coupon: coupon,
-                  isCreated: false, // community coupons are view-only
-                  onSend: null,
-                );
+                return _CouponCard(coupon: coupon);
               },
             ),
           );
@@ -194,16 +189,11 @@ class _CommunityCouponsScreenState extends State<CommunityCouponsScreen> {
     );
   }
 }
+
 class _CouponCard extends StatelessWidget {
   final Map<String, dynamic> coupon;
-  final bool isCreated;
-  final VoidCallback? onSend;
 
-  const _CouponCard({
-    required this.coupon,
-    required this.isCreated,
-    this.onSend,
-  });
+  const _CouponCard({required this.coupon});
 
   @override
   Widget build(BuildContext context) {
@@ -212,58 +202,60 @@ class _CouponCard extends StatelessWidget {
     final discountText = _discountText();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isExpired ? Colors.grey.shade200 : typeColor.withOpacity(0.2),
+          color: isExpired
+              ? Colors.grey.shade200
+              : typeColor.withOpacity(0.18),
+          width: 1,
         ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Column(
         children: [
-          // Top colored strip
+          // ── Header strip ──────────────────────────────────────────
           Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
             decoration: BoxDecoration(
               color: isExpired
                   ? Colors.grey.shade50
                   : typeColor.withOpacity(0.06),
               borderRadius:
-              const BorderRadius.vertical(top: Radius.circular(15)),
+              const BorderRadius.vertical(top: Radius.circular(17)),
               border: Border(
                 bottom: BorderSide(
                   color: isExpired
                       ? Colors.grey.shade100
-                      : typeColor.withOpacity(0.12),
+                      : typeColor.withOpacity(0.1),
                 ),
               ),
             ),
             child: Row(
               children: [
+                // Type badge
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: isExpired
                         ? Colors.grey.shade100
-                        : typeColor.withOpacity(0.1),
+                        : typeColor.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(_typeIcon(),
-                          color: isExpired ? Colors.grey : typeColor,
-                          size: 12),
+                          color: isExpired ? Colors.grey : typeColor, size: 12),
                       const SizedBox(width: 5),
                       Text(
                         _typeLabel().toUpperCase(),
@@ -278,10 +270,11 @@ class _CouponCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
+                // Expired badge
                 if (isExpired)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
                       color: Colors.red.shade50,
                       borderRadius: BorderRadius.circular(20),
@@ -295,13 +288,47 @@ class _CouponCard extends StatelessWidget {
                         letterSpacing: 1,
                       ),
                     ),
+                  )
+                // Active badge
+                else
+                  Container(
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          'ACTIVE',
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
               ],
             ),
           ),
 
+          // ── Body ─────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -313,23 +340,23 @@ class _CouponCard extends StatelessWidget {
                       child: Text(
                         coupon['name'] ?? 'Unnamed Coupon',
                         style: TextStyle(
-                          color: isExpired
-                              ? Colors.grey
-                              : Colors.black87,
+                          color: isExpired ? Colors.grey : Colors.black87,
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          height: 1.3,
                         ),
                       ),
                     ),
-                    if (discountText.isNotEmpty)
+                    if (discountText.isNotEmpty) ...[
+                      const SizedBox(width: 10),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
+                            horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color: isExpired
                               ? Colors.grey.shade100
                               : Primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           discountText,
@@ -340,27 +367,28 @@ class _CouponCard extends StatelessWidget {
                           ),
                         ),
                       ),
+                    ],
                   ],
                 ),
 
                 if (coupon['details'] != null &&
                     coupon['details'].toString().isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Text(
                     coupon['details'],
-                    style: TextStyle(
-                        color: Colors.grey[500], fontSize: 12),
+                    style:
+                    TextStyle(color: Colors.grey[500], fontSize: 13, height: 1.4),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
 
-                // Dashed divider
+                // ── Dashed divider ──
                 Row(
                   children: List.generate(
-                    30,
+                    40,
                         (i) => Expanded(
                       child: Container(
                         height: 1,
@@ -372,65 +400,87 @@ class _CouponCard extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
 
-                // Code strip
+                // ── Code strip ──
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+                      horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
                     color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: Row(
                     children: [
                       Icon(Icons.confirmation_number_outlined,
-                          color: Colors.grey[400], size: 15),
-                      const SizedBox(width: 8),
+                          color: Colors.grey[400], size: 16),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           coupon['code'] ?? '—',
                           style: const TextStyle(
                             color: Colors.black87,
-                            fontSize: 14,
+                            fontSize: 15,
                             fontWeight: FontWeight.w700,
-                            letterSpacing: 2,
+                            letterSpacing: 2.5,
                           ),
                         ),
                       ),
                       GestureDetector(
                         onTap: () {
-                          Clipboard.setData(ClipboardData(
-                              text: coupon['code'] ?? ''));
+                          Clipboard.setData(
+                              ClipboardData(text: coupon['code'] ?? ''));
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: const Text('Code copied!'),
+                              content: const Row(
+                                children: [
+                                  Icon(Icons.check_circle_rounded,
+                                      color: Colors.white, size: 16),
+                                  SizedBox(width: 8),
+                                  Text('Code copied!'),
+                                ],
+                              ),
                               backgroundColor: Primary,
                               behavior: SnackBarBehavior.floating,
-                              duration: const Duration(seconds: 1),
+                              duration: const Duration(seconds: 2),
                               shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8)),
+                                  borderRadius: BorderRadius.circular(10)),
+                              margin: const EdgeInsets.all(16),
                             ),
                           );
                         },
                         child: Container(
-                          padding: const EdgeInsets.all(6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
                             color: Primary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Icon(Icons.copy_rounded,
-                              color: Primary, size: 14),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.copy_rounded, color: Primary, size: 13),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Copy',
+                                style: TextStyle(
+                                  color: Primary,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
 
-                // Expiry row
+                // ── Expiry row ──
                 Row(
                   children: [
                     Icon(
@@ -448,72 +498,15 @@ class _CouponCard extends StatelessWidget {
                       style: TextStyle(
                         color: isExpired
                             ? Colors.red.shade400
-                            : Colors.grey[400],
-                        fontSize: 11,
+                            : Colors.grey[500],
+                        fontSize: 12,
                         fontWeight: isExpired
                             ? FontWeight.w600
-                            : FontWeight.normal,
+                            : FontWeight.w400,
                       ),
                     ),
                   ],
                 ),
-
-                // Action buttons
-                if (!isExpired) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      if (isCreated && onSend != null) ...[
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: onSend,
-                            icon: const Icon(Icons.send_rounded,
-                                size: 14),
-                            label: const Text('Send'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Primary,
-                              side: BorderSide(
-                                  color: Primary.withOpacity(0.4)),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius:
-                                  BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 10),
-                              textStyle: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                      ],
-                      if (coupon['link'] != null &&
-                          coupon['link'].toString().isNotEmpty)
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () {},
-                            icon: const Icon(
-                                Icons.open_in_new_rounded,
-                                size: 14),
-                            label: const Text('Use Now'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Primary,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius:
-                                  BorderRadius.circular(10)),
-                              padding: const EdgeInsets.symmetric(
-                                  vertical: 10),
-                              elevation: 0,
-                              textStyle: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
               ],
             ),
           ),
@@ -563,7 +556,6 @@ class _CouponCard extends StatelessWidget {
     try {
       return DateTime.parse(coupon['expiry']).isBefore(DateTime.now());
     } catch (_) {
-
       return false;
     }
   }

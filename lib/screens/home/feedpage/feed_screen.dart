@@ -226,6 +226,11 @@ class _FeedScreenState extends State<FeedScreen> {
         if (postJson != null) {
           try {
             final targetPost = Post.fromJson(postJson);
+
+            // ✅ FIX: inject into provider so getCommentsForPost can find it
+            final provider = context.read<CommentProvider>();
+            provider.injectSinglePost(targetPost);
+
             setState(() {
               posts = [targetPost];
               _originalPosts = [targetPost];
@@ -240,7 +245,7 @@ class _FeedScreenState extends State<FeedScreen> {
         }
       }
 
-      // ✅ FIX: show empty state instead of loading ALL posts
+      // ✅ show empty state instead of loading ALL posts
       setState(() {
         posts = [];
         _originalPosts = [];
@@ -264,16 +269,17 @@ class _FeedScreenState extends State<FeedScreen> {
     setState(() => isLoadingMore = true);
 
     final provider = context.read<CommentProvider>();
+    final offset = _currentPage * _postsPerPage;
 
     if (isCommunityFeed) {
       await provider.fetchCommunityPosts(
         communityId: widget.communityId!,
-        offset: _currentPage * _postsPerPage,
+        offset: offset,
         limit: _postsPerPage,
       );
     } else {
       await provider.fetchAllPosts(
-        offset: _currentPage * _postsPerPage,
+        offset: offset,
         limit: _postsPerPage,
         isRefresh: false,
       );
@@ -285,15 +291,19 @@ class _FeedScreenState extends State<FeedScreen> {
         ? provider.communityPosts
         : provider.posts;
 
+    final previousCount = posts.length;
+
     setState(() {
-      posts = List.from(currentPosts);        // ✅ Provider already appends
+      posts = List.from(currentPosts);
       _originalPosts = List.from(currentPosts);
       _allPostsCache = List.from(currentPosts);
-      _currentPage++;                          // ✅ Increment, don't reset
-      _hasMorePosts = currentPosts.length >= _currentPage * _postsPerPage;
-      isLoadingMore = false;                   // ✅ Was missing!
+      _currentPage++;
+      // ✅ If no new posts were added, there are no more pages
+      _hasMorePosts = currentPosts.length > previousCount;
+      isLoadingMore = false;
     });
   }
+
 
 
 

@@ -122,7 +122,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen>
           ),
         ],
       ),
-      floatingActionButton: _buildFAB(),
+
     );
   }
 
@@ -310,39 +310,7 @@ class _CommunityCampaignsScreenState extends State<CommunityCampaignsScreen>
     );
   }
 
-  Widget _buildFAB() {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: _accent.withOpacity(0.30),
-              blurRadius: 20,
-              offset: const Offset(0, 8)),
-        ],
-      ),
-      child: FloatingActionButton.extended(
-        onPressed: () {
-          HapticFeedback.mediumImpact();
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-                  CreateCampaignScreen(communityId: widget.communityId),
-            ),
-          );
-        },
-        backgroundColor: _accent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        icon: const Icon(Icons.add_rounded),
-        label: const Text('New Campaign',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-    );
-  }
+
 }
 
 // ─── Animated Campaign Card ───────────────────────────────────────────────────

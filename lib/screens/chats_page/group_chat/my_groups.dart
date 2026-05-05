@@ -590,25 +590,7 @@ class _MyGroupsScreenState extends State<MyGroupsScreen>
         child: Container(height: 1, color: kBorder),
       ),
       actions: [
-        IconButton(
-          onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const GroupListScreen())),
-          icon: const Icon(Icons.explore_outlined,
-              color: kPrimary, size: 22),
-          tooltip: 'Discover Groups',
-        ),
-        TextButton(
-          onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => GroupRequestScreen())),
-          style: TextButton.styleFrom(
-              foregroundColor: kPrimary,
-              padding:
-              const EdgeInsets.symmetric(horizontal: 12)),
-          child: const Text('Requests',
-              style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w600)),
-        ),
-        const SizedBox(width: 4),
+
       ],
     );
   }

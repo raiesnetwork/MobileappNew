@@ -160,20 +160,19 @@ class VoiceCallService {
   // ============================================================================
   Future<Map<String, dynamic>?> checkUserBusy(String receiverId) async {
     try {
-      if (_socket == null || _socket?.connected != true) {
-        debugPrint('⚠️ Socket not connected for busy check');
-        return null;
-      }
+      if (_socket == null || _socket?.connected != true) return null;
+
+      // ✅ Ensure only one listener at a time
+      _socket!.off('user-busy-voice-response');
 
       final completer = Completer<Map<String, dynamic>?>();
-      debugPrint('🔍 Checking if user $receiverId is busy...');
 
       _socket!.emitWithAck(
         'user-busy-voice',
         {'receiverId': receiverId},
         ack: (data) {
+          if (completer.isCompleted) return; // ✅ ignore duplicate responses
           try {
-            debugPrint('📨 Received busy check response: $data');
             if (data == null) {
               completer.complete(null);
             } else if (data is Map) {
@@ -184,18 +183,14 @@ class VoiceCallService {
               completer.complete(null);
             }
           } catch (e) {
-            debugPrint('❌ Error parsing busy check response: $e');
-            completer.completeError(e);
+            if (!completer.isCompleted) completer.completeError(e);
           }
         },
       );
 
       return await completer.future.timeout(
         const Duration(seconds: 5),
-        onTimeout: () {
-          debugPrint('⏱️ Check user busy timed out');
-          return null;
-        },
+        onTimeout: () => null,
       );
     } catch (e) {
       debugPrint('❌ Error checking user busy: $e');

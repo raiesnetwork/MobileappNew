@@ -24,6 +24,7 @@ class AuthProvider with ChangeNotifier {
   String get errorMessage => _errorMessage;
   bool get isAuthenticated => _user != null;
   bool get isInitialized => _isInitialized;
+  bool _isLoggingOut = false;
 
   void _setLoading(bool loading) { _isLoading = loading; notifyListeners(); }
   void _setError(String error) { _errorMessage = error; notifyListeners(); }
@@ -192,14 +193,15 @@ class AuthProvider with ChangeNotifier {
   // ✅ Same FCM clear fix — another device stole session, still need to clear token
   // ============================================================================
   Future<void> forceLogout() async {
-    if (_user == null) return;
+    if (_user == null || _isLoggingOut) return; // ← ADD _isLoggingOut check
+    _isLoggingOut = true;
+
     debugPrint('🔐 [FORCE LOGOUT] Session expired');
 
-    // ✅ Clear FCM token BEFORE clearing local auth data
     await FcmService.clearFcmToken();
-
     await _clearUserData();
     _user = null;
+    _isLoggingOut = false; // ← reset
     notifyListeners();
 
     final context = navigatorKey.currentContext;

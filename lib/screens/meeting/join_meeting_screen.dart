@@ -3,10 +3,17 @@ import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/meeting/waiting_approval_screeen.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../providers/auth_provider.dart';
 import 'meeting_rooom_screen.dart';
 
 class JoinMeetingScreen extends StatefulWidget {
-  const JoinMeetingScreen({Key? key}) : super(key: key);
+  final String? prefilledMeetingId; // ✅ ADD THIS
+
+  const JoinMeetingScreen({
+    Key? key,
+    this.prefilledMeetingId, // ✅ ADD THIS
+  }) : super(key: key);
 
   @override
   State<JoinMeetingScreen> createState() => _JoinMeetingScreenState();
@@ -18,9 +25,16 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
   bool _isJoining = false;
 
   @override
-  void dispose() {
-    _meetingIdController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+
+    // ✅ ADD THIS — if opened via deep link, prefill and auto join
+    if (widget.prefilledMeetingId != null) {
+      _meetingIdController.text = widget.prefilledMeetingId!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _joinMeeting(context);
+      });
+    }
   }
 
   @override
@@ -255,17 +269,30 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     setState(() => _isJoining = true);
 
     final provider = context.read<MeetingProvider>();
+    final authProvider = context.read<AuthProvider>();
 
-    // ← Extract ID from full link or use as-is
+    // ✅ Initialize provider first — CRITICAL
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    final userId = authProvider.user?.id ?? 'user-${DateTime.now().millisecondsSinceEpoch}';
+    final userName = authProvider.user?.username ?? 'User';
+
+    provider.initialize(
+      userId: userId,
+      userName: userName,
+      authToken: authToken,
+    );
+
+    // wait for socket to connect
+    await Future.delayed(const Duration(milliseconds: 800));
+
     String input = _meetingIdController.text.trim();
     String meetingId = input;
 
-    // If user pasted a full URL, extract just the ID
     if (input.startsWith('http://') || input.startsWith('https://')) {
       try {
         final uri = Uri.parse(input);
         final segments = uri.pathSegments;
-        // URL format: https://ixes.ai/meeting/MEETING_ID
         if (segments.length >= 2 && segments[0] == 'meeting') {
           meetingId = segments[1];
         } else if (segments.isNotEmpty) {
@@ -276,23 +303,49 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
       }
     }
 
-    print('🎯 Extracted meetingId: $meetingId from input: $input');
-
     provider.clearMessages();
+
+    // ✅ KEY FIX — check isHost FIRST, then route to correct flow
     await provider.requestToJoinMeeting(meetingId);
 
     setState(() => _isJoining = false);
 
     if (!mounted) return;
 
-    if (provider.joinStatus == JoinStatus.approved) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => MeetingRoomScreen(meetingId: meetingId),
-        ),
+    // ✅ If server says isHost → use host flow, not participant flow
+    if (provider.isHost) {
+      // Re-initialize as host properly
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
       );
+
+      await provider.joinAsMeetingHost(meetingId);
+
+      if (mounted) Navigator.pop(context); // close loading
+
+      if (provider.accessToken != null) {
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MeetingRoomScreen(meetingId: meetingId),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(provider.errorMessage ?? 'Failed to start meeting'),
+              backgroundColor: Colors.red[700],
+            ),
+          );
+        }
+      }
     } else if (provider.joinStatus == JoinStatus.requesting) {
+      // Normal participant — go to waiting screen
       Navigator.push(
         context,
         MaterialPageRoute(

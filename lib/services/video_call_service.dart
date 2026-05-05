@@ -129,21 +129,26 @@ class VideoCallService {
 
       final completer = Completer<Map<String, dynamic>?>();
 
-      _socket!.emitWithAck('user-busy', {'receiverId': receiverId}, ack: (data) {
-        try {
-          if (data == null) {
-            completer.complete(null);
-          } else if (data is Map) {
-            completer.complete(Map<String, dynamic>.from(data));
-          } else if (data is List && data.isNotEmpty && data[0] is Map) {
-            completer.complete(Map<String, dynamic>.from(data[0]));
-          } else {
-            completer.complete(null);
+      _socket!.emitWithAck(
+        'user-busy',
+        {'receiverId': receiverId},
+        ack: (data) {
+          if (completer.isCompleted) return; // ✅ ignore duplicate responses
+          try {
+            if (data == null) {
+              completer.complete(null);
+            } else if (data is Map) {
+              completer.complete(Map<String, dynamic>.from(data));
+            } else if (data is List && data.isNotEmpty && data[0] is Map) {
+              completer.complete(Map<String, dynamic>.from(data[0]));
+            } else {
+              completer.complete(null);
+            }
+          } catch (e) {
+            if (!completer.isCompleted) completer.completeError(e);
           }
-        } catch (e) {
-          completer.completeError(e);
-        }
-      });
+        },
+      );
 
       return await completer.future.timeout(
         const Duration(seconds: 5),

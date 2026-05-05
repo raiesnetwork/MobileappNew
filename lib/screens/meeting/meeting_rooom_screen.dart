@@ -44,6 +44,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   @override
   void initState() {
     super.initState();
+    _initFlutterBackground(); // ✅ add this line
     _checkAndRestoreFromOverlay();
     final overlayService = MeetingOverlayService();
     overlayService.addListener(_onOverlayUpdate);
@@ -55,6 +56,25 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         _isVideoEnabled = _localParticipant!.isCameraEnabled();
         _isAudioEnabled = _localParticipant!.isMicrophoneEnabled();
       });
+    }
+  }
+  Future<void> _initFlutterBackground() async {
+    if (!Platform.isAndroid) return;
+    try {
+      const androidConfig = FlutterBackgroundAndroidConfig(
+        notificationTitle: 'Screen Sharing',
+        notificationText: 'Your screen is being shared',
+        notificationImportance: AndroidNotificationImportance.normal,
+        notificationIcon: AndroidResource(
+          name: 'ic_launcher',
+          defType: 'mipmap',
+        ),
+      );
+      final initialized = await FlutterBackground.initialize(
+          androidConfig: androidConfig);
+      debugPrint('✅ FlutterBackground initialized: $initialized');
+    } catch (e) {
+      debugPrint('⚠️ FlutterBackground init error: $e');
     }
   }
 
@@ -289,8 +309,12 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Future<void> _initializeMeeting() async {
     final meetingProvider = context.read<MeetingProvider>();
 
+    // ✅ Only rejoin as host AFTER room connects, not before
     await _connectToRoom();
     if (_room == null) return;
+
+    // ✅ Small delay to let room stabilize before emitting socket events
+    await Future.delayed(const Duration(milliseconds: 800));
 
     if (meetingProvider.isHost) {
       await meetingProvider.rejoinAsHost();
@@ -308,22 +332,56 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     try {
       final meetingProvider = context.read<MeetingProvider>();
-      final accessToken = meetingProvider.accessToken;
+      String? accessToken = meetingProvider.accessToken;
 
       if (accessToken == null) throw Exception('No access token available');
 
       _room = Room();
       _setupRoomListeners();
 
-      await _room!.connect(
-        'wss://meet.ixes.ai',
-        accessToken,
-        roomOptions: const RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
-          defaultVideoPublishOptions: VideoPublishOptions(simulcast: true),
-        ),
-      );
+      // ✅ Retry up to 2 times if stateMismatch occurs
+      int attempts = 0;
+      bool connected = false;
+
+      while (attempts < 2 && !connected) {
+        try {
+          attempts++;
+          debugPrint('🔌 Connect attempt $attempts...');
+
+          // ✅ Fetch fresh token on retry
+          if (attempts > 1) {
+            debugPrint('🔄 Fetching fresh token for retry...');
+            final refreshed = await meetingProvider
+                .fetchAccessTokenAfterApproval(meetingProvider.currentMeetingId!);
+            if (!refreshed) throw Exception('Failed to refresh token');
+            accessToken = meetingProvider.accessToken;
+            if (accessToken == null) throw Exception('No token after refresh');
+
+            // Fresh room for retry
+            await _room?.dispose();
+            _room = Room();
+            _setupRoomListeners();
+          }
+
+          await _room!.connect(
+            'wss://meet.ixes.ai',
+            accessToken!,
+            roomOptions: const RoomOptions(
+              adaptiveStream: true,
+              dynacast: true,
+              defaultVideoPublishOptions:
+              VideoPublishOptions(simulcast: true),
+            ),
+          );
+
+          connected = true;
+          debugPrint('✅ Room connected on attempt $attempts');
+        } catch (e) {
+          debugPrint('❌ Connect attempt $attempts failed: $e');
+          if (attempts >= 2) rethrow;
+          await Future.delayed(const Duration(milliseconds: 1500));
+        }
+      }
 
       await _room!.localParticipant?.setCameraEnabled(_isVideoEnabled);
       await _room!.localParticipant?.setMicrophoneEnabled(_isAudioEnabled);
@@ -332,7 +390,10 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         _localParticipant = _room!.localParticipant;
         _isConnecting = false;
       });
+
+      _updateParticipants();
     } catch (e) {
+      debugPrint('❌ _connectToRoom failed: $e');
       setState(() {
         _errorMessage = 'Failed to connect to meeting: $e';
         _isConnecting = false;
@@ -383,59 +444,121 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         _updateParticipants();
       })
       ..on<TrackSubscribedEvent>((event) {
-        debugPrint('📹 Track subscribed');
+        debugPrint('📹 Track subscribed: ${event.participant.identity}');
         _updateParticipants();
       })
       ..on<TrackUnsubscribedEvent>((event) {
         debugPrint('📹 Track unsubscribed');
+        _updateParticipants();
+      })
+      ..on<TrackMutedEvent>((event) {
+        debugPrint('🔇 Track muted: ${event.participant.identity} | source: ${event.publication.source}');
+        _updateParticipants();
+      })
+      ..on<TrackUnmutedEvent>((event) {
+        debugPrint('🔊 Track unmuted: ${event.participant.identity} | source: ${event.publication.source}');
         _updateParticipants();
       });
   }
 
   void _onRoomUpdate() => _updateParticipants();
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // UPDATE PARTICIPANTS — separates camera vs screen share tracks
-  // ─────────────────────────────────────────────────────────────────────────
   void _updateParticipants() {
     if (_room == null) return;
 
     final cameras = <ParticipantTrack>[];
     final screens = <ParticipantTrack>[];
 
-    // Local participant
+    // ── Local participant ─────────────────────────────────────────
+    VideoTrack? localVideoTrack;
+    TrackPublication? localPub;
+
     for (var pub in _room!.localParticipant!.trackPublications.values) {
-      if (pub.track != null && pub.kind == TrackType.VIDEO) {
-        final track = ParticipantTrack(
-          participant: _room!.localParticipant!,
-          videoTrack: pub.track as VideoTrack?,
-          publication: pub,
-          isScreenShare: pub.source == TrackSource.screenShareVideo,
-        );
+      if (pub.kind == TrackType.VIDEO) {
         if (pub.source == TrackSource.screenShareVideo) {
-          screens.add(track);
+          screens.add(ParticipantTrack(
+            participant: _room!.localParticipant!,
+            videoTrack: pub.track as VideoTrack?,
+            publication: pub,
+            isScreenShare: true,
+          ));
         } else {
-          cameras.add(track);
+          localVideoTrack = pub.track as VideoTrack?;
+          localPub = pub;
         }
       }
     }
 
-    // Remote participants
+    if (localPub != null) {
+      cameras.add(ParticipantTrack(
+        participant: _room!.localParticipant!,
+        videoTrack: localVideoTrack,
+        publication: localPub,
+        isScreenShare: false,
+      ));
+    } else {
+      final anyPub = _room!.localParticipant!.trackPublications.values.isNotEmpty
+          ? _room!.localParticipant!.trackPublications.values.first
+          : null;
+      if (anyPub != null) {
+        cameras.add(ParticipantTrack(
+          participant: _room!.localParticipant!,
+          videoTrack: null,
+          publication: anyPub,
+          isScreenShare: false,
+        ));
+      }
+    }
+
+    // ── Remote participants ───────────────────────────────────────
     for (var participant in _room!.remoteParticipants.values) {
+      VideoTrack? cameraTrack;
+      TrackPublication? camPub;
+      TrackPublication? anyPub;
+
+      // ✅ Force-subscribe any unsubscribed audio tracks
       for (var pub in participant.trackPublications.values) {
-        if (pub.track != null && pub.kind == TrackType.VIDEO) {
-          final track = ParticipantTrack(
-            participant: participant,
-            videoTrack: pub.track as VideoTrack?,
-            publication: pub,
-            isScreenShare: pub.source == TrackSource.screenShareVideo,
-          );
+        if (pub.kind == TrackType.AUDIO &&
+            pub is RemoteTrackPublication &&
+            pub.subscribed == false) {
+          debugPrint('🔊 Force-subscribing audio for ${participant.identity}');
+          pub.subscribe();
+        }
+      }
+
+      for (var pub in participant.trackPublications.values) {
+        anyPub = pub;
+        if (pub.kind == TrackType.VIDEO) {
           if (pub.source == TrackSource.screenShareVideo) {
-            screens.add(track);
+            screens.add(ParticipantTrack(
+              participant: participant,
+              videoTrack: pub.track as VideoTrack?,
+              publication: pub,
+              isScreenShare: true,
+            ));
           } else {
-            cameras.add(track);
+            cameraTrack = pub.track as VideoTrack?;
+            camPub = pub;
           }
         }
+      }
+
+      if (camPub != null) {
+        cameras.add(ParticipantTrack(
+          participant: participant,
+          videoTrack: cameraTrack,
+          publication: camPub,
+          isScreenShare: false,
+        ));
+      } else if (anyPub != null) {
+        cameras.add(ParticipantTrack(
+          participant: participant,
+          videoTrack: null,
+          publication: anyPub,
+          isScreenShare: false,
+        ));
+      } else {
+        debugPrint('⚠️ Participant ${participant.identity} has no tracks yet');
       }
     }
 
@@ -443,14 +566,30 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       setState(() {
         _screenShareTracks = screens;
         _cameraTrack = cameras;
-        _participantTracks = [...cameras, ...screens]; // for count badge
+        _participantTracks = [...cameras, ...screens];
       });
     }
   }
+  bool _isParticipantMicOn(Participant participant) {
+    for (final pub in participant.trackPublications.values) {
+      if (pub.kind == TrackType.AUDIO &&
+          pub.source == TrackSource.microphone) {
+        return pub.muted != true;
+      }
+    }
+    return false;
+  }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // BUILD
-  // ─────────────────────────────────────────────────────────────────────────
+  bool _isParticipantCameraOn(Participant participant) {
+    for (final pub in participant.trackPublications.values) {
+      if (pub.kind == TrackType.VIDEO &&
+          pub.source == TrackSource.camera) {
+        return pub.muted != true;
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -841,6 +980,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     final videoTrack = track.videoTrack;
     final isScreenShare = track.isScreenShare;
 
+    final bool micOn = _isParticipantMicOn(participant);
+
     return Container(
       color: const Color(0xFF1A1A1A),
       child: Stack(
@@ -863,8 +1004,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               top: 8,
               left: 8,
               child: Container(
-                padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.green.withOpacity(0.85),
                   borderRadius: BorderRadius.circular(12),
@@ -895,8 +1035,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.black.withOpacity(0.6),
                     borderRadius: BorderRadius.circular(20),
@@ -906,12 +1045,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     children: [
                       if (!isScreenShare) ...[
                         Icon(
-                          participant.isMicrophoneEnabled()
-                              ? Icons.mic
-                              : Icons.mic_off,
-                          color: participant.isMicrophoneEnabled()
-                              ? Colors.white
-                              : Colors.red,
+                          micOn ? Icons.mic : Icons.mic_off,
+                          color: micOn ? Colors.white : Colors.red,
                           size: 14,
                         ),
                         const SizedBox(width: 4),
@@ -1567,6 +1702,9 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         : participant.identity);
     final provider = context.watch<MeetingProvider>();
 
+    final bool micOn    = _isParticipantMicOn(participant);
+    final bool cameraOn = _isParticipantCameraOn(participant);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(12),
@@ -1602,10 +1740,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      gradient: const LinearGradient(colors: [
-                        Color(0xFF2196F3),
-                        Color(0xFF1976D2)
-                      ]),
+                      gradient: const LinearGradient(
+                          colors: [Color(0xFF2196F3), Color(0xFF1976D2)]),
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: const Text('HOST',
@@ -1623,38 +1759,26 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: participant.isMicrophoneEnabled()
-                      ? Colors.grey[100]
-                      : Colors.red[50],
+                  color: micOn ? Colors.grey[100] : Colors.red[50],
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(
-                  participant.isMicrophoneEnabled()
-                      ? Icons.mic
-                      : Icons.mic_off,
+                  micOn ? Icons.mic : Icons.mic_off,
                   size: 16,
-                  color: participant.isMicrophoneEnabled()
-                      ? Colors.grey[700]
-                      : Colors.red,
+                  color: micOn ? Colors.grey[700] : Colors.red,
                 ),
               ),
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: participant.isCameraEnabled()
-                      ? Colors.grey[100]
-                      : Colors.red[50],
+                  color: cameraOn ? Colors.grey[100] : Colors.red[50],
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(
-                  participant.isCameraEnabled()
-                      ? Icons.videocam
-                      : Icons.videocam_off,
+                  cameraOn ? Icons.videocam : Icons.videocam_off,
                   size: 16,
-                  color: participant.isCameraEnabled()
-                      ? Colors.grey[700]
-                      : Colors.red,
+                  color: cameraOn ? Colors.grey[700] : Colors.red,
                 ),
               ),
               if (provider.isHost && !isLocal) ...[
@@ -1665,13 +1789,11 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: IconButton(
-                    icon:
-                    const Icon(Icons.person_remove, size: 16),
+                    icon: const Icon(Icons.person_remove, size: 16),
                     color: Colors.red,
                     padding: const EdgeInsets.all(6),
                     constraints: const BoxConstraints(),
-                    onPressed: () =>
-                        _kickParticipant(participant.identity),
+                    onPressed: () => _kickParticipant(participant.identity),
                     tooltip: 'Remove participant',
                   ),
                 ),

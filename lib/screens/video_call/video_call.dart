@@ -13,6 +13,8 @@ import 'dart:convert';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 
+import '../../services/api_service.dart';
+
 class VideoCallScreen extends StatefulWidget {
   // ✅ fromFcmAutoAccept: true when opened via Answer tap from killed state.
   // When true, closing navigates to MainScreen instead of pop()
@@ -134,35 +136,36 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
 
   Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token') ?? '';
-      final response = await http.get(
-        Uri.parse('https://api.ixes.ai/api/chat/get-turn-credentials'),
-        headers: {
-          'Authorization': 'Bearer $token',
-          'Content-Type': 'application/json'
-        },
-      ).timeout(const Duration(seconds: 5));
+      // ✅ Use ApiService.get() instead of raw http.get — includes x-platform header
+      final response = await ApiService.get('/api/chat/get-turn-credentials');
+
       if (response.statusCode == 200) {
         final body = json.decode(response.body);
-        final data = body['data'] as Map<String, dynamic>;
-        final iceList = data['iceServers'] as List<dynamic>;
-        debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
-        return iceList.map((server) {
-          final s = server as Map<String, dynamic>;
-          final urls = s['urls']?.toString() ?? s['url']?.toString() ?? '';
-          final username = s['username']?.toString();
-          final credential = s['credential']?.toString();
-          return RTCIceServer(
-              urls: [urls], username: username, credential: credential);
-        }).toList();
+        final data = body['data'] as Map<String, dynamic>?;
+        final iceList = (data?['iceServers'] ?? data?['ice_servers']) as List<dynamic>?;
+
+        if (iceList != null && iceList.isNotEmpty) {
+          debugPrint('✅ Got ${iceList.length} ICE servers from Twilio');
+          return iceList.map((server) {
+            final s = server as Map<String, dynamic>;
+            final rawUrl = s['urls'] ?? s['url'];
+            final urlString = rawUrl?.toString() ?? '';
+            final username = s['username']?.toString();
+            final credential = s['credential']?.toString();
+            return RTCIceServer(
+              urls: [urlString],
+              username: username,
+              credential: credential,
+            );
+          }).toList();
+        }
       }
+      debugPrint('⚠️ ICE fetch failed: ${response.statusCode} ${response.body}');
     } catch (e) {
-      debugPrint('⚠️ Could not fetch ICE servers: $e — using defaults');
+      debugPrint('⚠️ Could not fetch ICE servers: $e');
     }
-    return [
-      RTCIceServer(urls: ['stun:stun.l.google.com:19302'])
-    ];
+
+    return [RTCIceServer(urls: ['stun:stun.l.google.com:19302'])];
   }
 
   Future<void> _joinRoom() async {
@@ -208,7 +211,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
         connectOptions: ConnectOptions(
           rtcConfiguration: RTCConfiguration(
             iceServers: iceServers,
-            iceTransportPolicy: RTCIceTransportPolicy.relay,
+
           ),
         ),
       );

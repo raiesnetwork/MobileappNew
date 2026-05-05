@@ -40,10 +40,6 @@ class GoogleAuthResponse {
 class GoogleAuthService {
   // ── Configuration ──────────────────────────────────────────────────────────
 
-
-
-
-
   static const String _googleMobileEndpoint = 'api/auth/google/mobile';
 
   static const String _serverClientId =
@@ -118,7 +114,7 @@ class GoogleAuthService {
 
   /// POSTs the Google ID Token to the backend and returns the JWT response.
   ///
-  /// Expected request body:  { "idToken": "<google_id_token>" }
+  /// Expected request body:  { "idToken": "<google_id_token>", "platform": "mobile" }
   /// Expected success response: { "success": true, "token": "<jwt>", "user": { ... } }
   /// Expected failure response: { "success": false, "message": "<error>" }
   Future<GoogleAuthResponse> _sendTokenToBackend(String idToken) async {
@@ -130,10 +126,14 @@ class GoogleAuthService {
       final http.Response response = await http
           .post(
         url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'idToken': idToken}),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-platform': 'mobile',
+        },
+        body: jsonEncode({'idToken': idToken, 'platform': 'mobile'}), // ✅ added platform
       )
           .timeout(const Duration(seconds: 30));
+
 
       debugPrint('GoogleAuthService: Backend status → ${response.statusCode}');
 

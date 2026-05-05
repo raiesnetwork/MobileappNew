@@ -59,18 +59,7 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
     final filteredProducts = _filterProducts(servicesProvider.myProducts);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'My Products',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Primary,
-          ),
-        ),
-        backgroundColor: Colors.white,
-        elevation: 2,
-      ),
+
       body: Column(
         children: [
           // Search and Filter Section

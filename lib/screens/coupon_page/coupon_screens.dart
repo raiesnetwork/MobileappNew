@@ -54,11 +54,7 @@ class _CouponListScreenState extends State<CouponListScreen>
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.qr_code_scanner_rounded, color: Primary),
-            onPressed: _showVerifySheet,
-            tooltip: 'Apply Coupon',
-          ),
+
           IconButton(
             icon: Icon(Icons.refresh_rounded, color: Colors.grey[600]),
             onPressed: () =>

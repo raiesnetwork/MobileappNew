@@ -6,7 +6,9 @@ import '../../providers/personal_chat_provider.dart';
 import '../meeting/create_meeting_screen.dart';
 import '../meeting/meeting_list_screen.dart';
 import './chat_detail_screen.dart';
+
 import 'add_user_to_chat_screen.dart';
+import 'call_history.dart';
 import 'group_chat/getall_groups.dart';
 import 'group_chat/my_groups.dart';
 
@@ -78,7 +80,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                 },
                 borderRadius: BorderRadius.circular(8),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     border: Border.all(
                       color: Primary.withOpacity(0.3),
@@ -110,21 +113,36 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             ),
           ),
           IconButton(
-            icon: Image.asset(
-              'assets/icons/calendar.png',
-              width: 20,
-              height: 24,
-            ),
+            icon: Icon(Icons.group), // 👈 group icon
             onPressed: () {
-              Navigator.push(context,
-                  MaterialPageRoute(builder: (context) => MyGroupsScreen()));
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => MyGroupsScreen()),
+              );
             },
           ),
+
+          // ✅ Call History Icon — NEW
+          IconButton(
+            icon: const Icon(Icons.call_rounded),
+            color: Colors.grey[800],
+            tooltip: 'Call History',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const CallHistoryScreen(),
+                ),
+              );
+            },
+          ),
+
+          // ✅ Existing calendar icon — unchanged
+
         ],
       ),
       body: Consumer<PersonalChatProvider>(
         builder: (context, provider, child) {
-
           if (provider.isLoading) {
             return Center(
               child: Container(
@@ -210,7 +228,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                         provider.fetchPersonalChats();
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        backgroundColor:
+                        Theme.of(context).colorScheme.primary,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 32,
@@ -287,7 +306,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             color: Theme.of(context).colorScheme.primary,
             backgroundColor: Colors.white,
             child: ListView.builder(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: chats.length,
               itemBuilder: (context, index) {
                 final chat = chats[index];
@@ -300,14 +320,14 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
                         context,
                         MaterialPageRoute(
                           builder: (context) => ChatDetailScreen(
-                            userId: chat['pairedUser']['_id']?.toString() ?? '',
-                            chatTitle:
-                            chat['pairedUser']['profile']['name'] ?? 'Chat',
+                            userId: chat['pairedUser']['_id']?.toString() ??
+                                '',
+                            chatTitle: chat['pairedUser']['profile']['name'] ??
+                                'Chat',
                             userProfile: chat['pairedUser'],
                           ),
                         ),
                       );
-                      // Refresh after returning so badge is gone
                       if (context.mounted) {
                         await context
                             .read<PersonalChatProvider>()
@@ -328,7 +348,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
             PageRouteBuilder(
               pageBuilder: (context, animation, secondaryAnimation) =>
               const AddChatUserScreen(),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) {
                 return SlideTransition(
                   position: Tween<Offset>(
                     begin: const Offset(0, 1),
@@ -345,7 +366,6 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
           );
 
           if (user != null) {
-            // Navigate to ChatDetailScreen with selected user
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -391,9 +411,9 @@ class ChatListItem extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFFFFFFF), // Pure white
-            Color(0xFFF8F9FE), // Very light blue-white
-            Color(0xFFFAFBFF), // Slightly blue-tinted white
+            Color(0xFFFFFFFF),
+            Color(0xFFF8F9FE),
+            Color(0xFFFAFBFF),
           ],
           stops: [0.0, 0.5, 1.0],
         ),
@@ -422,7 +442,6 @@ class ChatListItem extends StatelessWidget {
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                // Profile Avatar without border
                 Container(
                   width: 54,
                   height: 54,
@@ -462,8 +481,6 @@ class ChatListItem extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 14),
-
-                // Chat Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -485,8 +502,6 @@ class ChatListItem extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 6),
-
-                      // Contact Info
                       if (email.isNotEmpty || mobile.isNotEmpty)
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,11 +509,8 @@ class ChatListItem extends StatelessWidget {
                             if (email.isNotEmpty)
                               Row(
                                 children: [
-                                  Icon(
-                                    Icons.email_outlined,
-                                    size: 13,
-                                    color: Colors.grey[500],
-                                  ),
+                                  Icon(Icons.email_outlined,
+                                      size: 13, color: Colors.grey[500]),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -506,9 +518,8 @@ class ChatListItem extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
+                                          color: Colors.grey[600],
+                                          fontSize: 12),
                                     ),
                                   ),
                                 ],
@@ -517,11 +528,8 @@ class ChatListItem extends StatelessWidget {
                               if (email.isNotEmpty) const SizedBox(height: 3),
                               Row(
                                 children: [
-                                  Icon(
-                                    Icons.phone_outlined,
-                                    size: 13,
-                                    color: Colors.grey[500],
-                                  ),
+                                  Icon(Icons.phone_outlined,
+                                      size: 13, color: Colors.grey[500]),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -529,9 +537,8 @@ class ChatListItem extends StatelessWidget {
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        color: Colors.grey[600],
-                                        fontSize: 12,
-                                      ),
+                                          color: Colors.grey[600],
+                                          fontSize: 12),
                                     ),
                                   ),
                                 ],
@@ -542,8 +549,6 @@ class ChatListItem extends StatelessWidget {
                     ],
                   ),
                 ),
-
-                // Timestamp and Badge
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -561,20 +566,24 @@ class ChatListItem extends StatelessWidget {
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
+                            horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
                             colors: [
                               Theme.of(context).colorScheme.primary,
-                              Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                              Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(0.8),
                             ],
                           ),
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withOpacity(0.3),
                               blurRadius: 4,
                               offset: const Offset(0, 2),
                             ),
@@ -602,12 +611,10 @@ class ChatListItem extends StatelessWidget {
 
   String _formatTimestamp(String timestamp) {
     if (timestamp.isEmpty) return '';
-
     try {
       final DateTime dateTime = DateTime.parse(timestamp);
       final DateTime now = DateTime.now();
       final Duration difference = now.difference(dateTime);
-
       if (difference.inDays > 7) {
         return '${dateTime.day}/${dateTime.month}';
       } else if (difference.inDays > 0) {

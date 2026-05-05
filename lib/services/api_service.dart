@@ -30,12 +30,47 @@ class ApiService {
   }
 
   static Future<Map<String, String>> _getHeaders({bool requireAuth = true}) async {
-    final headers = {'Content-Type': 'application/json'};
+    final headers = {
+      'Content-Type': 'application/json',
+      'x-platform': 'mobile',
+    };
     if (requireAuth) {
       final token = await _getToken();
-      if (token != null) headers['Authorization'] = 'Bearer $token';
+      if (token != null) {
+        headers['Authorization'] = 'Bearer $token';
+        print('🔑 [AUTH TOKEN] Bearer $token'); // ✅ ADD THIS
+      } else {
+        print('⚠️ [AUTH TOKEN] No token found!'); // ✅ ADD THIS
+      }
     }
     return headers;
+  }
+  static Future<http.Response> multipart({
+    required String endpoint,
+    required String method,
+    Map<String, String>? fields,
+    List<http.MultipartFile>? files,
+    bool requireAuth = true,
+  }) async {
+    final url = Uri.parse('$baseUrl$endpoint');
+    print('$method (multipart): $url');
+
+    final request = http.MultipartRequest(method, url);
+
+    // ✅ All headers in one place including x-platform
+    request.headers['x-platform'] = 'mobile';
+    if (requireAuth) {
+      final token = await _getToken();
+      if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    if (fields != null) request.fields.addAll(fields);
+    if (files != null) request.files.addAll(files);
+
+    final streamedResponse = await request.send();
+    final response = await http.Response.fromStream(streamedResponse);
+    if (requireAuth) _handleResponse(response);
+    return response;
   }
 
   static Future<http.Response> get(String endpoint, {bool requireAuth = true}) async {
