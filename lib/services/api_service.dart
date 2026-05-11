@@ -45,6 +45,35 @@ class ApiService {
     }
     return headers;
   }
+  // ADD these two methods to api_service.dart:
+
+// For GET with a full URL (not relative endpoint)
+  static Future<http.Response> getFromUrl(String fullUrl, {String? authToken}) async {
+    final uri = Uri.parse(fullUrl);
+    final token = authToken ?? await _getToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'x-platform': 'mobile',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+    return await http.get(uri, headers: headers);
+  }
+
+// For POST with a full URL (not relative endpoint)
+  static Future<http.Response> postToUrl(
+      String fullUrl,
+      Map<String, dynamic> body, {
+        String? authToken,
+      }) async {
+    final uri = Uri.parse(fullUrl);
+    final token = authToken ?? await _getToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'x-platform': 'mobile',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+    return await http.post(uri, headers: headers, body: json.encode(body));
+  }
   static Future<http.Response> multipart({
     required String endpoint,
     required String method,

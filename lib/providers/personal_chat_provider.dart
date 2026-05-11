@@ -8,7 +8,12 @@ import '../services/socket_service.dart';
 
 class PersonalChatProvider with ChangeNotifier {
   final PersonalChatService _chatService = PersonalChatService();
-  late SocketService _socketService;
+
+  // ✅ Changed from `late` to nullable
+  SocketService? _socketService;
+
+  // ✅ Safe getter — always reads live socket state
+  bool get _isSocketConnected => _socketService?.isConnected ?? false;
 
   StreamSubscription<bool>? _connectionSubscription;
   StreamSubscription<Map<String, dynamic>>? _newMessageSubscription;
@@ -63,13 +68,20 @@ class PersonalChatProvider with ChangeNotifier {
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();
     _currentUserId = prefs.getString('user_id');
-    _socketService = _chatService.socketService;
+    _socketService = _chatService.socketService; // ✅ works fine now (nullable)
     await initializeSocket();
     _safeNotifyListeners();
   }
 
   Future<bool> initializeSocket() async {
     try {
+      // ✅ Already connected — just setup listeners and return
+      if (_socketService?.isConnected == true) {
+        print('✅ Socket already connected — setting up listeners only');
+        _setupSocketEventListeners();
+        return true;
+      }
+
       print('🔌 Initializing socket connection...');
       final connected = await _chatService.initializeSocket();
       if (connected) {
@@ -88,7 +100,8 @@ class PersonalChatProvider with ChangeNotifier {
   void _setupSocketEventListeners() {
     _cancelSocketSubscriptions();
 
-    _connectionSubscription = _socketService.onConnectionChanged.listen(
+    // ✅ All uses of _socketService are now null-safe with ?.
+    _connectionSubscription = _socketService?.onConnectionChanged.listen(
           (connected) {
         _socketConnected = connected;
         print('🔌 Socket connection changed: $connected');
@@ -97,7 +110,7 @@ class PersonalChatProvider with ChangeNotifier {
       cancelOnError: false,
     );
 
-    _newMessageSubscription = _socketService.onNewMessage.listen(
+    _newMessageSubscription = _socketService?.onNewMessage.listen(
           (messageData) {
         print('📥 Socket new message: ${messageData['message']}');
         _handleNewMessage(messageData);
@@ -105,17 +118,17 @@ class PersonalChatProvider with ChangeNotifier {
       cancelOnError: false,
     );
 
-    _messageDeletedSubscription = _socketService.onMessageDeleted.listen(
+    _messageDeletedSubscription = _socketService?.onMessageDeleted.listen(
           (data) => _handleMessageDeleted(data),
       cancelOnError: false,
     );
 
-    _messageEditedSubscription = _socketService.onMessageEdited.listen(
+    _messageEditedSubscription = _socketService?.onMessageEdited.listen(
           (data) => _handleMessageEdited(data),
       cancelOnError: false,
     );
 
-    _readStatusSubscription = _socketService.onReadStatusUpdated.listen(
+    _readStatusSubscription = _socketService?.onReadStatusUpdated.listen(
           (data) => _handleReadStatusUpdated(data),
       cancelOnError: false,
     );
@@ -203,18 +216,14 @@ class PersonalChatProvider with ChangeNotifier {
         print('✅ [Socket] Appended new message — total: ${_messages.length}');
       }
 
-      // Bump unread + move to top only for messages from the other person
       if (messageSenderId != myId) {
         _incrementUnreadCount(messageSenderId);
-        _moveChatToTop(
-            messageSenderId, Map<String, dynamic>.from(message));
+        _moveChatToTop(messageSenderId, Map<String, dynamic>.from(message));
       }
-      // ✅ Auto scroll to bottom
+
       if (onNewMessageReceived != null) {
         onNewMessageReceived!();
       }
-      _safeNotifyListeners();
-
       _safeNotifyListeners();
     } catch (e) {
       print('💥 Error handling new message: $e');
@@ -226,7 +235,6 @@ class PersonalChatProvider with ChangeNotifier {
     try {
       print('🗑️ [Provider] handleMessageDeleted raw data: $data');
 
-      // ✅ Backend sends { messageId, conversationId }
       final messageId = data['messageId']?.toString();
 
       if (messageId != null && messageId.isNotEmpty) {
@@ -250,9 +258,10 @@ class PersonalChatProvider with ChangeNotifier {
       print('💥 Error handling message deletion: $e');
     }
   }
+
   // ════════════════════════════════════════════════════════════════════════
-//  CALL HISTORY STATE
-// ════════════════════════════════════════════════════════════════════════
+  //  CALL HISTORY STATE
+  // ════════════════════════════════════════════════════════════════════════
   List<dynamic> _callHistory = [];
   Map<String, dynamic> _callPagination = {};
   bool _isCallHistoryLoading = false;
@@ -321,7 +330,6 @@ class PersonalChatProvider with ChangeNotifier {
       final messageId = data['messageId']?.toString()
           ?? data['message']?['_id']?.toString();
 
-      // ✅ Backend sends message.text not newText
       final newText = data['message']?['text']?.toString()
           ?? data['newText']?.toString();
 
@@ -352,8 +360,8 @@ class PersonalChatProvider with ChangeNotifier {
       final receiverId = _extractId(data['receiverId']);
       if (senderId.isNotEmpty && receiverId.isNotEmpty) {
         _messages = _messages.map((msg) {
-          final msgMap     = Map<String, dynamic>.from(msg);
-          final msgSender  = _extractId(msgMap['senderId']);
+          final msgMap      = Map<String, dynamic>.from(msg);
+          final msgSender   = _extractId(msgMap['senderId']);
           final msgReceiver = _extractId(msgMap['receiverId']);
           if (msgSender == senderId && msgReceiver == receiverId) {
             msgMap['readBy'] = true;
@@ -374,7 +382,7 @@ class PersonalChatProvider with ChangeNotifier {
     m['readBy'] = m['readBy'] ?? false;
 
     if (m['receiverId'] is Map) m['receiverId'] = _extractId(m['receiverId']);
-    if (m['senderId']  is Map) m['senderId']  = _extractId(m['senderId']);
+    if (m['senderId']  is Map) m['senderId']    = _extractId(m['senderId']);
 
     if (m['isFile'] == true && m['fileUrl'] != null) {
       m['fileUrl'] = constructFullUrl(m['fileUrl'] as String);
@@ -411,7 +419,6 @@ class PersonalChatProvider with ChangeNotifier {
   Future<void> fetchConversation(String userId) async {
     if (_isDisposed) return;
 
-    // Only clear if switching to a different conversation
     if (_currentReceiverId != userId) {
       _messages = [];
       _currentReceiverId = userId;
@@ -436,19 +443,17 @@ class PersonalChatProvider with ChangeNotifier {
             .map((m) => _processMessage(m as Map<String, dynamic>))
             .toList();
 
-        // ✅ MERGE: keep existing messages not in fetched, add new ones
         final fetchedIds = fetched.map((m) => m['_id'].toString()).toSet();
-        final preserved = _messages.where(
-                (m) => !fetchedIds.contains(m['_id'].toString())
-                && m['isOptimistic'] != true
+        final preserved  = _messages.where(
+              (m) => !fetchedIds.contains(m['_id'].toString()) &&
+              m['isOptimistic'] != true,
         ).toList();
 
         _messages = [...preserved, ...fetched];
-        // Sort by createdAt ascending
         _messages.sort((a, b) => DateTime.parse(a['createdAt'])
             .compareTo(DateTime.parse(b['createdAt'])));
 
-        print('✅ Loaded ${_messages.length} messages (${fetched.length} from API, ${preserved.length} preserved)');
+        print('✅ Loaded ${_messages.length} messages');
       } else {
         _error = result['message'] ?? 'Failed to fetch conversation';
       }
@@ -483,15 +488,15 @@ class PersonalChatProvider with ChangeNotifier {
     _sendMessageError = null;
     _lastSentMessage  = null;
 
-    final tempId    = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempId     = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final optimistic = {
-      '_id':         tempId,
-      'text':        text,
-      'senderId':    _currentUserId ?? '',
-      'receiverId':  receiverId,
-      'readBy':      readBy,
-      'createdAt':   DateTime.now().toIso8601String(),
-      'status':      'sending',
+      '_id':          tempId,
+      'text':         text,
+      'senderId':     _currentUserId ?? '',
+      'receiverId':   receiverId,
+      'readBy':       readBy,
+      'createdAt':    DateTime.now().toIso8601String(),
+      'status':       'sending',
       'isOptimistic': true,
       if (image   != null) 'image':   image,
       if (replyTo != null) 'replyTo': replyTo,
@@ -509,15 +514,14 @@ class PersonalChatProvider with ChangeNotifier {
       );
 
       if (response['error'] == false) {
-        _lastSentMessage    = response['data'];
-        final messageData   = response['data']['message'] ?? response['data'];
-        final idx           = _messages.indexWhere((m) => m['_id'] == tempId);
+        _lastSentMessage  = response['data'];
+        final messageData = response['data']['message'] ?? response['data'];
+        final idx         = _messages.indexWhere((m) => m['_id'] == tempId);
         if (idx >= 0) {
           final List<dynamic> updated = List.from(_messages);
           updated[idx] = _processMessage(messageData);
           _messages    = updated;
         }
-        // Move chat to top with latest text preview
         _moveChatToTop(receiverId, {'text': text});
         _isSendingMessage = false;
         _safeNotifyListeners();
@@ -551,18 +555,18 @@ class PersonalChatProvider with ChangeNotifier {
     _sendMessageError = null;
     _lastSentMessage  = null;
 
-    final tempId    = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempId     = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final optimistic = {
-      '_id':          tempId,
-      'fileName':     file.path.split('/').last,
-      'fileUrl':      file.path,
-      'senderId':     _currentUserId ?? '',
-      'receiverId':   receiverId,
-      'isFile':       true,
-      'readBy':       readBy,
-      'createdAt':    DateTime.now().toIso8601String(),
-      'status':       'sending',
-      'isOptimistic': true,
+      '_id':           tempId,
+      'fileName':      file.path.split('/').last,
+      'fileUrl':       file.path,
+      'senderId':      _currentUserId ?? '',
+      'receiverId':    receiverId,
+      'isFile':        true,
+      'readBy':        readBy,
+      'createdAt':     DateTime.now().toIso8601String(),
+      'status':        'sending',
+      'isOptimistic':  true,
       'localFilePath': file.path,
     };
     _messages = [..._messages, optimistic];
@@ -574,7 +578,7 @@ class PersonalChatProvider with ChangeNotifier {
         receiverId: receiverId,
         readBy:     readBy,
         replyTo:    replyTo,
-        useSocket:  _socketConnected,
+        useSocket:  _isSocketConnected, // ✅ live check
       );
 
       final idx = _messages.indexWhere((m) => m['_id'] == tempId);
@@ -590,7 +594,6 @@ class PersonalChatProvider with ChangeNotifier {
         } else {
           _messages = [..._messages, real];
         }
-        // Move chat to top with file preview
         _moveChatToTop(receiverId, {'isFile': true});
         notifyListeners();
         return response['data'];
@@ -632,17 +635,17 @@ class PersonalChatProvider with ChangeNotifier {
     _sendMessageError = null;
     _lastSentMessage  = null;
 
-    final tempId    = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final tempId     = 'temp_${DateTime.now().millisecondsSinceEpoch}';
     final optimistic = {
-      '_id':          tempId,
-      'audioUrl':     audioFile.path,
-      'senderId':     _currentUserId ?? '',
-      'receiverId':   receiverId,
-      'isAudio':      true,
-      'readBy':       readBy,
-      'createdAt':    DateTime.now().toIso8601String(),
-      'status':       'sending',
-      'isOptimistic': true,
+      '_id':           tempId,
+      'audioUrl':      audioFile.path,
+      'senderId':      _currentUserId ?? '',
+      'receiverId':    receiverId,
+      'isAudio':       true,
+      'readBy':        readBy,
+      'createdAt':     DateTime.now().toIso8601String(),
+      'status':        'sending',
+      'isOptimistic':  true,
       'localFilePath': audioFile.path,
       if (audioDurationMs != null) 'audioDurationMs': audioDurationMs,
       if (image   != null) 'image':   image,
@@ -653,13 +656,13 @@ class PersonalChatProvider with ChangeNotifier {
 
     try {
       final response = await _chatService.sendVoiceMessage(
-        audioFile:      audioFile,
-        receiverId:     receiverId,
-        readBy:         readBy,
-        image:          image,
-        replyTo:        replyTo,
+        audioFile:       audioFile,
+        receiverId:      receiverId,
+        readBy:          readBy,
+        image:           image,
+        replyTo:         replyTo,
         audioDurationMs: audioDurationMs,
-        useSocket:      _socketConnected,
+        useSocket:       _isSocketConnected, // ✅ live check
       );
 
       final idx = _messages.indexWhere((m) => m['_id'] == tempId);
@@ -677,7 +680,6 @@ class PersonalChatProvider with ChangeNotifier {
           updated[idx] = real;
           _messages    = updated;
         }
-        // Move chat to top with voice preview
         _moveChatToTop(receiverId, {'isAudio': true});
         notifyListeners();
         return response['data'];
@@ -713,12 +715,12 @@ class PersonalChatProvider with ChangeNotifier {
   }) async {
     try {
       final response = await _chatService.updateReadStatus(
-        senderId:  senderId,
+        senderId:   senderId,
         receiverId: receiverId,
-        useSocket: _socketConnected,
+        useSocket:  _isSocketConnected, // ✅ live check
       );
 
-      if (response['error'] == false && !_socketConnected) {
+      if (response['error'] == false && !_isSocketConnected) {
         _messages = _messages.map((msg) {
           final m           = Map<String, dynamic>.from(msg);
           final msgSender   = _extractId(m['senderId']);
@@ -737,8 +739,11 @@ class PersonalChatProvider with ChangeNotifier {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  DELETE / EDIT
+  //  DELETE MESSAGE
   // ════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════
+//  DELETE MESSAGE
+// ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>?> deleteMessage({
     required String messageId,
     required String receiverId,
@@ -758,20 +763,34 @@ class PersonalChatProvider with ChangeNotifier {
         notifyListeners();
       }
 
-      // ✅ No reconnect attempt — service handles socket/HTTP fallback
-      final response = await _chatService.deleteMessage(
-        messageId: messageId,
-        receiverId: receiverId,
-        useSocket: _socketConnected,
-      );
+      // ✅ Wait up to 10s for socket if not connected
+      int attempts = 0;
+      while (!(_socketService?.isConnected ?? false) && attempts < 20) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        attempts++;
+        print('⏳ [DELETE] Waiting for socket... attempt $attempts');
+      }
 
-      print('🗑️ Delete response: $response');
-      return response;
+      final socket = _socketService?.socket;
+      if (socket == null || !(_socketService?.isConnected ?? false)) {
+        print('❌ [DELETE] Socket not ready — optimistic update kept');
+        return {'error': false, 'message': 'Deleted locally'};
+      }
+
+      socket.emit('deleteMessage', {
+        'messageId': messageId,
+        'receiverId': receiverId,
+      });
+      print('✅ [DELETE] Emitted via socket');
+      return {'error': false, 'message': 'Message deleted'};
     } catch (e) {
-      return {'error': true, 'message': 'Error deleting message: $e'};
+      return {'error': true, 'message': 'Error deleting: $e'};
     }
   }
 
+// ════════════════════════════════════════════════════════════════════════
+//  EDIT MESSAGE
+// ════════════════════════════════════════════════════════════════════════
   Future<Map<String, dynamic>?> editMessage({
     required String messageId,
     required String newText,
@@ -793,27 +812,35 @@ class PersonalChatProvider with ChangeNotifier {
         notifyListeners();
       }
 
-      // ✅ No reconnect attempt — service handles socket/HTTP fallback
-      final response = await _chatService.editMessage(
-        messageId: messageId,
-        newText: newText,
-        receiverId: receiverId,
-        useSocket: _socketConnected,
-      );
+      // ✅ Wait up to 10s for socket if not connected
+      int attempts = 0;
+      while (!(_socketService?.isConnected ?? false) && attempts < 20) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        attempts++;
+        print('⏳ [EDIT] Waiting for socket... attempt $attempts');
+      }
 
-      print('✏️ Edit response: $response');
-      return response;
+      final socket = _socketService?.socket;
+      if (socket == null || !(_socketService?.isConnected ?? false)) {
+        print('❌ [EDIT] Socket not ready — optimistic update kept');
+        return {'error': false, 'message': 'Edited locally'};
+      }
+
+      socket.emit('editMessage', {
+        'messageId': messageId,
+        'newText': newText,
+        'receiverId': receiverId,
+      });
+      print('✅ [EDIT] Emitted via socket');
+      return {'error': false, 'message': 'Message edited'};
     } catch (e) {
-      return {'error': true, 'message': 'Error editing message: $e'};
+      return {'error': true, 'message': 'Error editing: $e'};
     }
   }
 
   // ════════════════════════════════════════════════════════════════════════
   //  LOCAL STATE HELPERS
   // ════════════════════════════════════════════════════════════════════════
-
-  /// Moves a chat to the top of the list and updates the last message preview.
-  /// Pass the raw message map — text/isFile/isAudio are auto-detected.
   void _moveChatToTop(String chatUserId, Map<String, dynamic> message) {
     final data = _chatData['data'];
     if (data is! List) return;
@@ -841,7 +868,6 @@ class PersonalChatProvider with ChangeNotifier {
     _chatData = {..._chatData, 'data': list};
   }
 
-  /// Increments unreadMessage count for a chat when a socket message arrives.
   void _incrementUnreadCount(String senderId) {
     final data = _chatData['data'];
     if (data is! List) return;
@@ -861,7 +887,6 @@ class PersonalChatProvider with ChangeNotifier {
     _chatData = {..._chatData, 'data': updated};
   }
 
-  /// Clears the unread badge for a chat when the user opens it.
   void clearUnreadCount(String chatUserId) {
     final data = _chatData['data'];
     if (data is! List) return;
@@ -938,7 +963,8 @@ class PersonalChatProvider with ChangeNotifier {
 
   Future<bool> reconnectSocket() async => await initializeSocket();
 
-  bool isSocketConnected() => _socketService.isConnected;
+  // ✅ Null-safe
+  bool isSocketConnected() => _socketService?.isConnected ?? false;
 
   Map<String, dynamic>? getMessageById(String id) {
     try {

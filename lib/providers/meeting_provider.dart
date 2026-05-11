@@ -1,3 +1,4 @@
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import '../services/meeting_service.dart';
 
@@ -7,6 +8,7 @@ enum JoinStatus { idle, requesting, approved, rejected, joined }
 
 class MeetingProvider extends ChangeNotifier {
   final MeetingService _service = MeetingService();
+  final AudioPlayer _notifPlayer = AudioPlayer();
 
   // Current user info
   String? _currentUserId;
@@ -120,6 +122,7 @@ class MeetingProvider extends ChangeNotifier {
       debugPrint('🆕 Name: ${data['name']}');
       debugPrint('🆕 UserId: ${data['userId']}');
       debugPrint('🆕 MeetingId: ${data['meetingId']}');
+      _notifPlayer.play(AssetSource('sounds/notify.mp3'));
 
       _successMessage = '${data['name']} wants to join the meeting';
       final requestId = '${data['meetingId']}-${data['userId']}';
@@ -593,6 +596,7 @@ class MeetingProvider extends ChangeNotifier {
   @override
   void dispose() {
     debugPrint('🧹 Cleaning up MeetingProvider');
+    _notifPlayer.dispose();
 
     // Remove all listeners
     _service.offPendingRequestsUpdate();

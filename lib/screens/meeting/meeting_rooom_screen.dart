@@ -1092,12 +1092,40 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Widget _buildVideoPlaceholder(Participant participant) {
     final isLocal = participant is LocalParticipant;
-    final displayName = isLocal
-        ? 'You'
-        : (participant.name.isNotEmpty
+
+    // ✅ For local participant always show person icon, not initial
+    if (isLocal) {
+      return Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF2A2A2A), Color(0xFF1A1A1A)],
+          ),
+        ),
+        child: const Center(
+          child: CircleAvatar(
+            radius: 48,
+            backgroundColor: Color(0xFF2196F3),
+            child: Icon(
+              Icons.person,
+              color: Colors.white,
+              size: 48,
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Remote participant — use name initial safely
+    final displayName = participant.name.isNotEmpty
         ? participant.name
-        : participant.identity);
-    final initial = displayName.substring(0, 1).toUpperCase();
+        : participant.identity;
+
+    // ✅ Safe initial — check if it's a letter, else use person icon
+    final firstChar = displayName.isNotEmpty ? displayName[0] : '';
+    final isLetter = firstChar.isNotEmpty &&
+        RegExp(r'[a-zA-Z]').hasMatch(firstChar);
 
     return Container(
       decoration: const BoxDecoration(
@@ -1111,13 +1139,19 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
         child: CircleAvatar(
           radius: 48,
           backgroundColor: const Color(0xFF2196F3),
-          child: Text(
-            initial,
+          child: isLetter
+              ? Text(
+            firstChar.toUpperCase(),
             style: const TextStyle(
               color: Colors.white,
               fontSize: 36,
               fontWeight: FontWeight.bold,
             ),
+          )
+              : const Icon(   // ✅ Fallback to icon when identity is numeric
+            Icons.person,
+            color: Colors.white,
+            size: 48,
           ),
         ),
       ),

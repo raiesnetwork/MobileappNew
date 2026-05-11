@@ -471,15 +471,31 @@ class PersonalChatService {
     required String receiverId,
     bool useSocket = true,
   }) async {
-    if (_socketService.isConnected) {
-      print('🗑️ Deleting via socket');
+    print('🗑️ [DELETE] Starting | messageId=$messageId | receiverId=$receiverId');
+    print('🗑️ [DELETE] Socket connected=${_socketService.isConnected} | socket=${_socketService.socket != null}');
+
+    // Reconnect if socket is down
+    print('🗑️ [DELETE] Calling reconnectAndWait...');
+    final ready = await _socketService.reconnectAndWait();
+    print('🗑️ [DELETE] reconnectAndWait result: ready=$ready | socket=${_socketService.socket != null}');
+
+    if (!ready || _socketService.socket == null) {
+      print('❌ [DELETE] Socket not ready — aborting');
+      return {'error': true, 'message': 'Could not connect — try again'};
+    }
+
+    try {
+      print('🗑️ [DELETE] Emitting deleteMessage event...');
       _socketService.socket!.emit('deleteMessage', {
         'messageId': messageId,
         'receiverId': receiverId,
       });
-      return {'error': false, 'message': 'Message deleted via socket'};
+      print('✅ [DELETE] Emitted successfully | socketId=${_socketService.socket!.id}');
+      return {'error': false, 'message': 'Message deleted'};
+    } catch (e) {
+      print('💥 [DELETE] Emit failed: $e');
+      return {'error': true, 'message': 'Failed to delete: $e'};
     }
-    return {'error': true, 'message': 'Socket not connected'};
   }
 
   Future<Map<String, dynamic>> editMessage({
@@ -488,14 +504,32 @@ class PersonalChatService {
     required String receiverId,
     bool useSocket = true,
   }) async {
-    if (_socketService.isConnected) {
-      print('✏️ Editing via socket');
+    print('✏️ [EDIT] Starting | messageId=$messageId | receiverId=$receiverId');
+    print('✏️ [EDIT] newText=${newText.length > 50 ? newText.substring(0, 50) : newText}');
+    print('✏️ [EDIT] Socket connected=${_socketService.isConnected} | socket=${_socketService.socket != null}');
+
+    // Reconnect if socket is down
+    print('✏️ [EDIT] Calling reconnectAndWait...');
+    final ready = await _socketService.reconnectAndWait();
+    print('✏️ [EDIT] reconnectAndWait result: ready=$ready | socket=${_socketService.socket != null}');
+
+    if (!ready || _socketService.socket == null) {
+      print('❌ [EDIT] Socket not ready — aborting');
+      return {'error': true, 'message': 'Could not connect — try again'};
+    }
+
+    try {
+      print('✏️ [EDIT] Emitting editMessage event...');
       _socketService.socket!.emit('editMessage', {
         'messageId': messageId,
         'newText': newText,
         'receiverId': receiverId,
       });
-      return {'error': false, 'message': 'Message edited via socket'};
+      print('✅ [EDIT] Emitted successfully | socketId=${_socketService.socket!.id}');
+      return {'error': false, 'message': 'Message edited'};
+    } catch (e) {
+      print('💥 [EDIT] Emit failed: $e');
+      return {'error': true, 'message': 'Failed to edit: $e'};
     }
-    return {'error': true, 'message': 'Socket not connected'};
-  }}
+  }
+}

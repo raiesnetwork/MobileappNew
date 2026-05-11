@@ -163,12 +163,17 @@ class VideoCallService {
     }
   }
 
+  // FIND initiateVideoCall() and ADD one line at top:
   void initiateVideoCall({
     required String roomName,
+
     required String callerId,
     required String callerName,
     required String receiverId,
-  }) {
+  }) async {
+    // ✅ ADD THIS
+    await ensureConnectedAndRegistered(callerId);
+
     final data = {
       'roomName': roomName,
       'callerId': callerId,

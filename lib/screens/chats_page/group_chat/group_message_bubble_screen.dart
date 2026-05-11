@@ -10,6 +10,7 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../providers/group_provider.dart';
@@ -112,7 +113,94 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     }
     super.dispose();
   }
+  Future<void> _shareMessage() async {
+    try {
+      // ── Share FILE / IMAGE ───────────────────────────────────────
+      if (_isFile || _isAudio) {
+        String? filePath;
+        String? fileUrl;
 
+        if (_isAudio) {
+          filePath = widget.message['localFilePath']?.toString();
+          fileUrl  = widget.message['audioUrl']?.toString() ?? '';
+        } else {
+          filePath = widget.message['localFilePath']?.toString();
+          fileUrl  = widget.message['fileUrl']?.toString() ?? '';
+        }
+
+        // Use local file if available
+        if (filePath != null && filePath.isNotEmpty && File(filePath).existsSync()) {
+          await Share.shareXFiles([XFile(filePath)]);
+
+          return;
+        }
+
+        // Download from URL then share
+        if (fileUrl.isNotEmpty) {
+          if (!fileUrl.startsWith('http')) {
+            fileUrl = 'https://api.ixes.ai/$fileUrl';
+          }
+
+          // Show loading
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Row(children: [
+                  SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
+                  ),
+                  SizedBox(width: 12),
+                  Text('Preparing file to share...'),
+                ]),
+                duration: Duration(seconds: 10),
+              ),
+            );
+          }
+
+          try {
+            final tmpDir  = await getTemporaryDirectory();
+            final fileName = widget.message['fileName']?.toString()
+                ?? 'file_${DateTime.now().millisecondsSinceEpoch}';
+            final savePath = '${tmpDir.path}/$fileName';
+
+            // Use cached file if exists
+            if (!File(savePath).existsSync()) {
+              final response = await http.get(Uri.parse(fileUrl));
+              await File(savePath).writeAsBytes(response.bodyBytes);
+            }
+
+            if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+            await Share.shareXFiles([XFile(savePath)]);
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Failed to share file: $e'),
+                backgroundColor: Colors.red,
+              ));
+            }
+          }
+        }
+        return;
+      }
+
+      // ── Share TEXT ───────────────────────────────────────────────
+      final text = widget.message['text']?.toString() ?? '';
+      if (text.isNotEmpty) {
+        await Share.share(text);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Share failed: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    }
+  }
   // ════════════════════════════════════════════════════════════════════════
   //  PARSE MESSAGE — single source of truth, strict detection
   // ════════════════════════════════════════════════════════════════════════
@@ -1055,6 +1143,15 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         },
       ));
     }
+    // ADD after the Forward ListTile:
+    options.add(ListTile(
+      leading: Icon(Icons.share, color: _purple),
+      title: const Text('Share'),
+      onTap: () {
+        Navigator.pop(context);
+        _shareMessage();
+      },
+    ));
     // Copy Link — for link preview messages
     final _linkMeta = widget.message['linkMeta'];
     final _linkUrl = (_linkMeta is Map) ? (_linkMeta['url'] ?? '').toString() : '';

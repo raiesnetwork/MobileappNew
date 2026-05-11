@@ -101,6 +101,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   : Expanded(
                 child: Consumer2<AnnouncementProvider, NotificationProvider>(
                   builder: (context, announcementProvider, notificationProvider, _) {
+
                     final communityCount = notificationProvider.getUnreadCountForTypes([
                       'community',
                       'GroupRequest',
@@ -116,6 +117,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     final campaignsCount = notificationProvider.getUnreadCountForTypes([
                       'campaign',
                     ]);
+                    print('📊 All types: ${notificationProvider.notifications.map((n) => n['type']).toSet()}');
+                    print('📊 communityCount: $communityCount');
+                    print('📊 servicesCount: $servicesCount');
+                    print('📊 campaignsCount: $campaignsCount');
 
                     return RefreshIndicator(
                       onRefresh: () async {

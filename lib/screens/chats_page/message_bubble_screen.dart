@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_sound/flutter_sound.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 import 'dart:convert';  // For base64Decode
@@ -127,6 +128,81 @@ class _MessageBubbleState extends State<MessageBubble> {
       });
     } catch (e) {
       print('Error initializing audio player: $e');
+    }
+  }
+  Future<void> _shareMessage() async {
+    try {
+      // ── Share IMAGE / FILE ───────────────────────────────────────
+      if (widget.isFile || widget.isAudio) {
+        String? filePath  = widget.localFilePath;
+        String? remoteUrl = widget.isAudio ? widget.audioUrl : widget.fileUrl;
+        String  fileName  = widget.fileName
+            ?? 'file_${DateTime.now().millisecondsSinceEpoch}';
+
+        // Use local file if available
+        if (filePath != null && filePath.isNotEmpty && File(filePath).existsSync()) {
+          await Share.shareXFiles([XFile(filePath)]);
+          return;
+        }
+
+        // Download then share
+        if (remoteUrl != null && remoteUrl.isNotEmpty) {
+          if (!remoteUrl.startsWith('http')) {
+            remoteUrl = 'https://api.ixes.ai/$remoteUrl';
+          }
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Row(children: [
+                  SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  ),
+                  SizedBox(width: 12),
+                  Text('Preparing to share...'),
+                ]),
+                duration: Duration(seconds: 15),
+              ),
+            );
+          }
+
+          try {
+            final tmpDir   = await getTemporaryDirectory();
+            final savePath = '${tmpDir.path}/$fileName';
+
+            if (!File(savePath).existsSync()) {
+              final response = await http.get(Uri.parse(remoteUrl));
+              await File(savePath).writeAsBytes(response.bodyBytes);
+            }
+
+            if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            await Share.shareXFiles([XFile(savePath)]);
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                content: Text('Failed to share: $e'),
+                backgroundColor: Colors.red,
+              ));
+            }
+          }
+        }
+        return;
+      }
+
+      // ── Share TEXT ───────────────────────────────────────────────
+      final text = widget.content ?? '';
+      if (text.isNotEmpty) {
+        await Share.share(text);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Share failed: $e'),
+          backgroundColor: Colors.red,
+        ));
+      }
     }
   }
   Widget _buildForwardedLabel() {
@@ -1332,6 +1408,15 @@ class _MessageBubbleState extends State<MessageBubble> {
         },
       ));
     }
+    // ADD this after the Forward ListTile (after the Navigator.push block closes):
+    options.add(ListTile(
+      leading: Icon(Icons.share, color: Theme.of(context).colorScheme.primary),
+      title: const Text('Share'),
+      onTap: () {
+        Navigator.pop(context);
+        _shareMessage();
+      },
+    ));
 
     // EDIT option - only for MY TEXT messages
     if (widget.isMe &&

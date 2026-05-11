@@ -42,21 +42,8 @@ class GroupChatService {
     print('└──────────────────────────────────────────────');
   }
 
-  // ── Auth ───────────────────────────────────────────────────────────────
-  Future<String?> _getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    final t = prefs.getString('auth_token');
-    if (t == null || t.isEmpty) {
-      print('❗ [AUTH] Token missing!');
-      return null;
-    }
-    print('🔑 [AUTH] ${t.substring(0, 12)}...');
-    return t;
-  }
 
-  // ── Standard error returns ─────────────────────────────────────────────
-  Map<String, dynamic> _noToken() =>
-      {'error': true, 'message': 'Auth token missing', 'data': null};
+
 
   Map<String, dynamic> _noInternet(String l) {
     print('🌐 [$l] No internet');
@@ -330,47 +317,34 @@ class GroupChatService {
   }) async {
     const l = 'sendGroupFileMessage';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
-
       final fileName = p.basename(file.path);
-      final fileSize = await file.length();
-      final mime    = _mimeTypeForFile(file.path);
-      print('📤 [$l] $fileName — ${(fileSize / 1024).toStringAsFixed(1)} KB — $mime');
-      _logRequest('POST multipart', '/api/chat/groupfilemessage',
-          body: {'groupId': groupId, 'file': fileName});
+      final mime     = _mimeTypeForFile(file.path);
+      print('📤 [$l] $fileName — $mime');
 
-      final req = http.MultipartRequest(
-          'POST', Uri.parse('${apiBaseUrl}api/chat/groupfilemessage'));
-      req.headers['Authorization'] = 'Bearer $token';
-      req.files.add(await http.MultipartFile.fromPath(
-        'file',
-        file.path,
-        filename: fileName,
-        contentType: MediaType.parse(mime),
-      ));
-      req.fields['groupId'] = groupId;
-      if (communityInfo != null) {
-        req.fields['communityInfo'] = jsonEncode(communityInfo);
-      }
-      if (replyTo != null && replyTo.isNotEmpty) {
-        req.fields['replyTo'] = replyTo;
-      }
+      final fields = <String, String>{'groupId': groupId};
+      if (communityInfo != null) fields['communityInfo'] = jsonEncode(communityInfo);
+      if (replyTo != null && replyTo.isNotEmpty) fields['replyTo'] = replyTo;
 
-      final streamed = await req.send().timeout(const Duration(minutes: 2));
-      final res = await http.Response.fromStream(streamed);
-      ApiService.checkResponse(res); // ✅ 401 check
+      final files = [
+        await http.MultipartFile.fromPath(
+          'file', file.path,
+          filename: fileName,
+          contentType: MediaType.parse(mime),
+        )
+      ];
+
+      final res = await ApiService.multipart(
+        endpoint: '/api/chat/groupfilemessage',
+        method: 'POST',
+        fields: fields,
+        files: files,
+      );
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         final d = _safeJsonDecode(res);
-        print('✅ [$l] fileUrl: ${d['message']?['fileUrl']}');
-        return {
-          'error': d['error'] ?? false,
-          'message': d['message'],
-          'groupId': d['groupId'],
-          'data': d['message'],
-        };
+        return {'error': d['error'] ?? false, 'message': d['message'], 'groupId': d['groupId'], 'data': d['message']};
       }
       return _apiError(res, l);
     } on SocketException { return _noInternet(l); }
@@ -390,58 +364,39 @@ class GroupChatService {
   }) async {
     const l = 'sendGroupVoiceMessage';
     try {
-      final token = await _getToken();
-      if (token == null) return _noToken();
+      final mime = _mimeTypeForFile(audioFile.path);
+      print('🎤 [$l] ${audioFile.path.split('/').last} — $mime');
 
-      final fileSize = await audioFile.length();
-      final mime     = _mimeTypeForFile(audioFile.path);
-      print('🎤 [$l] ${audioFile.path.split('/').last} — '
-          '${(fileSize / 1024).toStringAsFixed(1)} KB — $mime');
-      _logRequest('POST multipart', '/api/chat/groupvoicemessage',
-          body: {'groupId': groupId});
+      final fields = <String, String>{'groupId': groupId};
+      if (audioDurationMs != null) fields['audioDurationMs'] = audioDurationMs.toString();
+      if (communityInfo != null) fields['communityInfo'] = jsonEncode(communityInfo);
+      if (replyTo != null && replyTo.isNotEmpty) fields['replyTo'] = replyTo;
 
-      final req = http.MultipartRequest(
-          'POST', Uri.parse('${apiBaseUrl}api/chat/groupvoicemessage'));
-      req.headers['Authorization'] = 'Bearer $token';
-      req.files.add(await http.MultipartFile.fromPath(
-        'audio',
-        audioFile.path,
-        contentType: MediaType.parse(mime),
-      ));
-      req.fields['groupId'] = groupId;
-      if (audioDurationMs != null) {
-        req.fields['audioDurationMs'] = audioDurationMs.toString();
-        print('📦 [$l] audioDurationMs: $audioDurationMs');
-      }
-      if (communityInfo != null) {
-        req.fields['communityInfo'] = jsonEncode(communityInfo);
-      }
-      if (replyTo != null && replyTo.isNotEmpty) {
-        req.fields['replyTo'] = replyTo;
-      }
+      final files = [
+        await http.MultipartFile.fromPath(
+          'audio', audioFile.path,
+          contentType: MediaType.parse(mime),
+        )
+      ];
 
-      print('📡 [$l] Uploading voice...');
-      final streamed = await req.send().timeout(const Duration(minutes: 2));
-      final res = await http.Response.fromStream(streamed);
-      ApiService.checkResponse(res); // ✅ 401 check
+      final res = await ApiService.multipart(
+        endpoint: '/api/chat/groupvoicemessage',
+        method: 'POST',
+        fields: fields,
+        files: files,
+      );
+      ApiService.checkResponse(res);
       _logResponse(res.statusCode, res.body, label: l);
 
       if (res.statusCode == 200 || res.statusCode == 201) {
         final d = _safeJsonDecode(res);
-        print('✅ [$l] audioUrl: ${d['message']?['audioUrl']}');
-        return {
-          'error': d['error'] ?? false,
-          'message': d['message'],
-          'groupId': d['groupId'],
-          'data': d['message'],
-        };
+        return {'error': d['error'] ?? false, 'message': d['message'], 'groupId': d['groupId'], 'data': d['message']};
       }
       return _apiError(res, l);
     } on SocketException { return _noInternet(l); }
     on TimeoutException  { return _timeout(l); }
     catch (e) { _logError(l, e); return _exception(e); }
   }
-
   // ════════════════════════════════════════════════════════════════════════
   // 8. SEND CAMERA PHOTO
   // ════════════════════════════════════════════════════════════════════════

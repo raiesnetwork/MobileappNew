@@ -55,7 +55,7 @@ const _uuid = Uuid();
 Map<String, dynamic>? _pendingCallData;
 String? _dispatchedRoomName;
 DateTime? _pendingCallDispatchedAt;
-const Duration _callTTL = Duration(seconds: 30);
+const Duration _callTTL = Duration(seconds: 90);
 
 void _storePendingCall(Map<String, dynamic> data) {
   _pendingCallData = data;
@@ -145,12 +145,27 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   final data = message.data;
   final type = data['type'] ?? '';
+
+  debugPrint('🔔 [BG FCM] type=$type | roomName=${data['roomName']}');
+
   if (type == 'voice_call' || type == 'video_call') {
+    final roomName   = data['roomName']   ?? '';
+    final callerId   = data['callerId']   ?? '';
+    final callerName = data['callerName'] ?? 'Incoming Call';
+
+    // ✅ Skip if missing critical data
+    if (roomName.isEmpty || callerId.isEmpty) {
+      debugPrint('⚠️ [BG FCM] Missing roomName or callerId — skipping');
+      return;
+    }
+
+    debugPrint('📲 [BG FCM] Showing CallKit | caller=$callerName | room=$roomName');
+
     await _showCallkitIncoming(
-      roomName: data['roomName'] ?? '',
-      callerId: data['callerId'] ?? '',
-      callerName: data['callerName'] ?? 'Unknown',
-      callType: type,
+      roomName:   roomName,
+      callerId:   callerId,
+      callerName: callerName,
+      callType:   type,
     );
   }
 }
@@ -186,15 +201,39 @@ Future<void> _initFCM() async {
     );
     await messaging.getToken();
     messaging.onTokenRefresh.listen((_) => _saveFcmToken());
-    FirebaseMessaging.onMessage.listen((RemoteMessage msg) {
+    FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
       final d = msg.data;
       final type = d['type'] ?? '';
       if (type == 'voice_call' || type == 'video_call') {
-        debugPrint(
-            '📲 [FG FCM] $type received — app is foreground, socket handles it, ignoring FCM');
-        return;
+
+        // Check if socket already handled it
+        final ctx = navigatorKey.currentContext;
+        bool socketHandled = false;
+        if (ctx != null) {
+          try {
+            final vcState   = ctx.read<VideoCallProvider>().callState;
+            final vState    = ctx.read<VoiceCallProvider>().callState;
+            socketHandled   = vcState == CallState.ringing ||
+                vState  == VoiceCallState.ringing;
+          } catch (_) {}
+        }
+
+        if (socketHandled) {
+          debugPrint('✅ [FG FCM] Socket handled — skipping CallKit');
+          return;
+        }
+
+        // ✅ Socket missed it — show CallKit with sound
+        debugPrint('⚠️ [FG FCM] Socket missed — showing CallKit');
+        await _showCallkitIncoming(
+          roomName:   d['roomName']   ?? '',
+          callerId:   d['callerId']   ?? '',
+          callerName: d['callerName'] ?? 'Unknown',
+          callType:   type,
+        );
       }
     });
+
   } catch (e) {
     debugPrint('❌ [FCM INIT] $e');
   }
@@ -550,7 +589,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
             timer.cancel();
             return;
           }
-          if (attempts > 100) {
+          if (attempts > 300) {
             _clearCallState();
             timer.cancel();
             return;
@@ -795,7 +834,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         home: auth.isAuthenticated
             ? VoiceCallListener(
             child: IncomingCallListener(
-                child: const MainScreen(initialIndex: 0)))
+                child: MainScreen(key: mainScreenKey, initialIndex: 0)))
             : widget.showLanguage
             ? const LanguageSelectionScreen()
             : const SplashScreen(),
@@ -829,7 +868,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         '/login': (_) => const LoginScreen(),
         '/main': (_) => VoiceCallListener(
             child: IncomingCallListener(
-                child: const MainScreen(initialIndex: 0))),
+                child: MainScreen(key: mainScreenKey, initialIndex: 0))),
       },
     );
   }

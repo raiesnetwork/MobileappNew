@@ -43,6 +43,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
 
   String? _currentUserId;
   bool _isSending = false;
+  bool _isTyping = false;
   File? _selectedFile;
 
   // ── Voice recording ──────────────────────────────────────────────────────
@@ -68,6 +69,12 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
     _groupChatProvider = context.read<GroupChatProvider>();
     _loadCurrentUser();
     _initializeRecorder();
+    _messageController.addListener(() {  // ✅ ADD
+      final typing = _messageController.text.isNotEmpty;
+      if (typing != _isTyping) {
+        setState(() => _isTyping = typing);
+      }
+    });
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _initializeChat());
   }
@@ -1176,43 +1183,45 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                             ),
                           ),
                           Padding(
-                            padding: const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.only(right: 1),
                             child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(
-                                        minWidth: 36, minHeight: 36),
-                                    icon: Icon(Icons.camera_alt,
-                                        size: 20,
-                                        color: (_selectedFile == null &&
-                                            !_isSending)
-                                            ? const Color(0xFF6C5CE7)
-                                            : Colors.grey[400]),
-                                    onPressed:
-                                    (_selectedFile == null &&
-                                        !_isSending)
-                                        ? _capturePhoto
-                                        : null,
-                                  ),
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(
-                                        minWidth: 36, minHeight: 36),
-                                    icon: Icon(Icons.attach_file,
-                                        size: 20,
-                                        color: (_selectedFile == null &&
-                                            !_isSending)
-                                            ? const Color(0xFF6C5CE7)
-                                            : Colors.grey[400]),
-                                    onPressed:
-                                    (_selectedFile == null &&
-                                        !_isSending)
-                                        ? _pickFile
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 4),
+                                  if (!_isTyping) ...[
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                          minWidth: 36, minHeight: 36),
+                                      icon: Icon(Icons.camera_alt,
+                                          size: 20,
+                                          color: (_selectedFile == null &&
+                                              !_isSending)
+                                              ? const Color(0xFF6C5CE7)
+                                              : Colors.grey[400]),
+                                      onPressed:
+                                      (_selectedFile == null &&
+                                          !_isSending)
+                                          ? _capturePhoto
+                                          : null,
+                                    ),
+                                    IconButton(
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(
+                                          minWidth: 36, minHeight: 36),
+                                      icon: Icon(Icons.attach_file,
+                                          size: 20,
+                                          color: (_selectedFile == null &&
+                                              !_isSending)
+                                              ? const Color(0xFF6C5CE7)
+                                              : Colors.grey[400]),
+                                      onPressed:
+                                      (_selectedFile == null &&
+                                          !_isSending)
+                                          ? _pickFile
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 4),
+                                  ],
                                   Container(
                                     width: 36,
                                     height: 36,
@@ -1232,8 +1241,7 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
                                                 strokeWidth: 2,
                                                 valueColor:
                                                 AlwaysStoppedAnimation(
-                                                    Colors
-                                                        .white))))
+                                                    Colors.white))))
                                         : IconButton(
                                       padding: EdgeInsets.zero,
                                       constraints:

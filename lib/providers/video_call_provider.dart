@@ -325,8 +325,12 @@ class VideoCallProvider extends ChangeNotifier {
     debugPrint('📞 Initiating call: roomName=$_currentRoomName | '
         'callerId=$_currentUserId | receiverId=$receiverId');
 
-    Future.delayed(const Duration(seconds: 35), () {
-      if (_isInitiating) _isInitiating = false;
+    Future.delayed(const Duration(seconds: 30), () {
+      if (_isInitiating && _callState == CallState.calling) {
+        debugPrint('⏱️ [VIDEO] Call timeout — no answer after 30s');
+        _errorMessage = 'No answer';
+        endCall();
+      }
     });
   }
 

@@ -208,7 +208,9 @@ class VoiceCallService {
     required String callerName,
     required String receiverId,
     bool isConference = false,
-  }) {
+  }) async {
+    // ✅ ADD THIS
+    await ensureConnectedAndRegistered(callerId);
     if (_socket?.connected != true) {
       debugPrint('⚠️ Cannot initiate call: Socket not connected');
       return;

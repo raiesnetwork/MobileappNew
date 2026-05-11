@@ -160,6 +160,7 @@ class _ForwardMessageScreenState extends State<ForwardMessageScreen>
         Uri.parse('https://api.ixes.ai/api/chat/forwardMessage'),
         headers: {
           'Authorization': 'Bearer $_token',
+          'x-platform': 'mobile',
           'Content-Type': 'application/json',
         },
         body: body,

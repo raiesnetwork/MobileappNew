@@ -10,17 +10,18 @@ import 'package:flutter/material.dart';
 
 class PostService {
 
+  // ✅ GET ALL POSTS
   Future<dynamic> getAllPosts({
     required int offset,
     required int limit,
   }) async {
     try {
       int pageNumber = (offset ~/ limit) + 1;
-
       print("Offset: $offset, Calculated Page: $pageNumber");
 
       final response = await ApiService.get(
-          '/api/mobile/posts?page=$pageNumber&limit=$limit');
+        '/api/mobile/posts?page=$pageNumber&limit=$limit',
+      );
       ApiService.checkResponse(response);
 
       print("GETALLPOSTS Status Code: ${response.statusCode}");
@@ -29,7 +30,7 @@ class PostService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        print("GETALLPOSTS Details Error: ${response.reasonPhrase}");
+        print("GETALLPOSTS Error: ${response.reasonPhrase}");
         return null;
       }
     } catch (e) {
@@ -38,6 +39,7 @@ class PostService {
     }
   }
 
+  // ✅ GET COMMUNITY POSTS
   Future<dynamic> getCommunityPosts({
     required String communityId,
     required int offset,
@@ -45,7 +47,8 @@ class PostService {
   }) async {
     try {
       final response = await ApiService.get(
-          '/api/post/$communityId?offset=$offset&limit=$limit');
+        '/api/post/$communityId?offset=$offset&limit=$limit',
+      );
       ApiService.checkResponse(response);
 
       print("GET_COMMUNITY_POSTS Status Code: ${response.statusCode}");
@@ -54,7 +57,7 @@ class PostService {
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        print("GET_COMMUNITY_POSTS Details Error: ${response.reasonPhrase}");
+        print("GET_COMMUNITY_POSTS Error: ${response.reasonPhrase}");
         return null;
       }
     } catch (e) {
@@ -63,6 +66,25 @@ class PostService {
     }
   }
 
+  // ✅ GET POST BY ID
+  Future<Map<String, dynamic>?> getPostById(String postId) async {
+    try {
+      final response = await ApiService.get('/api/mobile/posts/$postId');
+      ApiService.checkResponse(response);
+      print('📡 getPostById status: ${response.statusCode}');
+      print('📡 getPostById body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return null;
+    } catch (e) {
+      print('getPostById error: $e');
+      return null;
+    }
+  }
+
+  // ✅ CREATE POST
   static Future<Map<String, dynamic>> createPost(
       String mediaType,
       String postContent,
@@ -71,29 +93,19 @@ class PostService {
       String? communityId,
       ) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final fields = <String, String>{
+        'mediaType': mediaType,
+        'postContent': postContent,
+        if (communityId != null) 'communityId': communityId,
+      };
 
-      var request = http.MultipartRequest(
-          'POST', Uri.parse('${apiBaseUrl}api/post'));
-
-      request.headers.addAll({
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      });
-
-      request.fields['mediaType'] = mediaType;
-      request.fields['postContent'] = postContent;
-
-      if (communityId != null) {
-        request.fields['communityId'] = communityId;
-      }
+      final files = <http.MultipartFile>[];
 
       if (imagePaths != null && imagePaths.isNotEmpty) {
         for (int i = 0; i < imagePaths.length; i++) {
           final file = File(imagePaths[i]);
           if (await file.exists()) {
-            request.files.add(await http.MultipartFile.fromPath(
+            files.add(await http.MultipartFile.fromPath(
               'files',
               file.path,
               filename: 'image_$i.${file.path.split('.').last}',
@@ -105,7 +117,7 @@ class PostService {
       if (videoPath != null) {
         final file = File(videoPath);
         if (await file.exists()) {
-          request.files.add(await http.MultipartFile.fromPath(
+          files.add(await http.MultipartFile.fromPath(
             'files',
             file.path,
             filename: 'video.${file.path.split('.').last}',
@@ -114,19 +126,29 @@ class PostService {
       }
 
       print('📤 Multipart request prepared');
-      print('📤 Fields: ${request.fields}');
-      print('📤 Files count: ${request.files.length}');
+      print('📤 Fields: $fields');
+      print('📤 Files count: ${files.length}');
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      ApiService.checkResponse(response); // ✅ 401 check
+      final response = await ApiService.multipart(
+        endpoint: '/api/post',
+        method: 'POST',
+        fields: fields,
+        files: files,
+      );
+      ApiService.checkResponse(response);
 
       print('📥 Response status: ${response.statusCode}');
       print('📥 Response body: "${response.body}"');
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        if (response.body.isEmpty || response.body.trim() == '' || response.body == 'null') {
-          return {'success': true, 'post': null, 'message': 'Post created successfully'};
+        if (response.body.isEmpty ||
+            response.body.trim() == '' ||
+            response.body == 'null') {
+          return {
+            'success': true,
+            'post': null,
+            'message': 'Post created successfully'
+          };
         }
         try {
           final data = json.decode(response.body);
@@ -145,11 +167,19 @@ class PostService {
               };
             }
           } else {
-            return {'success': true, 'post': null, 'message': 'Post created successfully'};
+            return {
+              'success': true,
+              'post': null,
+              'message': 'Post created successfully'
+            };
           }
         } catch (parseError) {
           print('⚠️ Response parsing failed but request succeeded: $parseError');
-          return {'success': true, 'post': null, 'message': 'Post created successfully'};
+          return {
+            'success': true,
+            'post': null,
+            'message': 'Post created successfully'
+          };
         }
       } else {
         try {
@@ -157,13 +187,20 @@ class PostService {
             final errorData = json.decode(response.body);
             return {
               'success': false,
-              'message': errorData['message'] ?? 'Failed to create post: ${response.statusCode}',
+              'message': errorData['message'] ??
+                  'Failed to create post: ${response.statusCode}',
             };
           } else {
-            return {'success': false, 'message': 'Failed to create post: ${response.statusCode}'};
+            return {
+              'success': false,
+              'message': 'Failed to create post: ${response.statusCode}'
+            };
           }
         } catch (parseError) {
-          return {'success': false, 'message': 'Failed to create post: ${response.statusCode}'};
+          return {
+            'success': false,
+            'message': 'Failed to create post: ${response.statusCode}'
+          };
         }
       }
     } catch (e) {
@@ -172,6 +209,7 @@ class PostService {
     }
   }
 
+  // ✅ UPDATE POST
   static Future<Map<String, dynamic>> updatePost({
     required String postId,
     String? postContent,
@@ -181,38 +219,21 @@ class PostService {
     String? newVideoPath,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final fields = <String, String>{
+        if (postContent != null && postContent.isNotEmpty)
+          'postContent': postContent,
+        if (mediaType != null && mediaType.isNotEmpty) 'mediaType': mediaType,
+        if (deleteOldMediaUrl != null && deleteOldMediaUrl.isNotEmpty)
+          'deleteOldMediaUrl': deleteOldMediaUrl,
+      };
 
-      if (token == null) {
-        return {'success': false, 'message': 'Authentication token not found'};
-      }
-
-      var request = http.MultipartRequest(
-        'PUT',
-        Uri.parse('${apiBaseUrl}api/post/update/$postId'),
-      );
-
-      request.headers.addAll({
-        'Authorization': 'Bearer $token',
-        'Accept': 'application/json',
-      });
-
-      if (postContent != null && postContent.isNotEmpty) {
-        request.fields['postContent'] = postContent;
-      }
-      if (mediaType != null && mediaType.isNotEmpty) {
-        request.fields['mediaType'] = mediaType;
-      }
-      if (deleteOldMediaUrl != null && deleteOldMediaUrl.isNotEmpty) {
-        request.fields['deleteOldMediaUrl'] = deleteOldMediaUrl;
-      }
+      final files = <http.MultipartFile>[];
 
       if (newImagePaths != null && newImagePaths.isNotEmpty) {
         for (int i = 0; i < newImagePaths.length; i++) {
           final file = File(newImagePaths[i]);
           if (await file.exists()) {
-            request.files.add(await http.MultipartFile.fromPath(
+            files.add(await http.MultipartFile.fromPath(
               'files',
               file.path,
               filename: 'image_$i.${file.path.split('.').last}',
@@ -224,7 +245,7 @@ class PostService {
       if (newVideoPath != null) {
         final file = File(newVideoPath);
         if (await file.exists()) {
-          request.files.add(await http.MultipartFile.fromPath(
+          files.add(await http.MultipartFile.fromPath(
             'files',
             file.path,
             filename: 'video.${file.path.split('.').last}',
@@ -233,19 +254,29 @@ class PostService {
       }
 
       print('📤 Update request prepared for post: $postId');
-      print('📤 Fields: ${request.fields}');
-      print('📤 Files count: ${request.files.length}');
+      print('📤 Fields: $fields');
+      print('📤 Files count: ${files.length}');
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      ApiService.checkResponse(response); // ✅ 401 check
+      final response = await ApiService.multipart(
+        endpoint: '/api/post/update/$postId',
+        method: 'PUT',
+        fields: fields,
+        files: files,
+      );
+      ApiService.checkResponse(response);
 
       print('📥 Update response status: ${response.statusCode}');
       print('📥 Update response body: ${response.body}');
 
       if (response.statusCode == 200) {
-        if (response.body.isEmpty || response.body.trim() == '' || response.body == 'null') {
-          return {'success': true, 'message': 'Post updated successfully', 'post': null};
+        if (response.body.isEmpty ||
+            response.body.trim() == '' ||
+            response.body == 'null') {
+          return {
+            'success': true,
+            'message': 'Post updated successfully',
+            'post': null
+          };
         }
         try {
           final data = json.decode(response.body);
@@ -256,11 +287,19 @@ class PostService {
               'post': data['post'],
             };
           } else {
-            return {'success': false, 'message': data['message'] ?? 'Failed to update post'};
+            return {
+              'success': false,
+              'message': data['message'] ?? 'Failed to update post'
+            };
           }
         } catch (parseError) {
-          print('⚠️ Response parsing failed but request succeeded: $parseError');
-          return {'success': true, 'message': 'Post updated successfully', 'post': null};
+          print(
+              '⚠️ Response parsing failed but request succeeded: $parseError');
+          return {
+            'success': true,
+            'message': 'Post updated successfully',
+            'post': null
+          };
         }
       } else if (response.statusCode == 404) {
         return {'success': false, 'message': 'Post not found'};
@@ -270,13 +309,20 @@ class PostService {
             final errorData = json.decode(response.body);
             return {
               'success': false,
-              'message': errorData['message'] ?? 'Failed to update post: ${response.statusCode}',
+              'message': errorData['message'] ??
+                  'Failed to update post: ${response.statusCode}',
             };
           } else {
-            return {'success': false, 'message': 'Failed to update post: ${response.statusCode}'};
+            return {
+              'success': false,
+              'message': 'Failed to update post: ${response.statusCode}'
+            };
           }
         } catch (parseError) {
-          return {'success': false, 'message': 'Failed to update post: ${response.statusCode}'};
+          return {
+            'success': false,
+            'message': 'Failed to update post: ${response.statusCode}'
+          };
         }
       }
     } catch (e) {

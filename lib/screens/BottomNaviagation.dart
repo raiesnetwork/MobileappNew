@@ -14,10 +14,14 @@ import 'package:ixes.app/providers/communities_provider.dart';
 import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'chats_page/chat_detail_screen.dart'; // ✅ ADDED for chat navigation
 import 'chats_page/personal_chat_screen.dart';
 import 'communities_page/my_community_screen.dart';
 import 'coupon_page/coupon_screens.dart';
 import 'my_products/my_products_screen.dart';
+
+// ✅ ADDED: GlobalKey to access MainScreen state from NotificationScreen
+final GlobalKey<_MainScreenState> mainScreenKey = GlobalKey<_MainScreenState>();
 
 class MainScreen extends StatefulWidget {
   final int initialIndex;
@@ -36,6 +40,9 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   bool _isInitialized = false;
+
+  // ✅ ADDED: for post navigation from notification
+  String? _pendingPostId;
 
   @override
   void initState() {
@@ -127,6 +134,52 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       if (mounted) {
         _clearTabNotifications(index);
       }
+    });
+  }
+
+  // ✅ ADDED: Public method called from NotificationScreen via mainScreenKey
+  void navigateToTab(
+      int index, {
+        String? postId,
+        String? chatUserId,
+        String? chatTitle,
+        Map<String, dynamic>? chatUserProfile,
+      }) {
+    // ✅ For post: set postId BEFORE switching tab so no flash
+    if (index == 0 && postId != null) {
+      setState(() {
+        _pendingPostId = postId;
+        _currentIndex = index;
+      });
+      _pageController.jumpToPage(index); // ✅ jumpToPage instead of animate — no flash
+    } else {
+      // ✅ For other tabs: jump instantly, no animation = no flash
+      setState(() {
+        _currentIndex = index;
+      });
+      _pageController.jumpToPage(index); // ✅ KEY FIX — eliminates the flash
+    }
+
+    // For chat → open ChatDetailScreen on top of PersonalChatScreen
+    if (index == 2 && chatUserId != null) {
+      Future.delayed(const Duration(milliseconds: 150), () { // ✅ shorter delay since no animation
+        if (!mounted) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatDetailScreen(
+              userId: chatUserId,
+              chatTitle: chatTitle ?? 'Chat',
+              userProfile: chatUserProfile ??
+                  {'profile': {'name': chatTitle ?? 'Chat'}},
+            ),
+          ),
+        );
+      });
+    }
+
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _clearTabNotifications(index);
     });
   }
 
@@ -281,12 +334,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             builder: (context, notifProvider, child) {
               final unreadCount = notifProvider.totalUnreadCount;
 
-
               return Stack(
                 children: [
-
                   IconButton(
-                    icon: const Icon(Icons.notifications_outlined, color: Primary),
+                    icon: const Icon(Icons.notifications_outlined,
+                        color: Primary),
                     onPressed: () async {
                       await Navigator.push(
                         context,
@@ -296,8 +348,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                       );
 
                       if (mounted) {
-                        await context.read<NotificationProvider>().loadNotifications();
-                        await Future.delayed(const Duration(milliseconds: 300));
+                        await context
+                            .read<NotificationProvider>()
+                            .loadNotifications();
+                        await Future.delayed(
+                            const Duration(milliseconds: 300));
                         _clearTabNotifications(_currentIndex);
                       }
                     },
@@ -346,22 +401,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       drawer: Drawer(
         backgroundColor: Colors.black,
-        child: Column(
-          children: [
-            Container(
-              height: 200,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.grey[900]!,
-                    Colors.black,
-                  ],
+        child: SafeArea(
+          child: Column(
+            children: [
+              Container(
+                height: 180,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.grey[900]!,
+                      Colors.black,
+                    ],
+                  ),
                 ),
-              ),
-              child: SafeArea(
                 child: Padding(
                   padding: const EdgeInsets.all(0),
                   child: Column(
@@ -417,23 +472,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   ),
                 ),
               ),
-            ),
-            Expanded(
-              child: Container(
-                color: Colors.black,
-                child: CommunitiesListWidget(
-                  searchController: _searchController,
-                  searchFocusNode: _searchFocusNode,
-                  onCommunityTapped: _onCommunityTapped,
+              Expanded(
+                child: Container(
+                  color: Colors.black,
+                  child: CommunitiesListWidget(
+                    searchController: _searchController,
+                    searchFocusNode: _searchFocusNode,
+                    onCommunityTapped: _onCommunityTapped,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
-          final communityList = provider.myCommunities['data'] as List? ?? [];
+          final communityList =
+              provider.myCommunities['data'] as List? ?? [];
           final communityId = communityList.isNotEmpty
               ? communityList.first['_id']?.toString() ?? ''
               : '';
@@ -450,21 +506,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 }
               });
             },
-            children: const [
-              FeedScreen(),
-              NewaScreen(),
-              PersonalChatScreen(),
-              CommunitiesScreen(),
-              DashboardScreen(),
+            children: [
+              FeedScreen(postId: _pendingPostId, showBackButton: false),// ✅ CHANGED: pass pendingPostId
+              const NewaScreen(),
+              const PersonalChatScreen(),
+              const CommunitiesScreen(),
+              const DashboardScreen(),
             ],
           );
         },
       ),
       bottomNavigationBar: Consumer<NotificationProvider>(
         builder: (context, notifProvider, child) {
-          final homeCount = notifProvider.getUnreadCountForTypes(['Post', 'Announcement']);
-          final chatCount = notifProvider.getUnreadCountForTypes(['chat', 'GroupChat', 'Conversation']);
-          final communityCount = notifProvider.getUnreadCountForTypes(['community', 'GroupRequest']);
+          final homeCount = notifProvider
+              .getUnreadCountForTypes(['Post', 'Announcement']);
+          final chatCount = notifProvider.getUnreadCountForTypes(
+              ['chat', 'GroupChat', 'Conversation']);
+          final communityCount = notifProvider
+              .getUnreadCountForTypes(['community', 'GroupRequest']);
           final dashboardCount = notifProvider.getUnreadCountForTypes([
             'campaign',
             'Service',

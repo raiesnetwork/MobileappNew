@@ -1,35 +1,17 @@
-
-
-import 'dart:developer';
-import 'dart:io';
-import 'package:http_parser/http_parser.dart';
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-// import 'package:ixes.app/api_service/ApiHelper.dart';
-// import 'package:ixes.app/api_s/ervice/ApiHelper.dart';
-// import 'package:ixes.app/api_service/ApiHelper.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-// import 'package:nacl_qr_delivery_app/lib/api_service/ApiHelper.dart';
 import 'dart:convert';
-
+import 'package:flutter/material.dart';
 import '../constants/apiConstants.dart';
+import '../services/api_service.dart';
+
 
 class UserAPI {
   Future<Map<String, dynamic>> SignUpApi(
       BuildContext context, Map<String, dynamic> params) async {
     try {
-      final String url = apiBaseUrl + SIGNUP;
-
-      final headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      };
-
-      final response = await http.post(
-        Uri.parse(url),
-        headers: headers,
-        body: jsonEncode(params),
+      final response = await ApiService.post(
+        SIGNUP,
+        params,
+        requireAuth: false, // signup doesn't need auth
       );
 
       final responseData = jsonDecode(response.body);
@@ -54,63 +36,49 @@ class UserAPI {
     }
   }
 
-  Future<dynamic> getAllPosts(
-    int offset,
-    int limit,
-  ) async {
+  Future<dynamic> getAllPosts(int offset, int limit) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
-
-      final url =
-          Uri.parse('$apiBaseUrl$GETALLPOST?offset=$offset&limit=$limit');
-
-      print("getallfeedpost URL: $url");
-
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+      final response = await ApiService.get(
+        '$GETALLPOST?offset=$offset&limit=$limit',
       );
 
-      print("getallfeedpost Status Code: ${response.statusCode}");
-      print("getallfeedpost Response Body: ${response.body}");
+      ApiService.checkResponse(response);
+
+      print('getallfeedpost Status Code: ${response.statusCode}');
 
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
-        print("getallfeedpost Error: ${response.reasonPhrase}");
+        print('getallfeedpost Error: ${response.reasonPhrase}');
         return null;
       }
     } catch (e) {
       print('Error in getallfeedpost: $e');
-
       return null;
     }
   }
+
   Future<Map<String, dynamic>?> getPostById(String postId) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      String? token = prefs.getString('auth_token');
+      // ✅ Try multiple endpoint patterns
+      final endpoints = [
+        '/api/mobile/post/$postId',
+        '/api/mobile/posts/$postId',
+        '/api/post/$postId',
+        '/api/posts/$postId',
+      ];
 
-      final url = Uri.parse('${apiBaseUrl}api/mobile/post/$postId');
-      print('📡 getPostById URL: $url');
+      for (final endpoint in endpoints) {
+        final response = await ApiService.get(endpoint);
+        ApiService.checkResponse(response);
+        print('📡 getPostById trying $endpoint → ${response.statusCode}');
 
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      print('📡 getPostById status: ${response.statusCode}');
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        if (response.statusCode == 200) {
+          return jsonDecode(response.body);
+        }
       }
+
+      print('❌ getPostById: all endpoints returned non-200');
       return null;
     } catch (e) {
       print('getPostById error: $e');

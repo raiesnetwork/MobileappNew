@@ -44,10 +44,25 @@ class SocketService {
   //  CONNECT
   // ════════════════════════════════════════════════════════════════════════
   Future<bool> connect() async {
-    if (_isConnected || _isConnecting) {
-      print('⚠️ Socket already connected or connecting');
+    // ✅ Already connected — return true immediately
+    if (_isConnected && _socket != null) {
+      print('✅ Socket already connected — skipping');
+      return true;
+    }
+
+    // ✅ Currently connecting — wait for it instead of failing
+    if (_isConnecting) {
+      print('⏳ Socket is connecting — waiting...');
+      int attempts = 0;
+      while (_isConnecting && attempts < 20) {
+        await Future.delayed(const Duration(milliseconds: 300));
+        attempts++;
+      }
+      print('✅ Wait result: connected=$_isConnected');
       return _isConnected;
     }
+
+
 
     try {
       _isConnecting = true;
@@ -68,9 +83,11 @@ class SocketService {
         IO.OptionBuilder()
             .setTransports(['websocket'])
             .setQuery({'token': token, 'userId': userId})
-            .setReconnectionAttempts(5)
-            .setReconnectionDelay(2000)
-            .setTimeout(10000)
+            .setReconnectionAttempts(20)          // ✅ more attempts
+            .setReconnectionDelay(3000)           // ✅ 3 seconds between attempts
+            .setReconnectionDelayMax(10000)       // ✅ max 10 seconds delay
+            .setTimeout(60000)                    // ✅ match backend pingTimeout
+            .enableReconnection()
             .disableAutoConnect()
             .build(),
       );
@@ -136,6 +153,22 @@ class SocketService {
       _connectionController.add(false);
       return false;
     }
+  }
+  // ADD this new method:
+  Future<bool> reconnectAndWait() async {
+    print('🔌 [Socket] reconnectAndWait | isConnected=$_isConnected | socket=${_socket != null} | socketId=${_socket?.id}');
+
+    // Already connected — use it directly
+    if (_isConnected && _socket != null) {
+      print('✅ [Socket] Already connected — skipping reconnect');
+      return true;
+    }
+
+    // Not connected — return false immediately
+    // Let the backend pingTimeout/pingInterval keep the socket alive
+    // instead of trying to reconnect here
+    print('❌ [Socket] Not connected — backend fix needed (pingTimeout/pingInterval)');
+    return false;
   }
 
   // ════════════════════════════════════════════════════════════════════════

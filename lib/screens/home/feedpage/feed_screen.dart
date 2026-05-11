@@ -22,12 +22,14 @@ import 'edit_post_screen.dart';
 
 class FeedScreen extends StatefulWidget {
   final String? postId;
-  final String? communityId; // ✅ Add communityId parameter
+  final String? communityId;
+  final bool showBackButton; // ✅ ADD
 
   const FeedScreen(
       {this.postId,
-      this.communityId, // ✅ Accept communityId
-      super.key});
+        this.communityId,
+        this.showBackButton = true, // ✅ ADD
+        super.key});
 
   @override
   State<FeedScreen> createState() => _FeedScreenState();
@@ -983,7 +985,7 @@ class _FeedScreenState extends State<FeedScreen> {
             LinkPreviewWidget(content: post.postContent),
           ],
           // Show a button to go back and browse the full feed
-          if (widget.postId != null && widget.postId!.isNotEmpty)
+          if (widget.postId != null && widget.postId!.isNotEmpty && widget.showBackButton)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: SizedBox(

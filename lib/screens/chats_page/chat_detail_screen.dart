@@ -57,6 +57,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   File? _selectedFile;
   bool _isSending = false;
+  bool _isTyping = false;
   String? _userId;
   late NotificationProvider _notificationProvider;
 
@@ -79,6 +80,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     _initializeRecorder();
+    _messageController.addListener(() {  // ✅ ADD
+      final typing = _messageController.text.isNotEmpty;
+      if (typing != _isTyping) {
+        setState(() => _isTyping = typing);
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _chatProvider = context.read<PersonalChatProvider>();
       context.read<VideoCallProvider>().setChatProvider(_chatProvider);
@@ -1260,50 +1267,39 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             ),
                           ),
                           Padding(
-                            padding:
-                            const EdgeInsets.only(right: 4),
+                            padding: const EdgeInsets.only(right: 1),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints:
-                                  const BoxConstraints(
-                                      minWidth: 36,
-                                      minHeight: 36),
-                                  icon: Icon(Icons.camera_alt,
-                                      size: 20,
-                                      color: (_selectedFile ==
-                                          null &&
-                                          !_isSending)
-                                          ? Primary
-                                          : Colors.grey[500]),
-                                  onPressed: (_selectedFile ==
-                                      null &&
-                                      !_isSending)
-                                      ? _capturePhoto
-                                      : null,
-                                ),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints:
-                                  const BoxConstraints(
-                                      minWidth: 36,
-                                      minHeight: 36),
-                                  icon: Icon(Icons.attach_file,
-                                      size: 20,
-                                      color: (_selectedFile ==
-                                          null &&
-                                          !_isSending)
-                                          ? Primary
-                                          : Colors.grey[500]),
-                                  onPressed: (_selectedFile ==
-                                      null &&
-                                      !_isSending)
-                                      ? _pickFile
-                                      : null,
-                                ),
-                                const SizedBox(width: 4),
+                                if (!_isTyping) ...[
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                        minWidth: 36, minHeight: 36),
+                                    icon: Icon(Icons.camera_alt,
+                                        size: 20,
+                                        color: (_selectedFile == null && !_isSending)
+                                            ? Primary
+                                            : Colors.grey[500]),
+                                    onPressed: (_selectedFile == null && !_isSending)
+                                        ? _capturePhoto
+                                        : null,
+                                  ),
+                                  IconButton(
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                        minWidth: 36, minHeight: 36),
+                                    icon: Icon(Icons.attach_file,
+                                        size: 20,
+                                        color: (_selectedFile == null && !_isSending)
+                                            ? Primary
+                                            : Colors.grey[500]),
+                                    onPressed: (_selectedFile == null && !_isSending)
+                                        ? _pickFile
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 4),
+                                ],
                                 Container(
                                   width: 36,
                                   height: 36,
@@ -1318,27 +1314,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                       child: SizedBox(
                                           width: 16,
                                           height: 16,
-                                          child:
-                                          CircularProgressIndicator(
-                                              strokeWidth:
-                                              2,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2,
                                               valueColor:
                                               AlwaysStoppedAnimation(
-                                                  Colors
-                                                      .white))))
+                                                  Colors.white))))
                                       : IconButton(
                                     padding: EdgeInsets.zero,
-                                    constraints:
-                                    const BoxConstraints(
-                                        minWidth: 36,
-                                        minHeight: 36),
-                                    icon: const Icon(
-                                        Icons.send,
-                                        size: 18,
-                                        color: Colors.white),
-                                    onPressed: _isSending
-                                        ? null
-                                        : _sendMessage,
+                                    constraints: const BoxConstraints(
+                                        minWidth: 36, minHeight: 36),
+                                    icon: const Icon(Icons.send,
+                                        size: 18, color: Colors.white),
+                                    onPressed:
+                                    _isSending ? null : _sendMessage,
                                   ),
                                 ),
                               ],

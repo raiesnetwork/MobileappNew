@@ -156,8 +156,12 @@ class VoiceCallProvider extends ChangeNotifier {
 
       _clearCallData();
       _safeNotify();
-      Future.delayed(const Duration(seconds: 3), () {
-        if (_callState == VoiceCallState.ended) { _callState = VoiceCallState.idle; _safeNotify(); }
+      Future.delayed(const Duration(seconds: 30), () {
+        if (_isInitiating && _callState == VoiceCallState.calling) {
+          debugPrint('⏱️ [VOICE] Call timeout — no answer after 30s');
+          _errorMessage = 'No answer';
+          endVoiceCall();
+        }
       });
     });
 
