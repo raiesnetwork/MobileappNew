@@ -75,24 +75,17 @@ class PersonalChatProvider with ChangeNotifier {
 
   Future<bool> initializeSocket() async {
     try {
-      // ✅ Already connected — just setup listeners and return
       if (_socketService?.isConnected == true) {
-        print('✅ Socket already connected — setting up listeners only');
         _setupSocketEventListeners();
         return true;
       }
-
-      print('🔌 Initializing socket connection...');
-      final connected = await _chatService.initializeSocket();
-      if (connected) {
-        _setupSocketEventListeners();
-        print('✅ Socket initialized successfully');
-      } else {
-        print('❌ Socket initialization failed');
-      }
-      return connected;
+      // Don't await — just trigger connect and listen via streams
+      _chatService.initializeSocket(); // ← no await
+      _setupSocketEventListeners();
+      print('🔌 Socket connect triggered');
+      return true;
     } catch (e) {
-      print('💥 Error initializing socket: $e');
+      print('💥 Error: $e');
       return false;
     }
   }

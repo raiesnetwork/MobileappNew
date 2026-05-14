@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/service_request/service_request_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../providers/communities_provider.dart';
 import '../announcement_page/announcement_screen.dart';
 import '../home/feedpage/feed_screen.dart';
@@ -1355,6 +1356,13 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         'bgColor': const Color(0xFFFEEAF3),
         'screen': CommunityCouponsScreen(communityId: widget.communityId)
       },
+      {
+        'icon': Icons.school_outlined,
+        'title': 'Academy',
+        'color': const Color(0xFF6C5CE7),
+        'bgColor': const Color(0xFFF0EFFE),
+        'screen': const SizedBox() // dummy, won't be used
+      },
     ];
 
     return Padding(
@@ -1390,12 +1398,21 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
               title: item['title'] as String,
               iconColor: item['color'] as Color,
               bgColor: item['bgColor'] as Color,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => item['screen'] as Widget,
-                ),
-              ),
+              onTap: () {
+                if (item['title'] == 'Academy') {
+                  launchUrl(
+                    Uri.parse('https://ixes.ai/academy'),
+                    mode: LaunchMode.externalApplication,
+                  );
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => item['screen'] as Widget,
+                    ),
+                  );
+                }
+              },
             );
           },
         ),

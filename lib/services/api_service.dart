@@ -2,16 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../constants/apiConstants.dart';
 
 class ApiService {
-  static const String baseUrl = 'https://api.ixes.ai';
-
-  // ✅ Registered by AuthProvider.loadUserFromStorage() — fires forceLogout()
   static Function()? onUnauthorized;
 
-  // ✅ Call this after ANY http.Response anywhere in the app
-  // Paste this one line after every response in every service file:
-  //   ApiService.checkResponse(response);
   static void checkResponse(http.Response response) {
     if (response.statusCode == 401 && onUnauthorized != null) {
       onUnauthorized!();
@@ -22,6 +17,10 @@ class ApiService {
     if (response.statusCode == 401 && onUnauthorized != null) {
       onUnauthorized!();
     }
+  }
+
+  static String _clean(String endpoint) {
+    return endpoint.startsWith('/') ? endpoint.substring(1) : endpoint;
   }
 
   static Future<String?> _getToken() async {
@@ -38,16 +37,14 @@ class ApiService {
       final token = await _getToken();
       if (token != null) {
         headers['Authorization'] = 'Bearer $token';
-        print('🔑 [AUTH TOKEN] Bearer $token'); // ✅ ADD THIS
+        print('🔑 [AUTH TOKEN] Bearer $token');
       } else {
-        print('⚠️ [AUTH TOKEN] No token found!'); // ✅ ADD THIS
+        print('⚠️ [AUTH TOKEN] No token found!');
       }
     }
     return headers;
   }
-  // ADD these two methods to api_service.dart:
 
-// For GET with a full URL (not relative endpoint)
   static Future<http.Response> getFromUrl(String fullUrl, {String? authToken}) async {
     final uri = Uri.parse(fullUrl);
     final token = authToken ?? await _getToken();
@@ -59,7 +56,6 @@ class ApiService {
     return await http.get(uri, headers: headers);
   }
 
-// For POST with a full URL (not relative endpoint)
   static Future<http.Response> postToUrl(
       String fullUrl,
       Map<String, dynamic> body, {
@@ -74,6 +70,7 @@ class ApiService {
     };
     return await http.post(uri, headers: headers, body: json.encode(body));
   }
+
   static Future<http.Response> multipart({
     required String endpoint,
     required String method,
@@ -81,12 +78,10 @@ class ApiService {
     List<http.MultipartFile>? files,
     bool requireAuth = true,
   }) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    final url = Uri.parse('$apiBaseUrl${_clean(endpoint)}');
     print('$method (multipart): $url');
 
     final request = http.MultipartRequest(method, url);
-
-    // ✅ All headers in one place including x-platform
     request.headers['x-platform'] = 'mobile';
     if (requireAuth) {
       final token = await _getToken();
@@ -103,7 +98,7 @@ class ApiService {
   }
 
   static Future<http.Response> get(String endpoint, {bool requireAuth = true}) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    final url = Uri.parse('$apiBaseUrl${_clean(endpoint)}');
     print('GET: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
     final response = await http.get(url, headers: headers);
@@ -113,7 +108,7 @@ class ApiService {
 
   static Future<http.Response> post(String endpoint, Map<String, dynamic> body,
       {bool requireAuth = true}) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    final url = Uri.parse('$apiBaseUrl${_clean(endpoint)}');
     print('POST: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
     final response = await http.post(url, headers: headers, body: json.encode(body));
@@ -123,7 +118,7 @@ class ApiService {
 
   static Future<http.Response> put(String endpoint, Map<String, dynamic> body,
       {bool requireAuth = true}) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    final url = Uri.parse('$apiBaseUrl${_clean(endpoint)}');
     print('PUT: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
     final response = await http.put(url, headers: headers, body: json.encode(body));
@@ -132,7 +127,7 @@ class ApiService {
   }
 
   static Future<http.Response> delete(String endpoint, {bool requireAuth = true}) async {
-    final url = Uri.parse('$baseUrl$endpoint');
+    final url = Uri.parse('$apiBaseUrl${_clean(endpoint)}');
     print('DELETE: $url');
     final headers = await _getHeaders(requireAuth: requireAuth);
     final response = await http.delete(url, headers: headers);
@@ -144,7 +139,7 @@ class ApiService {
     try {
       final platform = Platform.isAndroid ? "android" : "ios";
       final response = await post(
-        '/api/mobile/user/save-fcm',
+        'api/mobile/user/save-fcm',
         {"fcmToken": fcmToken, "platform": platform},
         requireAuth: true,
       );

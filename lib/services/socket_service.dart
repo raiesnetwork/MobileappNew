@@ -44,34 +44,28 @@ class SocketService {
   //  CONNECT
   // ════════════════════════════════════════════════════════════════════════
   Future<bool> connect() async {
-    // ✅ Already connected — return true immediately
     if (_isConnected && _socket != null) {
-      print('✅ Socket already connected — skipping');
+      print('✅ Socket already connected');
       return true;
     }
 
-    // ✅ Currently connecting — wait for it instead of failing
     if (_isConnecting) {
-      print('⏳ Socket is connecting — waiting...');
+      print('⏳ Already connecting — waiting...');
       int attempts = 0;
-      while (_isConnecting && attempts < 20) {
-        await Future.delayed(const Duration(milliseconds: 300));
+      while (_isConnecting && attempts < 40) {
+        await Future.delayed(const Duration(milliseconds: 500));
         attempts++;
       }
-      print('✅ Wait result: connected=$_isConnected');
       return _isConnected;
     }
 
-
-
     try {
       _isConnecting = true;
-      final prefs  = await SharedPreferences.getInstance();
-      final token  = prefs.getString('auth_token');
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
       final userId = prefs.getString('user_id');
 
       if (token == null || userId == null) {
-        print('❗ Cannot connect socket: missing token/userId');
         _isConnecting = false;
         return false;
       }
@@ -79,15 +73,13 @@ class SocketService {
       if (_socket != null) await _disposeSocket();
 
       _socket = IO.io(
-        'wss://api.ixes.ai',
+        'wss://api.ixes.ai',  // ← https not wss
         IO.OptionBuilder()
-            .setTransports(['websocket'])
-            .setQuery({'token': token, 'userId': userId})
-            .setReconnectionAttempts(20)          // ✅ more attempts
-            .setReconnectionDelay(3000)           // ✅ 3 seconds between attempts
-            .setReconnectionDelayMax(10000)       // ✅ max 10 seconds delay
-            .setTimeout(60000)                    // ✅ match backend pingTimeout
+            .setTransports(['polling', 'websocket'])  // ← same as web default
+            .setQuery({'userId': userId})  // ← web only sends userId, no token!
             .enableReconnection()
+            .setReconnectionAttempts(5)
+            .setReconnectionDelay(1000)
             .disableAutoConnect()
             .build(),
       );
@@ -95,62 +87,57 @@ class SocketService {
       _setupEventListeners();
 
       _socket!.onConnect((_) {
-        print("✅ Connected to socket server");
-        _isConnected  = true;
-        _isConnecting = false;
+        print("✅ Connected to socket server | id=${_socket?.id}");
+        _isConnected = true;
+        _isConnecting = false;  // ← reset here
         _connectionController.add(true);
         _socket!.emit("joinUser", userId);
         _cancelReconnectTimer();
-
-        // ── NEW: broadcast the live socket so GroupChatProvider can wire up ──
         if (!_socketReadyController.isClosed && _socket != null) {
           _socketReadyController.add(_socket!);
-          print('📡 [SocketService] onSocketReady fired');
         }
       });
 
-      _socket!.onDisconnect((_) {
-        print("❌ Disconnected from socket server");
-        _isConnected  = false;
-        _isConnecting = false;
+      _socket!.onConnectError((data) {
+        print("💥 Connect error: $data");
+        _isConnected = false;
+        _isConnecting = false;  // ← reset here
         _connectionController.add(false);
         _startReconnectTimer();
-      });
-
-      _socket!.onConnectError((data) {
-        print("💥 Socket connection error: $data");
-        _isConnected  = false;
-        _isConnecting = false;
-        _connectionController.add(false);
       });
 
       _socket!.onError((data) {
         print("💥 Socket error: $data");
-        _isConnected  = false;
-        _isConnecting = false;
+        _isConnected = false;
+        _isConnecting = false;  // ← reset here
         _connectionController.add(false);
-      });
-
-      _socket!.onReconnect((data) {
-        print("🔄 Socket reconnecting... attempt: $data");
-      });
-
-      _socket!.onReconnectError((data) {
-        print("💥 Reconnection error: $data");
-      });
-
-      _socket!.onReconnectFailed((_) {
-        print("❌ Reconnection failed");
         _startReconnectTimer();
       });
 
+      _socket!.onDisconnect((_) {
+        print("❌ Disconnected");
+        _isConnected = false;
+        _isConnecting = false;
+        _connectionController.add(false);
+        _startReconnectTimer();
+      });
+
+      _socket!.onReconnect((_) => print("🔄 Reconnected"));
+      _socket!.onReconnectError((d) => print("💥 Reconnect error: $d"));
+      _socket!.onReconnectFailed((_) {
+        print("❌ Reconnect failed");
+        _startReconnectTimer();
+      });
+
+      print('🔌 Connecting to: wss://api.ixes.ai');
       _socket!.connect();
-      return true;
+
+      return true;  // ← only ONE return, no _isConnecting = false here
+
     } catch (e) {
-      print("💥 Socket connection error: $e");
-      _isConnected  = false;
+      print("💥 $e");
+      _isConnected = false;
       _isConnecting = false;
-      _connectionController.add(false);
       return false;
     }
   }
