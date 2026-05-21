@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../services/service_request_service.dart';
 
@@ -5,15 +6,20 @@ class ServiceRequestProvider extends ChangeNotifier {
   final ServiceRequestService _service = ServiceRequestService();
 
   List<Map<String, dynamic>> _requests = [];
+  List<Map<String, dynamic>> _assignedRequests = [];
   bool _isLoading = false;
   String? _error;
   Map<String, dynamic>? _currentRequest;
 
   List<Map<String, dynamic>> get requests => _requests;
+  List<Map<String, dynamic>> get assignedRequests => _assignedRequests;
   bool get isLoading => _isLoading;
   String? get error => _error;
   Map<String, dynamic>? get currentRequest => _currentRequest;
 
+  // ─────────────────────────────────────────────
+  // FETCH ALL
+  // ─────────────────────────────────────────────
   Future<void> fetchServiceRequests({
     String? status,
     String? communityId,
@@ -32,27 +38,37 @@ class ServiceRequestProvider extends ChangeNotifier {
 
       if (response['error'] == false) {
         _requests = List<Map<String, dynamic>>.from(response['data'] ?? []);
+        _assignedRequests = List<Map<String, dynamic>>.from(
+            response['userAssignedRequests'] ?? []);
         _error = null;
       } else {
         _error = response['message'] ?? 'Unknown error occurred';
         _requests = [];
+        _assignedRequests = [];
       }
     } catch (e) {
       _error = 'Failed to fetch service requests: ${e.toString()}';
       _requests = [];
+      _assignedRequests = [];
     }
 
     _isLoading = false;
     notifyListeners();
   }
 
+  // ─────────────────────────────────────────────
+  // CREATE
+  // ─────────────────────────────────────────────
   Future<Map<String, dynamic>> createServiceRequest({
     required String subject,
     required String description,
     required String category,
     required String priority,
     String? communityId,
-    String? assignedTo, // Add this parameter
+    String? assignedTo,
+    String? dueDate,
+    String? source,
+    String? email,
   }) async {
     _isLoading = true;
     _error = null;
@@ -65,7 +81,10 @@ class ServiceRequestProvider extends ChangeNotifier {
         category: category,
         priority: priority,
         communityId: communityId,
-        assignedTo: assignedTo, // Pass it to the service
+        assignedTo: assignedTo,
+        dueDate: dueDate,
+        source: source,
+        email: email,
       );
 
       if (response['error'] == false) {
@@ -73,30 +92,26 @@ class ServiceRequestProvider extends ChangeNotifier {
         await fetchServiceRequests(communityId: communityId);
         return {
           'error': false,
-          'message': response['message'] ?? 'Service request created successfully',
+          'message':
+          response['message'] ?? 'Service request created successfully',
           'data': response['data'],
         };
       } else {
         _error = response['message'] ?? 'Failed to create service request';
-        return {
-          'error': true,
-          'message': _error,
-          'data': null,
-        };
+        return {'error': true, 'message': _error, 'data': null};
       }
     } catch (e) {
       _error = 'Failed to create service request: ${e.toString()}';
-      return {
-        'error': true,
-        'message': _error,
-        'data': null,
-      };
+      return {'error': true, 'message': _error, 'data': null};
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+  // ─────────────────────────────────────────────
+  // GET BY ID
+  // ─────────────────────────────────────────────
   Future<Map<String, dynamic>> getServiceRequestById(String requestId) async {
     _isLoading = true;
     _error = null;
@@ -107,34 +122,40 @@ class ServiceRequestProvider extends ChangeNotifier {
       final response = await _service.getServiceRequestById(requestId);
 
       if (response['error'] == false) {
-        _currentRequest = response['data'];
+        _currentRequest = response['data'] != null
+            ? Map<String, dynamic>.from(
+            response['data'] as Map<String, dynamic>)
+            : null;
         _error = null;
         return {
           'error': false,
-          'message': response['message'] ?? 'Service request retrieved successfully',
+          'message': response['message'] ?? 'Retrieved successfully',
           'data': response['data'],
         };
       } else {
         _error = response['message'] ?? 'Failed to get service request';
-        return {
-          'error': true,
-          'message': _error,
-          'data': null,
-        };
+        return {'error': true, 'message': _error, 'data': null};
       }
     } catch (e) {
       _error = 'Failed to get service request: ${e.toString()}';
-      return {
-        'error': true,
-        'message': _error,
-        'data': null,
-      };
+      return {'error': true, 'message': _error, 'data': null};
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+  // ─────────────────────────────────────────────
+  // UPDATE (status / notes / files)
+  //
+  // FIX 1: Always update _currentRequest immediately from the
+  //         response data so the UI reflects new files, status,
+  //         and working notes without a separate API call.
+  //
+  // FIX 2: Call notifyListeners() right after setting
+  //         _currentRequest so the screen re-renders instantly
+  //         before the background fetchServiceRequests completes.
+  // ─────────────────────────────────────────────
   Future<Map<String, dynamic>> updateServiceRequest({
     required String requestId,
     String? subject,
@@ -144,6 +165,10 @@ class ServiceRequestProvider extends ChangeNotifier {
     String? status,
     String? assignedTo,
     String? completedBy,
+    String? nextAction,
+    String? dueDate,
+    List<File>? files,
+    String? communityId,
   }) async {
     _isLoading = true;
     _error = null;
@@ -159,38 +184,55 @@ class ServiceRequestProvider extends ChangeNotifier {
         status: status,
         assignedTo: assignedTo,
         completedBy: completedBy,
+        nextAction: nextAction,
+        dueDate: dueDate,
+        files: files,
       );
 
       if (response['error'] == false) {
         _error = null;
-        await fetchServiceRequests(); // Refresh the requests list
+
+        // FIX 1: Always set _currentRequest from the response so
+        // attachments / status / notes appear immediately in the UI.
+        if (response['data'] != null) {
+          _currentRequest = Map<String, dynamic>.from(
+              response['data'] as Map<String, dynamic>);
+        }
+
+        // FIX 2: Notify immediately so screen re-renders with new
+        // data before the list refresh below completes.
+        _isLoading = false;
+        notifyListeners();
+
+        // Refresh the list in the background (non-blocking for UI).
+        await fetchServiceRequests(communityId: communityId);
+
         return {
           'error': false,
-          'message': response['message'] ?? 'Service request updated successfully',
+          'message':
+          response['message'] ?? 'Service request updated successfully',
           'data': response['data'],
         };
       } else {
         _error = response['message'] ?? 'Failed to update service request';
-        return {
-          'error': true,
-          'message': _error,
-          'data': null,
-        };
+        return {'error': true, 'message': _error, 'data': null};
       }
     } catch (e) {
       _error = 'Failed to update service request: ${e.toString()}';
-      return {
-        'error': true,
-        'message': _error,
-        'data': null,
-      };
+      return {'error': true, 'message': _error, 'data': null};
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  Future<Map<String, dynamic>> deleteServiceRequest(String requestId) async {
+  // ─────────────────────────────────────────────
+  // DELETE
+  // ─────────────────────────────────────────────
+  Future<Map<String, dynamic>> deleteServiceRequest(
+      String requestId, {
+        String? communityId,
+      }) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
@@ -200,37 +242,38 @@ class ServiceRequestProvider extends ChangeNotifier {
 
       if (response['error'] == false) {
         _error = null;
-        await fetchServiceRequests(); // Refresh the requests list
+        // Clear currentRequest if it was the deleted one
+        if (_currentRequest != null &&
+            _currentRequest!['_id'] == requestId) {
+          _currentRequest = null;
+        }
+        await fetchServiceRequests(communityId: communityId);
         return {
           'error': false,
-          'message': response['message'] ?? 'Service request deleted successfully',
+          'message':
+          response['message'] ?? 'Service request deleted successfully',
           'data': null,
         };
       } else {
         _error = response['message'] ?? 'Failed to delete service request';
-        return {
-          'error': true,
-          'message': _error,
-          'data': null,
-        };
+        return {'error': true, 'message': _error, 'data': null};
       }
     } catch (e) {
       _error = 'Failed to delete service request: ${e.toString()}';
-      return {
-        'error': true,
-        'message': _error,
-        'data': null,
-      };
+      return {'error': true, 'message': _error, 'data': null};
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+
   void clearError() {
     _error = null;
     notifyListeners();
   }
+
+
 
   void clearCurrentRequest() {
     _currentRequest = null;

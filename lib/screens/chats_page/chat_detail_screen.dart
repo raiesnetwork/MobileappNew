@@ -98,7 +98,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       await _initializeChatNotifications();
       _chatProvider.clearUnreadCount(widget.userId);
-      await _chatProvider.fetchConversation(widget.userId);
+
+      // ← Only fetch fresh if this is a new conversation or empty
+      final alreadyLoaded = _chatProvider.currentReceiverId == widget.userId &&
+          _chatProvider.messages.isNotEmpty;
+
+      if (!alreadyLoaded) {
+        await _chatProvider.fetchConversation(widget.userId);
+      }
+
       await _chatProvider.updateReadStatus(
         senderId: widget.userId,
         receiverId: _chatProvider.currentUserId!,

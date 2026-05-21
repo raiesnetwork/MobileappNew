@@ -6,6 +6,76 @@ import '../constants/apiConstants.dart';
 
 class ApiService {
   static Function()? onUnauthorized;
+  static bool _isRefreshing = false;
+
+  // ─── Token expiry check ───────────────────────────────────────────────────
+  static bool isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      String payload = parts[1];
+      while (payload.length % 4 != 0) payload += '=';
+      final decoded = utf8.decode(base64Url.decode(payload));
+      final map = jsonDecode(decoded) as Map<String, dynamic>;
+      final exp = map['exp'] as int?;
+      if (exp == null) return true;
+      // Consider expired if less than 5 minutes remaining
+      final nowSecs = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      return nowSecs > (exp - 300);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // ─── Refresh token ────────────────────────────────────────────────────────
+  static Future<String?> refreshToken() async {
+    if (_isRefreshing) return null;
+    _isRefreshing = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final oldToken = prefs.getString('auth_token');
+      if (oldToken == null) return null;
+
+      final url = Uri.parse('${apiBaseUrl}api/auth/refresh-token');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-platform': 'mobile',
+          'Authorization': 'Bearer $oldToken',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final newToken = data['token'] as String?;
+        if (newToken != null && newToken.isNotEmpty) {
+          await prefs.setString('auth_token', newToken);
+          print('✅ [TOKEN] Refreshed successfully');
+          return newToken;
+        }
+      }
+      print('⚠️ [TOKEN] Refresh failed: ${response.statusCode}');
+      return null;
+    } catch (e) {
+      print('❌ [TOKEN] Refresh error: $e');
+      return null;
+    } finally {
+      _isRefreshing = false;
+    }
+  }
+
+  // ─── Get valid token (refresh if needed) ──────────────────────────────────
+  static Future<String?> getValidToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    if (token == null) return null;
+    if (isTokenExpired(token)) {
+      print('⚠️ [TOKEN] Expired or expiring soon — refreshing...');
+      return await refreshToken();
+    }
+    return token;
+  }
 
   static void checkResponse(http.Response response) {
     if (response.statusCode == 401 && onUnauthorized != null) {
@@ -14,7 +84,8 @@ class ApiService {
   }
 
   static void _handleResponse(http.Response response) {
-    if (response.statusCode == 401 && onUnauthorized != null) {
+    if ((response.statusCode == 401 || response.statusCode == 403)
+        && onUnauthorized != null) {
       onUnauthorized!();
     }
   }
@@ -34,12 +105,14 @@ class ApiService {
       'x-platform': 'mobile',
     };
     if (requireAuth) {
-      final token = await _getToken();
+      // Always get valid (non-expired) token
+      final token = await getValidToken();
       if (token != null) {
         headers['Authorization'] = 'Bearer $token';
         print('🔑 [AUTH TOKEN] Bearer $token');
       } else {
-        print('⚠️ [AUTH TOKEN] No token found!');
+        print('⚠️ [AUTH TOKEN] No valid token — user may need to login again');
+        if (onUnauthorized != null) onUnauthorized!();
       }
     }
     return headers;
@@ -47,7 +120,7 @@ class ApiService {
 
   static Future<http.Response> getFromUrl(String fullUrl, {String? authToken}) async {
     final uri = Uri.parse(fullUrl);
-    final token = authToken ?? await _getToken();
+    final token = authToken ?? await getValidToken();
     final headers = {
       'Content-Type': 'application/json',
       'x-platform': 'mobile',
@@ -62,7 +135,7 @@ class ApiService {
         String? authToken,
       }) async {
     final uri = Uri.parse(fullUrl);
-    final token = authToken ?? await _getToken();
+    final token = authToken ?? await getValidToken();
     final headers = {
       'Content-Type': 'application/json',
       'x-platform': 'mobile',
@@ -84,7 +157,7 @@ class ApiService {
     final request = http.MultipartRequest(method, url);
     request.headers['x-platform'] = 'mobile';
     if (requireAuth) {
-      final token = await _getToken();
+      final token = await getValidToken();
       if (token != null) request.headers['Authorization'] = 'Bearer $token';
     }
 

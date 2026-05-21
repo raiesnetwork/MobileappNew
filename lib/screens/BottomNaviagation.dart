@@ -14,6 +14,7 @@ import 'package:ixes.app/providers/communities_provider.dart';
 import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'auth/launguage_selection_page.dart';
 import 'chats_page/chat_detail_screen.dart'; // ✅ ADDED for chat navigation
 import 'chats_page/personal_chat_screen.dart';
 import 'communities_page/my_community_screen.dart';
@@ -316,43 +317,35 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 _scaffoldKey.currentState?.openDrawer();
               },
             ),
-            Container(
-              height: 30,
-              width: 30,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                image: DecorationImage(
-                  image: AssetImage(Images.Logo),
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
+            // Container(
+            //   height: 30,
+            //   width: 30,
+            //   decoration: BoxDecoration(
+            //     borderRadius: BorderRadius.circular(8),
+            //     image: DecorationImage(
+            //       image: AssetImage(Images.Logo),
+            //       fit: BoxFit.cover,
+            //     ),
+            //   ),
+            // ),
           ],
         ),
         actions: [
           Consumer<NotificationProvider>(
             builder: (context, notifProvider, child) {
               final unreadCount = notifProvider.totalUnreadCount;
-
               return Stack(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.notifications_outlined,
-                        color: Primary),
+                    icon: const Icon(Icons.notifications_outlined, color: Primary),
                     onPressed: () async {
                       await Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (context) => const NotificationScreen(),
-                        ),
+                        MaterialPageRoute(builder: (context) => const NotificationScreen()),
                       );
-
                       if (mounted) {
-                        await context
-                            .read<NotificationProvider>()
-                            .loadNotifications();
-                        await Future.delayed(
-                            const Duration(milliseconds: 300));
+                        await context.read<NotificationProvider>().loadNotifications();
+                        await Future.delayed(const Duration(milliseconds: 300));
                         _clearTabNotifications(_currentIndex);
                       }
                     },
@@ -365,36 +358,33 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.local_offer_outlined, color: Primary),
             tooltip: 'My Coupons',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const CouponListScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CouponListScreen())),
           ),
           IconButton(
             icon: const Icon(Icons.store, color: Primary),
-            onPressed: () {
-              Navigator.push(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ServicesScreen())),
+          ),
+
+          // ✅ NEW: Language switcher
+          IconButton(
+            icon: const Icon(Icons.language, color: Primary),
+            tooltip: 'Change Language',
+            onPressed: () async {
+              final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => const ServicesScreen(),
+                  builder: (_) => const LanguageSelectionScreen(isFromSettings: true),
                 ),
               );
+              if (result != null && mounted) {
+                setState(() {});
+              }
             },
           ),
+
           IconButton(
             icon: const Icon(Icons.person, color: Primary),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const ProfileScreen(),
-                ),
-              );
-            },
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
           ),
           const SizedBox(width: 12),
         ],

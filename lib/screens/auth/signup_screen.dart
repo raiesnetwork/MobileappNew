@@ -6,6 +6,7 @@ import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sizer/sizer.dart';
+import '../../app_localisations.dart';
 import '../../providers/auth_provider.dart';
 
 class _C {
@@ -90,9 +91,10 @@ class _SignupScreenState extends State<SignupScreen>
   }
 
   Future<void> _handleSignUp() async {
+    final t = AppLocalizations.instance;
     if (!_formKey.currentState!.validate()) return;
     if (!_agreement) {
-      _showSnack('Please agree to the terms and conditions', isError: true);
+      _showSnack(t.agreeToTermsError, isError: true);
       return;
     }
 
@@ -122,12 +124,22 @@ class _SignupScreenState extends State<SignupScreen>
         );
       }
     } else {
-      _showSnack(response['message'] ?? 'Sign up failed. Try again.', isError: true);
+      _showSnack(response['message'] ?? t.signUpFailed, isError: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLocalizations.notifier,
+      builder: (context, _, __) {
+        final t = AppLocalizations.instance;
+        return _buildScaffold(context, t);
+      },
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, AppLocalizations t) {
     return Scaffold(
       backgroundColor: _C.bg,
       resizeToAvoidBottomInset: true,
@@ -148,11 +160,10 @@ class _SignupScreenState extends State<SignupScreen>
                   children: [
                     SizedBox(height: 2.h),
 
-                    // ── Top row: [←]  [Logo] ─────────────────────────
+                    // ── Top row: [←] ─────────────────────────────────
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Back button
                         GestureDetector(
                           onTap: () => Navigator.pop(context),
                           child: Container(
@@ -170,10 +181,7 @@ class _SignupScreenState extends State<SignupScreen>
                             ),
                           ),
                         ),
-
                         const SizedBox(width: 12),
-
-
                       ],
                     ),
 
@@ -181,9 +189,9 @@ class _SignupScreenState extends State<SignupScreen>
 
                     // ── Heading ──────────────────────────────────────
                     Center(
-                      child: const Text(
-                        'Create account',
-                        style: TextStyle(
+                      child: Text(
+                        t.createAccount,
+                        style: const TextStyle(
                           color: _C.textPrimary,
                           fontSize: 26,
                           fontWeight: FontWeight.w700,
@@ -193,9 +201,9 @@ class _SignupScreenState extends State<SignupScreen>
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      'Join iXES and connect with your community',
-                      style: TextStyle(
+                    Text(
+                      t.joinIxes,
+                      style: const TextStyle(
                         color: _C.textSecondary,
                         fontSize: 13.5,
                         height: 1.5,
@@ -217,61 +225,60 @@ class _SignupScreenState extends State<SignupScreen>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _buildLabel('Mobile Number'),
+                            _buildLabel(t.mobileNumberLabel),
                             const SizedBox(height: 8),
-                            _buildMobileField(),
+                            _buildMobileField(t),
                             const SizedBox(height: 16),
 
-                            _buildLabel('Username'),
+                            _buildLabel(t.usernameLabel),
                             const SizedBox(height: 8),
                             _buildInputField(
                               controller: _usernameController,
-                              hint: 'e.g. john_doe',
+                              hint: t.usernamePlaceholder,
                               icon: Icons.person_outline_rounded,
                               validator: (v) {
-                                if (v == null || v.isEmpty) return 'Enter a username';
-                                if (v.length < 3) return 'At least 3 characters';
+                                if (v == null || v.isEmpty) return t.enterUsernameError;
+                                if (v.length < 3) return t.usernameMinLength;
                                 return null;
                               },
                             ),
                             const SizedBox(height: 16),
 
-                            _buildLabel('Password'),
+                            _buildLabel(t.passwordLabel),
                             const SizedBox(height: 8),
                             _buildPasswordField(
                               controller: _passwordController,
-                              hint: 'Min. 6 characters',
+                              hint: t.passwordMinChars,
                               obscure: _obscurePassword,
                               onToggle: () => setState(
                                       () => _obscurePassword = !_obscurePassword),
                               validator: (v) {
-                                if (v == null || v.isEmpty) return 'Enter a password';
-                                if (v.length < 6) return 'At least 6 characters';
+                                if (v == null || v.isEmpty) return t.enterPasswordError;
+                                if (v.length < 6) return t.passwordMinLength;
                                 return null;
                               },
                             ),
                             const SizedBox(height: 16),
 
-                            _buildLabel('Confirm Password'),
+                            _buildLabel(t.confirmPasswordLabel),
                             const SizedBox(height: 8),
                             _buildPasswordField(
                               controller: _confirmPasswordController,
-                              hint: 'Re-enter your password',
+                              hint: t.reenterPassword,
                               obscure: _obscureConfirmPassword,
                               onToggle: () => setState(() =>
                               _obscureConfirmPassword = !_obscureConfirmPassword),
                               validator: (v) {
-                                if (v == null || v.isEmpty) return 'Confirm your password';
-                                if (v != _passwordController.text)
-                                  return 'Passwords do not match';
+                                if (v == null || v.isEmpty) return t.confirmPasswordError;
+                                if (v != _passwordController.text) return t.passwordsNotMatch;
                                 return null;
                               },
                             ),
                             const SizedBox(height: 20),
 
                             _buildToggleTile(
-                              title: 'Terms & Conditions',
-                              subtitle: 'I agree to the terms and conditions',
+                              title: t.termsTitle,
+                              subtitle: t.termsSubtitle,
                               icon: Icons.verified_user_outlined,
                               value: _agreement,
                               onChanged: (v) =>
@@ -283,6 +290,7 @@ class _SignupScreenState extends State<SignupScreen>
                             _SignupButton(
                               isLoading: _isLoading,
                               onPressed: _handleSignUp,
+                              label: t.createAccountBtn,
                             ),
                           ],
                         ),
@@ -295,15 +303,16 @@ class _SignupScreenState extends State<SignupScreen>
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Text(
-                          'Already have an account?  ',
-                          style: TextStyle(color: _C.textSecondary, fontSize: 13),
+                        Text(
+                          t.alreadyHaveAccount,
+                          style: const TextStyle(
+                              color: _C.textSecondary, fontSize: 13),
                         ),
                         GestureDetector(
                           onTap: () => Navigator.pop(context),
-                          child: const Text(
-                            'Sign In',
-                            style: TextStyle(
+                          child: Text(
+                            t.signIn,
+                            style: const TextStyle(
                               color: _C.accent,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -334,7 +343,7 @@ class _SignupScreenState extends State<SignupScreen>
     ),
   );
 
-  Widget _buildMobileField() {
+  Widget _buildMobileField(AppLocalizations t) {
     return Container(
       decoration: BoxDecoration(
         color: _C.surfaceHi,
@@ -370,16 +379,16 @@ class _SignupScreenState extends State<SignupScreen>
                 LengthLimitingTextInputFormatter(10),
               ],
               style: const TextStyle(color: _C.textPrimary, fontSize: 15),
-              decoration: const InputDecoration(
-                hintText: 'Enter mobile number',
-                hintStyle: TextStyle(color: _C.textMuted, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: t.enterMobileNumberHint,
+                hintStyle: const TextStyle(color: _C.textMuted, fontSize: 14),
                 border: InputBorder.none,
                 contentPadding:
-                EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
               ),
               validator: (v) {
-                if (v == null || v.isEmpty) return 'Enter mobile number';
-                if (v.length < 10) return 'Enter a valid 10-digit number';
+                if (v == null || v.isEmpty) return t.enterMobileNumber;
+                if (v.length < 10) return t.enterValidNumber;
                 return null;
               },
             ),
@@ -490,8 +499,7 @@ class _SignupScreenState extends State<SignupScreen>
                 color: value ? color.withOpacity(0.15) : _C.surface,
                 borderRadius: BorderRadius.circular(8),
               ),
-              child:
-              Icon(icon, color: value ? color : _C.textMuted, size: 16),
+              child: Icon(icon, color: value ? color : _C.textMuted, size: 16),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -528,13 +536,16 @@ class _SignupScreenState extends State<SignupScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-
 class _SignupButton extends StatelessWidget {
   final bool isLoading;
   final VoidCallback? onPressed;
+  final String label;
 
-  const _SignupButton({required this.isLoading, this.onPressed});
+  const _SignupButton({
+    required this.isLoading,
+    required this.label,
+    this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -557,9 +568,9 @@ class _SignupButton extends StatelessWidget {
           child: CircularProgressIndicator(
               strokeWidth: 2, color: Colors.white),
         )
-            : const Text(
-          'Create Account',
-          style: TextStyle(
+            : Text(
+          label,
+          style: const TextStyle(
             fontSize: 15.5,
             fontWeight: FontWeight.w600,
             letterSpacing: 0.2,

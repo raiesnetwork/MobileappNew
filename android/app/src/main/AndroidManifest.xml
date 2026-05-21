@@ -110,9 +110,23 @@
             android:exported="false"
             android:foregroundServiceType="phoneCall"
             android:stopWithTask="false" />
-
+        <!-- ─── Custom FCM Service (intercepts call notifications) ─── -->
         <service
-            android:name="de.julianassmann.flutter_background.IsolateHolderService"
+            android:name=".MyFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- FCM default notification channel -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="call_channel" />
+
+        <!-- ─── Screen Share Service ─── -->
+        <service
+            android:name=".ScreenShareService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 

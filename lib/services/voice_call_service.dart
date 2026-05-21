@@ -15,9 +15,23 @@ class VoiceCallService {
 
   // ============================================================================
   // SOCKET CONNECTION
+  // FIX: Reuse existing socket if connected; dispose old one before creating new
   // ============================================================================
 
   void connectSocket() {
+    // ✅ FIX: If socket already connected, reuse it
+    if (_socket != null && _socket!.connected) {
+      debugPrint('✅ Voice socket already connected — reusing');
+      return;
+    }
+    // ✅ FIX: Clean up old socket before creating new one
+    if (_socket != null) {
+      _clearAllListeners();
+      _socket!.dispose();
+      _socket = null;
+      _isRegistered = false;
+    }
+
     _socket = IO.io(
       socketUrl,
       IO.OptionBuilder()
@@ -30,25 +44,14 @@ class VoiceCallService {
           .build(),
     );
 
-    _socket?.onConnectError((error) {
-      debugPrint('❌ Socket CONNECT ERROR: $error');
-    });
-
-    _socket?.onError((error) {
-      debugPrint('❌ Socket ERROR: $error');
-    });
-
+    _socket?.onConnectError((error) => debugPrint('❌ Voice Socket CONNECT ERROR: $error'));
+    _socket?.onError((error) => debugPrint('❌ Voice Socket ERROR: $error'));
     _socket?.onReconnect((attempt) {
-      debugPrint('🔄 Socket RECONNECTING (attempt $attempt)');
+      debugPrint('🔄 Voice Socket RECONNECTING (attempt $attempt)');
+      _isRegistered = false; // ✅ force re-registration after reconnect
     });
-
-    _socket?.onReconnectError((error) {
-      debugPrint('❌ Socket RECONNECT ERROR: $error');
-    });
-
-    _socket?.onReconnectFailed((_) {
-      debugPrint('❌ Socket RECONNECT FAILED');
-    });
+    _socket?.onReconnectError((error) => debugPrint('❌ Voice Socket RECONNECT ERROR: $error'));
+    _socket?.onReconnectFailed((_) => debugPrint('❌ Voice Socket RECONNECT FAILED'));
 
     debugPrint('🎙️ Voice call socket configured');
   }
@@ -68,33 +71,44 @@ class VoiceCallService {
     debugPrint('🔌 Disconnected from voice call socket');
   }
 
+  // ✅ FIX: Clear all event listeners to prevent stacking
+  void _clearAllListeners() {
+    _socket?.off('connect');
+    _socket?.off('disconnect');
+    _socket?.off('incoming-voice-call');
+    _socket?.off('call-accepted-voice');
+    _socket?.off('call-rejected-voice');
+    _socket?.off('voice-call-ended');
+    _socket?.off('user-offline-voice');
+    _socket?.off('new-participant-invited-voice');
+    _socket?.off('participant-joined-voice-call');
+    _socket?.off('participant-left-voice-call');
+  }
+
   void dispose() {
     _isRegistered = false;
+    _clearAllListeners();
     _socket?.dispose();
+    _socket = null;
     debugPrint('🗑️ Voice call socket disposed');
   }
 
   // ============================================================================
-  // ✅ KEY FIX: RELIABLE ensureConnectedAndRegistered
-  // Uses polling instead of once('connect') to avoid race conditions
-  // where the connect event fires before once() is attached.
+  // RELIABLE ensureConnectedAndRegistered
   // ============================================================================
   Future<void> ensureConnectedAndRegistered(String userId) async {
     debugPrint('🔌 ensureConnectedAndRegistered: start | connected=${_socket?.connected} | registered=$_isRegistered');
 
-    // Step 1: Initialize socket if null
     if (_socket == null) {
       debugPrint('⚠️ Socket is null — initializing');
       connectSocket();
     }
 
-    // Step 2: Trigger connect if not connected
     if (_socket?.connected != true) {
       debugPrint('🔌 Socket not connected — calling connect()');
       _socket?.connect();
     }
 
-    // Step 3: Poll until connected (max 10 seconds)
     const pollInterval = Duration(milliseconds: 200);
     const maxWait = Duration(seconds: 10);
     final deadline = DateTime.now().add(maxWait);
@@ -102,18 +116,16 @@ class VoiceCallService {
     while (_socket?.connected != true) {
       if (DateTime.now().isAfter(deadline)) {
         debugPrint('⏰ ensureConnectedAndRegistered: timeout waiting for connection');
-        return; // Caller handles the not-connected case
+        return;
       }
       debugPrint('⏳ Waiting for socket connection...');
       await Future.delayed(pollInterval);
     }
 
-    // Step 4: Register user
     debugPrint('✅ ensureConnectedAndRegistered: connected — registering $userId');
     _socket?.emit('register-user', userId);
     _isRegistered = true;
 
-    // Small buffer for server to process registration
     await Future.delayed(const Duration(milliseconds: 300));
     debugPrint('✅ ensureConnectedAndRegistered: done | socketId=${_socket?.id}');
   }
@@ -162,16 +174,13 @@ class VoiceCallService {
     try {
       if (_socket == null || _socket?.connected != true) return null;
 
-      // ✅ Ensure only one listener at a time
-      _socket!.off('user-busy-voice-response');
-
       final completer = Completer<Map<String, dynamic>?>();
 
       _socket!.emitWithAck(
         'user-busy-voice',
         {'receiverId': receiverId},
         ack: (data) {
-          if (completer.isCompleted) return; // ✅ ignore duplicate responses
+          if (completer.isCompleted) return;
           try {
             if (data == null) {
               completer.complete(null);
@@ -202,14 +211,13 @@ class VoiceCallService {
   // CALL OPERATIONS
   // ============================================================================
 
-  void initiateVoiceCall({
+  Future<void> initiateVoiceCall({
     required String roomName,
     required String callerId,
     required String callerName,
     required String receiverId,
     bool isConference = false,
   }) async {
-    // ✅ ADD THIS
     await ensureConnectedAndRegistered(callerId);
     if (_socket?.connected != true) {
       debugPrint('⚠️ Cannot initiate call: Socket not connected');
@@ -366,8 +374,10 @@ class VoiceCallService {
 
   // ============================================================================
   // EVENT LISTENERS
+  // ✅ FIX: Each on*() call uses off() first to prevent listener stacking
   // ============================================================================
   void onConnect(Function() callback) {
+    _socket?.off('connect');
     _socket?.onConnect((_) {
       debugPrint('✅ Voice call socket connected (callback)');
       callback();
@@ -375,6 +385,7 @@ class VoiceCallService {
   }
 
   void onDisconnect(Function() callback) {
+    _socket?.off('disconnect');
     _socket?.onDisconnect((_) {
       debugPrint('❌ Voice call socket disconnected (callback)');
       _isRegistered = false;
@@ -383,6 +394,7 @@ class VoiceCallService {
   }
 
   void onIncomingVoiceCall(Function(dynamic) callback) {
+    _socket?.off('incoming-voice-call');
     _socket?.on('incoming-voice-call', (data) {
       debugPrint('📞 INCOMING VOICE CALL EVENT RECEIVED: $data');
       callback(data);
@@ -391,6 +403,7 @@ class VoiceCallService {
   }
 
   void onCallAcceptedVoice(Function(dynamic) callback) {
+    _socket?.off('call-accepted-voice');
     _socket?.on('call-accepted-voice', (data) {
       debugPrint('✅ CALL ACCEPTED EVENT RECEIVED: $data');
       callback(data);
@@ -399,6 +412,7 @@ class VoiceCallService {
   }
 
   void onCallRejectedVoice(Function(dynamic) callback) {
+    _socket?.off('call-rejected-voice');
     _socket?.on('call-rejected-voice', (data) {
       debugPrint('❌ CALL REJECTED EVENT RECEIVED: $data');
       callback(data);
@@ -407,6 +421,7 @@ class VoiceCallService {
   }
 
   void onVoiceCallEnded(Function(dynamic) callback) {
+    _socket?.off('voice-call-ended');
     _socket?.on('voice-call-ended', (data) {
       debugPrint('📴 CALL ENDED EVENT RECEIVED: $data');
       callback(data);
@@ -415,6 +430,7 @@ class VoiceCallService {
   }
 
   void onUserOfflineVoice(Function(dynamic) callback) {
+    _socket?.off('user-offline-voice');
     _socket?.on('user-offline-voice', (data) {
       debugPrint('🔴 USER OFFLINE EVENT RECEIVED: $data');
       callback(data);
@@ -423,6 +439,7 @@ class VoiceCallService {
   }
 
   void onNewParticipantInvitedVoice(Function(dynamic) callback) {
+    _socket?.off('new-participant-invited-voice');
     _socket?.on('new-participant-invited-voice', (data) {
       debugPrint('📧 NEW PARTICIPANT INVITED EVENT RECEIVED: $data');
       callback(data);
@@ -431,6 +448,7 @@ class VoiceCallService {
   }
 
   void onParticipantJoinedVoiceCall(Function(dynamic) callback) {
+    _socket?.off('participant-joined-voice-call');
     _socket?.on('participant-joined-voice-call', (data) {
       debugPrint('👤 PARTICIPANT JOINED EVENT RECEIVED: $data');
       callback(data);
@@ -439,6 +457,7 @@ class VoiceCallService {
   }
 
   void onParticipantLeftVoiceCall(Function(dynamic) callback) {
+    _socket?.off('participant-left-voice-call');
     _socket?.on('participant-left-voice-call', (data) {
       debugPrint('👋 PARTICIPANT LEFT EVENT RECEIVED: $data');
       callback(data);

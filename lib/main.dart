@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background/flutter_background.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -29,6 +30,8 @@ import 'package:ixes.app/providers/service_request_provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
 import 'package:ixes.app/screens/auth/launguage_selection_page.dart';
+import 'package:ixes.app/screens/chats_page/chat_detail_screen.dart';
+
 import 'package:ixes.app/screens/video_call/video_call.dart';
 import 'package:ixes.app/screens/voice_call/voice_call_room_screen.dart';
 import 'package:ixes.app/screens/widgets/video_call.dart';
@@ -52,33 +55,61 @@ import 'utils/app_theme.dart';
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 const _uuid = Uuid();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// File-scope call state
+// Lives outside any class so the FCM background isolate and foreground app
+// can both access it without passing references around.
+// ─────────────────────────────────────────────────────────────────────────────
+
 Map<String, dynamic>? _pendingCallData;
-String? _dispatchedRoomName;
+String?   _dispatchedRoomName;
 DateTime? _pendingCallDispatchedAt;
 const Duration _callTTL = Duration(seconds: 90);
 
 void _storePendingCall(Map<String, dynamic> data) {
-  _pendingCallData = data;
+  _pendingCallData         = data;
   _pendingCallDispatchedAt = DateTime.now();
-  _dispatchedRoomName = data['roomName'] ?? '';
+  _dispatchedRoomName      = data['roomName'] ?? '';
   debugPrint('💾 [PENDING] Stored | type=${data['callType']} | room=${data['roomName']}');
 }
 
 void _clearCallState() {
-  _pendingCallData = null;
-  _dispatchedRoomName = null;
+  _pendingCallData         = null;
+  _dispatchedRoomName      = null;
   _pendingCallDispatchedAt = null;
   debugPrint('🧹 [CALL STATE] Cleared');
 }
 
 bool _isCallExpired() {
   final at = _pendingCallDispatchedAt;
-  if (at == null) return true;
+  if (at == null) return false;
   return DateTime.now().difference(at) > _callTTL;
 }
 
+// Broadcast stream used to push call events into the app while providers
+// may not yet be ready.
 final StreamController<Map<String, dynamic>> _callStream =
 StreamController<Map<String, dynamic>>.broadcast();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ✅ NEW: File-scope pending chat state
+// ─────────────────────────────────────────────────────────────────────────────
+
+Map<String, dynamic>? _pendingChatData;
+
+void _storePendingChat(Map<String, dynamic> data) {
+  _pendingChatData = data;
+  debugPrint('💾 [PENDING CHAT] Stored | senderId=${data['senderId']} | senderName=${data['senderName']}');
+}
+
+void _clearChatState() {
+  _pendingChatData = null;
+  debugPrint('🧹 [CHAT STATE] Cleared');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CallKit UI helper — top-level so _firebaseBackgroundHandler can call it
+// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _showCallkitIncoming({
   required String roomName,
@@ -88,57 +119,61 @@ Future<void> _showCallkitIncoming({
 }) async {
   final callUUID = _uuid.v4();
   await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
-    id: callUUID,
-    nameCaller: callerName,
-    appName: 'Ixes',
-    avatar: null,
-    handle: callerId,
-    type: callType == 'video_call' ? 1 : 0,
-    textAccept: 'Accept',
+    id:          callUUID,
+    nameCaller:  callerName,
+    appName:     'Ixes',
+    avatar:      null,
+    handle:      callerId,
+    type:        callType == 'video_call' ? 1 : 0,
+    textAccept:  'Accept',
     textDecline: 'Decline',
     missedCallNotification: const NotificationParams(
       showNotification: true,
-      isShowCallback: false,
-      subtitle: 'Missed call',
+      isShowCallback:   false,
+      subtitle:         'Missed call',
     ),
     duration: 30000,
     extra: <String, dynamic>{
-      'roomName': roomName,
-      'callerId': callerId,
+      'roomName':   roomName,
+      'callerId':   callerId,
       'callerName': callerName,
-      'callType': callType,
+      'callType':   callType,
     },
     android: const AndroidParams(
-      isCustomNotification: true,
-      isShowLogo: false,
-      ringtonePath: 'system_ringtone_default',
-      backgroundColor: '#0D0D14',
-      backgroundUrl: null,
-      actionColor: '#4CAF50',
-      textColor: '#ffffff',
+      isCustomNotification:               true,
+      isShowLogo:                         false,
+      ringtonePath:                       'system_ringtone_default',
+      backgroundColor:                    '#0D0D14',
+      backgroundUrl:                      null,
+      actionColor:                        '#4CAF50',
+      textColor:                          '#ffffff',
       incomingCallNotificationChannelName: 'Incoming Calls',
-      missedCallNotificationChannelName: 'Missed Calls',
-      isShowCallID: false,
+      missedCallNotificationChannelName:   'Missed Calls',
+      isShowCallID:                       false,
     ),
     ios: const IOSParams(
-      iconName: 'AppIcon',
-      handleType: 'generic',
-      supportsVideo: true,
-      maximumCallGroups: 1,
-      maximumCallsPerCallGroup: 1,
-      audioSessionMode: 'default',
-      audioSessionActive: true,
-      audioSessionPreferredSampleRate: 44100.0,
+      iconName:                              'AppIcon',
+      handleType:                            'generic',
+      supportsVideo:                         true,
+      maximumCallGroups:                     1,
+      maximumCallsPerCallGroup:              1,
+      audioSessionMode:                      'default',
+      audioSessionActive:                    true,
+      audioSessionPreferredSampleRate:       44100.0,
       audioSessionPreferredIOBufferDuration: 0.005,
-      supportsDTMF: true,
-      supportsHolding: true,
-      supportsGrouping: false,
+      supportsDTMF:      true,
+      supportsHolding:   true,
+      supportsGrouping:  false,
       supportsUngrouping: false,
-      ringtonePath: 'system_ringtone_default',
+      ringtonePath:      'system_ringtone_default',
     ),
   ));
   debugPrint('✅ [CALLKIT UI] Shown | room=$roomName | uuid=$callUUID');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FCM background handler — must be a top-level function
+// ─────────────────────────────────────────────────────────────────────────────
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
@@ -153,14 +188,12 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     final callerId   = data['callerId']   ?? '';
     final callerName = data['callerName'] ?? 'Incoming Call';
 
-    // ✅ Skip if missing critical data
     if (roomName.isEmpty || callerId.isEmpty) {
       debugPrint('⚠️ [BG FCM] Missing roomName or callerId — skipping');
       return;
     }
 
     debugPrint('📲 [BG FCM] Showing CallKit | caller=$callerName | room=$roomName');
-
     await _showCallkitIncoming(
       roomName:   roomName,
       callerId:   callerId,
@@ -168,15 +201,25 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       callType:   type,
     );
   }
+  // ✅ NOTE: Chat notifications don't need background handler processing —
+  // the system notification is shown automatically by FCM when app is in
+  // background/killed (because backend sends both notification + data keys).
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FCM helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _saveFcmToken() async {
   try {
-    final prefs = await SharedPreferences.getInstance();
-    final authToken = prefs.getString('auth_token');
-    if (authToken == null || authToken.isEmpty) return;
+    final authToken = await ApiService.getValidToken();
+    if (authToken == null || authToken.isEmpty) {
+      debugPrint('⚠️ [FCM] No valid auth token — skipping FCM save');
+      return;
+    }
     final fcmToken = await FirebaseMessaging.instance.getToken();
     if (fcmToken == null) return;
+    final prefs  = await SharedPreferences.getInstance();
     final userId = prefs.getString('user_id');
     debugPrint('📱 [FCM] Saving token for userId=$userId');
     await ApiService.post(
@@ -190,10 +233,182 @@ Future<void> _saveFcmToken() async {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ✅ NEW: Navigate to ChatDetailScreen from FCM tap
+// ─────────────────────────────────────────────────────────────────────────────
+
+void _navigateToChat({
+  required String senderId,
+  required String senderName,
+  required String conversationId,
+}) {
+  final nav = navigatorKey.currentState;
+  final ctx = navigatorKey.currentContext;
+
+  if (nav == null || ctx == null) {
+    debugPrint('⚠️ [CHAT NAV] Navigator not ready — storing pending');
+    _storePendingChat({
+      'senderId':       senderId,
+      'senderName':     senderName,
+      'conversationId': conversationId,
+    });
+    return;
+  }
+
+  debugPrint('💬 [CHAT NAV] Navigating to ChatDetailScreen | sender=$senderName');
+
+  // Go to main screen (chats tab = index 2) first
+  nav.pushNamedAndRemoveUntil('/main', (route) => false);
+
+  // Then push ChatDetailScreen on top after a short delay so main screen settles
+  Future.delayed(const Duration(milliseconds: 400), () {
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ChatDetailScreen(
+          userId:      senderId,
+          chatTitle:   senderName,
+          userProfile: {
+            '_id': senderId,
+            'profile': {
+              'name':         senderName,
+              'profileImage': '',
+            },
+          },
+        ),
+      ),
+    );
+    _clearChatState();
+  });
+}
+
 Future<void> _initFCM() async {
   try {
+    // ── Listen for call intents from native Kotlin ─────────────────────
+    const _callChannel = MethodChannel('com.ixes.app/calls');
+    _callChannel.setMethodCallHandler((call) async {
+      if (call.method == 'incomingCall') {
+        final args       = Map<String, dynamic>.from(call.arguments as Map);
+        final type       = args['type']?.toString()       ?? '';
+        final roomName   = args['roomName']?.toString()   ?? '';
+        final callerId   = args['callerId']?.toString()   ?? '';
+        final callerName = args['callerName']?.toString() ?? 'Incoming Call';
+
+        debugPrint('📲 [NATIVE→FLUTTER] type=$type | room=$roomName | caller=$callerName');
+
+        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+          final ctx = navigatorKey.currentContext;
+          bool socketHandled = false;
+          if (ctx != null) {
+            try {
+              final vcState = ctx.read<VideoCallProvider>().callState;
+              final vState  = ctx.read<VoiceCallProvider>().callState;
+              socketHandled = vcState == CallState.ringing ||
+                  vState == VoiceCallState.ringing;
+            } catch (_) {}
+          }
+          if (!socketHandled) {
+            await _showCallkitIncoming(
+              roomName:   roomName,
+              callerId:   callerId,
+              callerName: callerName,
+              callType:   type,
+            );
+          }
+        }
+      }
+    });
+
+    // ── Handle app opened from killed state via notification tap ────────
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      final d    = initialMessage.data;
+      final type = d['type'] ?? '';
+
+      if (type == 'voice_call' || type == 'video_call') {
+        final roomName   = d['roomName']   ?? '';
+        final callerId   = d['callerId']   ?? '';
+        final callerName = d['callerName'] ?? 'Incoming Call';
+        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+          debugPrint('📲 [FCM INITIAL] Killed state tap | type=$type');
+          await _showCallkitIncoming(
+            roomName:   roomName,
+            callerId:   callerId,
+            callerName: callerName,
+            callType:   type,
+          );
+        }
+      }
+
+      // ✅ NEW: Chat notification tap — killed state
+      if (type == 'chat') {
+        final senderId       = d['senderId']       ?? '';
+        final senderName     = d['senderName']     ?? 'Chat';
+        final conversationId = d['conversationId'] ?? '';
+        if (senderId.isNotEmpty) {
+          debugPrint('💬 [FCM INITIAL] Chat tap from killed state | sender=$senderName');
+          _storePendingChat({
+            'senderId':       senderId,
+            'senderName':     senderName,
+            'conversationId': conversationId,
+          });
+        }
+      }
+    }
+
+    // ── Handle app foregrounded from notification tap ───────────────────
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) async {
+      final d    = msg.data;
+      final type = d['type'] ?? '';
+
+      if (type == 'voice_call' || type == 'video_call') {
+        final roomName   = d['roomName']   ?? '';
+        final callerId   = d['callerId']   ?? '';
+        final callerName = d['callerName'] ?? 'Incoming Call';
+        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+          debugPrint('📲 [FCM OPENED] Background tap | type=$type');
+          await Future.delayed(const Duration(milliseconds: 500));
+          final ctx = navigatorKey.currentContext;
+          bool socketHandled = false;
+          if (ctx != null) {
+            try {
+              final vcState = ctx.read<VideoCallProvider>().callState;
+              final vState  = ctx.read<VoiceCallProvider>().callState;
+              socketHandled = vcState == CallState.ringing ||
+                  vState == VoiceCallState.ringing;
+            } catch (_) {}
+          }
+          if (!socketHandled) {
+            await _showCallkitIncoming(
+              roomName:   roomName,
+              callerId:   callerId,
+              callerName: callerName,
+              callType:   type,
+            );
+          }
+        }
+      }
+
+      // ✅ NEW: Chat notification tap — background state
+      if (type == 'chat') {
+        final senderId       = d['senderId']       ?? '';
+        final senderName     = d['senderName']     ?? 'Chat';
+        final conversationId = d['conversationId'] ?? '';
+        if (senderId.isNotEmpty) {
+          debugPrint('💬 [FCM OPENED] Chat tap from background | sender=$senderName');
+          await Future.delayed(const Duration(milliseconds: 500));
+          _navigateToChat(
+            senderId:       senderId,
+            senderName:     senderName,
+            conversationId: conversationId,
+          );
+        }
+      }
+    });
+
+    // ── existing code from here ─────────────────────────────────────────
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
+
     await messaging.setForegroundNotificationPresentationOptions(
       alert: false,
       badge: false,
@@ -201,19 +416,21 @@ Future<void> _initFCM() async {
     );
     await messaging.getToken();
     messaging.onTokenRefresh.listen((_) => _saveFcmToken());
-    FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
-      final d = msg.data;
-      final type = d['type'] ?? '';
-      if (type == 'voice_call' || type == 'video_call') {
 
-        // Check if socket already handled it
+    FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
+      final d    = msg.data;
+      final type = d['type'] ?? '';
+
+      if (type == 'voice_call' || type == 'video_call') {
+        await Future.delayed(const Duration(milliseconds: 800));
+
         final ctx = navigatorKey.currentContext;
         bool socketHandled = false;
         if (ctx != null) {
           try {
-            final vcState   = ctx.read<VideoCallProvider>().callState;
-            final vState    = ctx.read<VoiceCallProvider>().callState;
-            socketHandled   = vcState == CallState.ringing ||
+            final vcState = ctx.read<VideoCallProvider>().callState;
+            final vState  = ctx.read<VoiceCallProvider>().callState;
+            socketHandled = vcState == CallState.ringing ||
                 vState  == VoiceCallState.ringing;
           } catch (_) {}
         }
@@ -223,8 +440,7 @@ Future<void> _initFCM() async {
           return;
         }
 
-        // ✅ Socket missed it — show CallKit with sound
-        debugPrint('⚠️ [FG FCM] Socket missed — showing CallKit');
+        debugPrint('⚠️ [FG FCM] Socket missed after 800 ms — showing CallKit');
         await _showCallkitIncoming(
           roomName:   d['roomName']   ?? '',
           callerId:   d['callerId']   ?? '',
@@ -232,42 +448,44 @@ Future<void> _initFCM() async {
           callType:   type,
         );
       }
+      // ✅ NOTE: Foreground chat messages are handled by socket (real-time),
+      // so no FCM action needed here for type == 'chat'.
     });
-
   } catch (e) {
     debugPrint('❌ [FCM INIT] $e');
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Startup: restore a pending call if the app was launched by CallKit accept
+// ─────────────────────────────────────────────────────────────────────────────
+
 Future<void> _checkActiveCallsOnStartup() async {
   try {
     final calls = await FlutterCallkitIncoming.activeCalls();
     if (calls == null || calls.isEmpty) return;
-    final call = calls.last;
+
+    final call  = calls.last;
     final extra = call['extra'] as Map<dynamic, dynamic>? ??
         call['Extra'] as Map<dynamic, dynamic>? ??
         {};
-    final roomName = extra['roomName']?.toString() ??
-        call['roomName']?.toString() ??
-        '';
-    final callerId = extra['callerId']?.toString() ??
-        call['callerId']?.toString() ??
-        call['handle']?.toString() ??
-        '';
-    final callerName = extra['callerName']?.toString() ??
-        call['callerName']?.toString() ??
-        call['nameCaller']?.toString() ??
-        'Unknown';
-    final callType = extra['callType']?.toString() ??
-        call['callType']?.toString() ??
-        'voice_call';
-    if (roomName.isEmpty) return;
+
+    final roomName   = extra['roomName']?.toString()   ?? call['roomName']?.toString()   ?? '';
+    final callerId   = extra['callerId']?.toString()   ?? call['callerId']?.toString()   ?? call['handle']?.toString()    ?? '';
+    final callerName = extra['callerName']?.toString() ?? call['callerName']?.toString() ?? call['nameCaller']?.toString() ?? 'Unknown';
+    final callType   = extra['callType']?.toString()   ?? call['callType']?.toString()   ?? 'voice_call';
+
+    if (roomName.isEmpty || callerId.isEmpty) {
+      debugPrint('⚠️ [STARTUP] Active call missing roomName/callerId — skipping');
+      return;
+    }
+
     _storePendingCall({
-      'callType': callType,
-      'roomName': roomName,
-      'callerId': callerId,
+      'callType':   callType,
+      'roomName':   roomName,
+      'callerId':   callerId,
       'callerName': callerName,
-      'autoAccept': true
+      'autoAccept': true,
     });
     debugPrint('✅ [STARTUP] Stored pending call from activeCalls()');
   } catch (e) {
@@ -275,41 +493,73 @@ Future<void> _checkActiveCallsOnStartup() async {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// main()
+// ─────────────────────────────────────────────────────────────────────────────
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  print('\n');
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  print('🚀 APP STARTED');
+  print('📱 Platform: ${Platform.operatingSystem}');
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  SocketService().onConnectionChanged.listen((c)  => print('🌐 [SOCKET] connected=$c'));
+  SocketService().onSocketReady.listen((s) {
+    print('✅ [SOCKET READY] id=${s.id} | transport=${s.io.engine?.transport?.name}');
+  });
+  SocketService().onNewMessage.listen((d)        => print('📩 [MSG] $d'));
+  SocketService().onMessageDeleted.listen((d)    => print('🗑️ [MSG DEL] $d'));
+  SocketService().onMessageEdited.listen((d)     => print('✏️ [MSG EDIT] $d'));
+  SocketService().onReadStatusUpdated.listen((d) => print('👁️ [READ] $d'));
+
   FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+
   await _initFCM();
   await _checkActiveCallsOnStartup();
+
   const androidConfig = FlutterBackgroundAndroidConfig(
-    notificationTitle: 'Screen Sharing',
-    notificationText: 'Ixes meeting is running in background',
+    notificationTitle:      'Screen Sharing',
+    notificationText:       'Ixes meeting is running in background',
     notificationImportance: AndroidNotificationImportance.normal,
-    notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+    notificationIcon:       AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
   );
   await FlutterBackground.initialize(androidConfig: androidConfig);
-
   await AppLocalizations.load();
 
-  final prefs = await SharedPreferences.getInstance();
-  final token = prefs.getString('auth_token');
-  final userId = prefs.getString('user_id');
+  final prefs    = await SharedPreferences.getInstance();
+  final token    = prefs.getString('auth_token');
+  final userId   = prefs.getString('user_id');
   final language = prefs.getString('app_language');
+
+  print('🔐 authToken exists = ${token != null}');
+  print('👤 userId = $userId');
+
   runApp(IxesApp(
-      initialToken: token,
-      initialUserId: userId,
-      showLanguage: language == null));
+    initialToken:  token,
+    initialUserId: userId,
+    showLanguage:  language == null,
+  ));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Root widget
+// ─────────────────────────────────────────────────────────────────────────────
 
 class IxesApp extends StatelessWidget {
   final String? initialToken;
   final String? initialUserId;
-  final bool showLanguage;
-  const IxesApp(
-      {super.key,
-        this.initialToken,
-        this.initialUserId,
-        this.showLanguage = false});
+  final bool    showLanguage;
+
+  const IxesApp({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+    this.showLanguage = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -338,20 +588,27 @@ class IxesApp extends StatelessWidget {
           ChangeNotifierProvider(create: (_) => MeetingOverlayService()),
         ],
         child: AppWithLifecycleObserver(
-          initialToken: initialToken,
+          initialToken:  initialToken,
           initialUserId: initialUserId,
-          showLanguage: showLanguage,
+          showLanguage:  showLanguage,
         ),
       ),
     );
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Connecting splash — shown while providers init on cold-launch via CallKit
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _CallConnectingSplash extends StatelessWidget {
   final String callerName;
   final String callType;
-  const _CallConnectingSplash(
-      {required this.callerName, required this.callType});
+
+  const _CallConnectingSplash({
+    required this.callerName,
+    required this.callType,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -359,11 +616,11 @@ class _CallConnectingSplash extends StatelessWidget {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin:  Alignment.topCenter,
+            end:    Alignment.bottomCenter,
             colors: [
               Color.fromARGB(165, 55, 0, 255),
-              Color.fromARGB(70, 179, 154, 219)
+              Color.fromARGB(70, 179, 154, 219),
             ],
           ),
         ),
@@ -374,46 +631,50 @@ class _CallConnectingSplash extends StatelessWidget {
               Image.asset(Images.LogoTrans, height: 100),
               const SizedBox(height: 56),
               Container(
-                width: 110,
+                width:  110,
                 height: 110,
                 decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.white.withOpacity(0.15),
-                    border: Border.all(color: Colors.white38, width: 2)),
+                  shape:  BoxShape.circle,
+                  color:  Colors.white.withOpacity(0.15),
+                  border: Border.all(color: Colors.white38, width: 2),
+                ),
                 child: Center(
-                    child: Text(
-                        callerName.isNotEmpty
-                            ? callerName[0].toUpperCase()
-                            : '?',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 44,
-                            fontWeight: FontWeight.bold))),
+                  child: Text(
+                    callerName.isNotEmpty ? callerName[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                      color:      Colors.white,
+                      fontSize:   44,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 28),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
-                child: Text(callerName,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold)),
+                child: Text(
+                  callerName,
+                  textAlign: TextAlign.center,
+                  maxLines:  2,
+                  overflow:  TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color:      Colors.white,
+                    fontSize:   26,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               Text(
                 callType == 'video_call'
                     ? 'Connecting video call...'
                     : 'Connecting voice call...',
-                style:
-                const TextStyle(color: Colors.white70, fontSize: 16),
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
               ),
               const SizedBox(height: 48),
               const CircularProgressIndicator(
-                  valueColor:
-                  AlwaysStoppedAnimation<Color>(Colors.white)),
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
             ],
           ),
         ),
@@ -422,15 +683,21 @@ class _CallConnectingSplash extends StatelessWidget {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AppWithLifecycleObserver
+// ─────────────────────────────────────────────────────────────────────────────
+
 class AppWithLifecycleObserver extends StatefulWidget {
   final String? initialToken;
   final String? initialUserId;
-  final bool showLanguage;
-  const AppWithLifecycleObserver(
-      {super.key,
-        this.initialToken,
-        this.initialUserId,
-        this.showLanguage = false});
+  final bool    showLanguage;
+
+  const AppWithLifecycleObserver({
+    super.key,
+    this.initialToken,
+    this.initialUserId,
+    this.showLanguage = false,
+  });
 
   @override
   State<AppWithLifecycleObserver> createState() =>
@@ -439,18 +706,27 @@ class AppWithLifecycleObserver extends StatefulWidget {
 
 class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     with WidgetsBindingObserver {
+
   StreamSubscription<Map<String, dynamic>>? _callSub;
-  bool _providersReady = false;
-  bool _initStarted = false;
-  Timer? _retryTimer;
+  StreamSubscription? _socketReadySub;
+
+  bool    _providersReady = false;
+  bool    _initStarted    = false;
+  Timer?  _retryTimer;
   String? _lastInitUserId;
+
+  final Set<String> _handledRoomNames = {};
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   @override
   void initState() {
     super.initState();
     DeepLinkService.init();
     WidgetsBinding.instance.addObserver(this);
+
     if (_pendingCallData != null) _startRetryLoop();
+
     _callSub = _callStream.stream.listen((data) {
       if (_providersReady && mounted) {
         if (_isCallExpired()) {
@@ -463,6 +739,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         _startRetryLoop();
       }
     });
+
     FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
       if (event == null) return;
       debugPrint('📲 [CALLKIT EVENT] ${event.event}');
@@ -470,43 +747,60 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     });
   }
 
+  @override
+  void dispose() {
+    _callSub?.cancel();
+    _socketReadySub?.cancel();
+    _retryTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    try { MeetingOverlayService().dispose(); } catch (_) {}
+    super.dispose();
+  }
+
+  // ── CallKit event handler ──────────────────────────────────────────────────
+
   void _handleCallKitEvent(CallEvent event) {
-    final body = event.body as Map<dynamic, dynamic>? ?? {};
-    final extra = body['extra'] as Map<dynamic, dynamic>? ?? {};
-    final roomName = extra['roomName']?.toString() ?? '';
-    final callerId = extra['callerId']?.toString() ?? '';
+    final body       = event.body as Map<dynamic, dynamic>? ?? {};
+    final extra      = body['extra'] as Map<dynamic, dynamic>? ?? {};
+    final roomName   = extra['roomName']?.toString()   ?? '';
+    final callerId   = extra['callerId']?.toString()   ?? '';
     final callerName = extra['callerName']?.toString() ?? '';
-    final callType = extra['callType']?.toString() ?? 'voice_call';
+    final callType   = extra['callType']?.toString()   ?? 'voice_call';
+
     debugPrint(
-        '🎯 [CALLKIT] ${event.event} | room=$roomName | type=$callType | ready=$_providersReady');
+      '🎯 [CALLKIT] ${event.event} | room=$roomName | type=$callType | ready=$_providersReady',
+    );
 
     switch (event.event) {
+
       case Event.actionCallIncoming:
         if (roomName.isEmpty) return;
         final ctx = navigatorKey.currentContext;
         if (ctx == null) {
           _storePendingCall({
-            'callType': callType,
-            'roomName': roomName,
-            'callerId': callerId,
+            'callType':   callType,
+            'roomName':   roomName,
+            'callerId':   callerId,
             'callerName': callerName,
-            'autoAccept': false
+            'autoAccept': false,
           });
           _startRetryLoop();
           return;
         }
         if (callType == 'video_call') {
           ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
-              roomName: roomName,
-              callerId: callerId,
-              callerName: callerName,
-              acceptedViaCallKit: false);
+            roomName:           roomName,
+            callerId:           callerId,
+            callerName:         callerName,
+            acceptedViaCallKit: false,
+          );
         } else {
           ctx.read<VoiceCallProvider>().setIncomingCallFromFCM(
-              roomName: roomName,
-              callerId: callerId,
-              callerName: callerName,
-              acceptedViaCallKit: false);
+            roomName:           roomName,
+            callerId:           callerId,
+            callerName:         callerName,
+            acceptedViaCallKit: false,
+          );
         }
         break;
 
@@ -515,17 +809,19 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
           debugPrint('❌ [ACCEPT] Empty roomName');
           return;
         }
+        _handledRoomNames.add(roomName);
+
         final callData = {
-          'callType': callType,
-          'roomName': roomName,
-          'callerId': callerId,
+          'callType':   callType,
+          'roomName':   roomName,
+          'callerId':   callerId,
           'callerName': callerName,
-          'autoAccept': true
+          'autoAccept': true,
         };
         if (_providersReady &&
             mounted &&
             navigatorKey.currentContext != null &&
-            navigatorKey.currentState != null) {
+            navigatorKey.currentState  != null) {
           _navigate(callData);
         } else {
           _storePendingCall(callData);
@@ -536,21 +832,19 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       case Event.actionCallDecline:
         _clearCallState();
         _retryTimer?.cancel();
+        if (roomName.isNotEmpty) _handledRoomNames.add(roomName);
+        _endAllCallKitCalls();
+
         final ctx = navigatorKey.currentContext;
         if (ctx == null) return;
-        if (callType == 'video_call') {
-          ctx.read<VideoCallProvider>().setCallerForReject(
-              callerId: callerId,
-              callerName: callerName,
-              roomName: roomName);
-          ctx.read<VideoCallProvider>().rejectCall();
-        } else {
-          ctx.read<VoiceCallProvider>().setCallerForReject(
-              callerId: callerId,
-              callerName: callerName,
-              roomName: roomName);
-          ctx.read<VoiceCallProvider>().rejectVoiceCall();
-        }
+
+        _rejectCallWithReconnect(
+          ctx:        ctx,
+          callType:   callType,
+          callerId:   callerId,
+          callerName: callerName,
+          roomName:   roomName,
+        );
         break;
 
       case Event.actionCallTimeout:
@@ -558,6 +852,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         _clearCallState();
         _retryTimer?.cancel();
         _endAllCallKitCalls();
+        _handledRoomNames.remove(roomName);
+
         final ctx2 = navigatorKey.currentContext;
         if (ctx2 != null) {
           if (callType == 'video_call') {
@@ -573,66 +869,49 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     }
   }
 
+  // ── Retry loop ─────────────────────────────────────────────────────────────
+
   void _startRetryLoop() {
     _retryTimer?.cancel();
     int attempts = 0;
-    _retryTimer =
-        Timer.periodic(const Duration(milliseconds: 300), (timer) {
-          attempts++;
-          final data = _pendingCallData;
-          if (data == null) {
-            timer.cancel();
-            return;
-          }
-          if (_isCallExpired()) {
-            _clearCallState();
-            timer.cancel();
-            return;
-          }
-          if (attempts > 300) {
-            _clearCallState();
-            timer.cancel();
-            return;
-          }
-          if (!_providersReady ||
-              navigatorKey.currentContext == null ||
-              navigatorKey.currentState == null ||
-              !mounted) {
-            if (!mounted) timer.cancel();
-            return;
-          }
-          debugPrint('🚀 [RETRY #$attempts] Providers ready → navigating!');
-          final callData = data;
-          _pendingCallData = null;
-          timer.cancel();
-          _navigate(callData);
-        });
+
+    _retryTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+      attempts++;
+      final data = _pendingCallData;
+
+      if (data == null)     { timer.cancel(); return; }
+      if (_isCallExpired()) { _clearCallState(); timer.cancel(); return; }
+      if (attempts > 300)   { _clearCallState(); timer.cancel(); return; }
+      if (!mounted)         { timer.cancel(); return; }
+
+      if (!_providersReady ||
+          navigatorKey.currentContext == null ||
+          navigatorKey.currentState  == null) {
+        return;
+      }
+
+      debugPrint('🚀 [RETRY #$attempts] Providers ready → navigating!');
+      _pendingCallData = null;
+      timer.cancel();
+      _navigate(data);
+    });
   }
 
-  @override
-  void dispose() {
-    _callSub?.cancel();
-    _retryTimer?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
-    try {
-      MeetingOverlayService().dispose();
-    } catch (_) {}
-    super.dispose();
-  }
+  // ── Navigation ─────────────────────────────────────────────────────────────
 
   Future<void> _navigate(Map<String, dynamic> data) async {
-    final roomName = data['roomName'] ?? '';
-    final callType = data['callType'] ?? '';
-    final callerId = data['callerId'] ?? '';
+    final roomName   = data['roomName']   ?? '';
+    final callType   = data['callType']   ?? '';
+    final callerId   = data['callerId']   ?? '';
     final callerName = data['callerName'] ?? '';
     final autoAccept = data['autoAccept'] == true;
 
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint(
-        '🎯 [NAVIGATE] type=$callType | room=$roomName | auto=$autoAccept');
+    debugPrint('🎯 [NAVIGATE] type=$callType | room=$roomName | auto=$autoAccept');
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     if (roomName.isEmpty || callType.isEmpty) return;
+
     final ctx = navigatorKey.currentContext;
     final nav = navigatorKey.currentState;
     if (ctx == null || nav == null) {
@@ -643,26 +922,28 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
     if (callType == 'video_call') {
       ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
-          roomName: roomName,
-          callerId: callerId,
-          callerName: callerName,
-          acceptedViaCallKit: autoAccept);
+        roomName:           roomName,
+        callerId:           callerId,
+        callerName:         callerName,
+        acceptedViaCallKit: autoAccept,
+      );
       if (autoAccept) {
         nav.push(MaterialPageRoute(
-            builder: (_) =>
-                VideoCallScreen(fromFcmAutoAccept: true)));
+          builder: (_) => VideoCallScreen(fromFcmAutoAccept: true),
+        ));
         await _endAllCallKitCalls();
       }
     } else {
       ctx.read<VoiceCallProvider>().setIncomingCallFromFCM(
-          roomName: roomName,
-          callerId: callerId,
-          callerName: callerName,
-          acceptedViaCallKit: autoAccept);
+        roomName:           roomName,
+        callerId:           callerId,
+        callerName:         callerName,
+        acceptedViaCallKit: autoAccept,
+      );
       if (autoAccept) {
         nav.push(MaterialPageRoute(
-            builder: (_) =>
-            const VoiceRoomScreen(fromFcmAutoAccept: true)));
+          builder: (_) => const VoiceRoomScreen(fromFcmAutoAccept: true),
+        ));
         await _endAllCallKitCalls();
       }
     }
@@ -676,37 +957,287 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       return;
     }
     _retryTimer?.cancel();
-    _pendingCallData = null;
+    _pendingCallData    = null;
     _dispatchedRoomName = null;
     _navigate(data);
   }
+
+  // ✅ NEW: Consume pending chat navigation after providers are ready
+  void _consumePendingChat() {
+    final data = _pendingChatData;
+    if (data == null) return;
+    _pendingChatData = null;
+    _navigateToChat(
+      senderId:       data['senderId']       ?? '',
+      senderName:     data['senderName']     ?? 'Chat',
+      conversationId: data['conversationId'] ?? '',
+    );
+  }
+
+  // ── App lifecycle ──────────────────────────────────────────────────────────
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (!mounted) return;
+
     try {
       final auth = context.read<AuthProvider>();
       if (!auth.isAuthenticated) return;
+
       final chat = context.read<PersonalChatProvider>();
+
       switch (state) {
         case AppLifecycleState.resumed:
           chat.reconnectSocket();
-          if (chat.currentReceiverId != null)
-            chat.fetchConversation(chat.currentReceiverId!);
           if (_providersReady && _pendingCallData != null) _consumePending();
+          _checkActiveCallsOnResume();
           break;
+
         case AppLifecycleState.detached:
           chat.cleanup();
-          try {
-            MeetingOverlayService().hideOverlay();
-          } catch (_) {}
+          try { MeetingOverlayService().hideOverlay(); } catch (_) {}
           break;
+
         default:
           break;
       }
     } catch (e) {
       debugPrint('❌ [LIFECYCLE] $e');
+    }
+  }
+
+  Future<void> _checkActiveCallsOnResume() async {
+    try {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+
+      final calls = await FlutterCallkitIncoming.activeCalls();
+      if (calls == null || calls.isEmpty) {
+        debugPrint('📵 [RESUME] No active CallKit calls');
+        return;
+      }
+
+      final call  = calls.last;
+      final extra = call['extra'] as Map<dynamic, dynamic>? ??
+          call['Extra'] as Map<dynamic, dynamic>? ??
+          {};
+
+      final roomName   = extra['roomName']?.toString()   ?? call['roomName']?.toString()   ?? '';
+      final callerId   = extra['callerId']?.toString()   ?? call['callerId']?.toString()   ?? call['handle']?.toString()    ?? '';
+      final callerName = extra['callerName']?.toString() ?? call['callerName']?.toString() ?? call['nameCaller']?.toString() ?? 'Incoming Call';
+      final callType   = extra['callType']?.toString()   ?? call['callType']?.toString()   ?? 'voice_call';
+
+      if (roomName.isEmpty || callerId.isEmpty) {
+        debugPrint('⚠️ [RESUME] Active call missing roomName/callerId — ending stale CallKit entry');
+        await _endAllCallKitCalls();
+        return;
+      }
+
+      if (_handledRoomNames.contains(roomName)) {
+        debugPrint('⏭️ [RESUME] Room $roomName already handled — skipping');
+        return;
+      }
+
+      if (_isCallExpired()) {
+        debugPrint('⏰ [RESUME] Call expired (TTL) — ending stale CallKit | room=$roomName');
+        await _endAllCallKitCalls();
+        return;
+      }
+
+      final ctx = navigatorKey.currentContext;
+      if (ctx == null) return;
+
+      bool alreadyRinging = false;
+      try {
+        final vcState = ctx.read<VideoCallProvider>().callState;
+        final vState  = ctx.read<VoiceCallProvider>().callState;
+        alreadyRinging = vcState == CallState.ringing ||
+            vState  == VoiceCallState.ringing;
+      } catch (_) {}
+
+      if (alreadyRinging) {
+        debugPrint('✅ [RESUME] Already ringing in-app — skipping | room=$roomName');
+        _handledRoomNames.add(roomName);
+        return;
+      }
+
+      _handledRoomNames.add(roomName);
+
+      debugPrint(
+        '📲 [RESUME] Surfacing call in-app | room=$roomName | caller=$callerName | type=$callType',
+      );
+
+      if (callType == 'video_call') {
+        ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
+          roomName:           roomName,
+          callerId:           callerId,
+          callerName:         callerName,
+          acceptedViaCallKit: false,
+        );
+      } else {
+        ctx.read<VoiceCallProvider>().setIncomingCallFromFCM(
+          roomName:           roomName,
+          callerId:           callerId,
+          callerName:         callerName,
+          acceptedViaCallKit: false,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ [RESUME] _checkActiveCallsOnResume error: $e');
+    }
+  }
+
+  Future<void> _rejectCallWithReconnect({
+    required BuildContext ctx,
+    required String callType,
+    required String callerId,
+    required String callerName,
+    required String roomName,
+  }) async {
+    try {
+      if (callType == 'video_call') {
+        ctx.read<VideoCallProvider>().setCallerForReject(
+          callerId:   callerId,
+          callerName: callerName,
+          roomName:   roomName,
+        );
+      } else {
+        ctx.read<VoiceCallProvider>().setCallerForReject(
+          callerId:   callerId,
+          callerName: callerName,
+          roomName:   roomName,
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ [REJECT] setCallerForReject error: $e');
+    }
+
+    try {
+      final isConnected = SocketService().socket?.connected == true;
+
+      if (isConnected) {
+        debugPrint('✅ [REJECT] Socket connected — emitting reject | room=$roomName');
+        _emitReject(ctx, callType);
+        return;
+      }
+
+      debugPrint('🔄 [REJECT] Socket disconnected — reconnecting | room=$roomName');
+      ctx.read<PersonalChatProvider>().reconnectSocket();
+
+      bool reconnected = false;
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (SocketService().socket?.connected == true) {
+          reconnected = true;
+          break;
+        }
+      }
+
+      if (reconnected) {
+        debugPrint('✅ [REJECT] Socket reconnected — emitting reject | room=$roomName');
+        _emitReject(ctx, callType);
+      } else {
+        debugPrint('⚠️ [REJECT] Reconnect timed out — REST fallback | room=$roomName');
+        await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
+      }
+    } catch (e) {
+      debugPrint('❌ [REJECT] Unexpected error ($e) — REST fallback | room=$roomName');
+      await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
+    }
+  }
+
+  void _emitReject(BuildContext ctx, String callType) {
+    try {
+      if (callType == 'video_call') {
+        ctx.read<VideoCallProvider>().rejectCall();
+      } else {
+        ctx.read<VoiceCallProvider>().rejectVoiceCall();
+      }
+    } catch (e) {
+      debugPrint('❌ [REJECT] emit error: $e');
+    }
+  }
+
+  Future<void> _rejectViaRestApi({
+    required String callerId,
+    required String roomName,
+    required String callType,
+  }) async {
+    try {
+      await ApiService.post(
+        '/api/call/reject',
+        {'callerId': callerId, 'roomName': roomName, 'callType': callType},
+        requireAuth: true,
+      ).timeout(const Duration(seconds: 5));
+      debugPrint('✅ [REJECT REST] Sent via API | room=$roomName');
+    } on TimeoutException {
+      debugPrint('⏰ [REJECT REST] Timed out after 5 s | room=$roomName');
+    } catch (e) {
+      debugPrint('❌ [REJECT REST] API call failed: $e');
+    }
+  }
+
+  Future<void> _initProviders(BuildContext ctx, dynamic user) async {
+    final mobile = user.mobile as String;
+    final name   = (user.username as String).isNotEmpty
+        ? user.username as String
+        : 'User_${mobile.substring(mobile.length - 4)}';
+
+    await ctx.read<PersonalChatProvider>().initialize();
+
+    final sock = SocketService().socket;
+    if (sock != null) {
+      ctx.read<GroupChatProvider>().setSocket(sock);
+      _clearStaleCallState(sock, user.id as String);
+    }
+
+    _socketReadySub?.cancel();
+    _socketReadySub = SocketService().onSocketReady.listen((s) {
+      if (mounted) {
+        ctx.read<GroupChatProvider>().setSocket(s);
+        _clearStaleCallState(s, user.id as String);
+      }
+    });
+
+    final freshPrefs = await SharedPreferences.getInstance();
+    final freshToken = freshPrefs.getString('auth_token');
+
+    ctx.read<VideoCallProvider>().initialize(
+      userId:    user.id as String,
+      userName:  name,
+      authToken: freshToken,
+    );
+    ctx.read<VoiceCallProvider>().initialize(
+      userId:    user.id as String,
+      userName:  name,
+      authToken: freshToken,
+    );
+    ctx.read<MeetingProvider>().initialize(
+      userId:    user.id as String,
+      userName:  name,
+      authToken: freshToken,
+    );
+
+    await _saveFcmToken();
+    ctx.read<CommentProvider>().setCurrentUserId(user.id as String? ?? '');
+  }
+
+  void _clearStaleCallState(dynamic socket, String userId) {
+    try {
+      socket.emit('call-rejected-voice', {
+        'callerId':      userId,
+        'currentUserId': userId,
+        'receiverName':  '',
+      });
+      socket.emit('call-rejected', {
+        'callerId':      userId,
+        'currentUserId': userId,
+        'receiverName':  '',
+      });
+      debugPrint('🧹 [CALL STATE] Cleared stale busy flags for userId=$userId');
+    } catch (e) {
+      debugPrint('❌ [CALL STATE] Failed to clear busy flags: $e');
     }
   }
 
@@ -717,63 +1248,35 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
       if (_pendingCallData != null &&
           _pendingCallData!['autoAccept'] == true &&
-          auth.isAuthenticated) {
-        if (auth.user != null) {
-          final user = auth.user!;
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            if (!mounted) return;
-            if (_initStarted && _lastInitUserId == user.id) return;
-            _initStarted = true;
-            _providersReady = false;
-            _lastInitUserId = user.id;
-            final name = user.username.isNotEmpty
-                ? user.username
-                : 'User_${user.mobile.substring(user.mobile.length - 4)}';
-            try {
-              await ctx.read<PersonalChatProvider>().initialize();
-              final sock = SocketService().socket;
-              if (sock != null)
-                ctx.read<GroupChatProvider>().setSocket(sock);
-              SocketService().onSocketReady.listen((s) {
-                if (mounted) ctx.read<GroupChatProvider>().setSocket(s);
-              });
+          auth.isAuthenticated &&
+          auth.user != null) {
 
-              // ✅ FIX — always get fresh token from storage
-              final freshPrefs = await SharedPreferences.getInstance();
-              final freshToken = freshPrefs.getString('auth_token');
+        final user = auth.user!;
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          if (!mounted) return;
+          if (_initStarted && _lastInitUserId == user.id) return;
+          _initStarted    = true;
+          _providersReady = false;
+          _lastInitUserId = user.id;
+          try {
+            await _initProviders(ctx, user);
+            _providersReady = true;
+            debugPrint('✅ [PROVIDER INIT / autoAccept] Done');
+            if (mounted) _consumePending();
+          } catch (e) {
+            debugPrint('❌ [PROVIDER INIT / autoAccept] $e');
+          }
+        });
 
-              ctx.read<VideoCallProvider>().initialize(
-                  userId: user.id,
-                  userName: name,
-                  authToken: freshToken);
-              ctx.read<VoiceCallProvider>().initialize(
-                  userId: user.id,
-                  userName: name,
-                  authToken: freshToken);
-              ctx.read<MeetingProvider>().initialize(
-                  userId: user.id,
-                  userName: name,
-                  authToken: freshToken);
-
-              await _saveFcmToken();
-              ctx.read<CommentProvider>().setCurrentUserId(user.id ?? '');
-              _providersReady = true;
-              debugPrint(
-                  '✅ [PROVIDER INIT] Done | pending=${_pendingCallData != null}');
-              if (mounted) _consumePending();
-            } catch (e) {
-              debugPrint('❌ [PROVIDER INIT] $e');
-            }
-          });
-        }
         return _buildApp(
           home: _CallConnectingSplash(
             callerName: _pendingCallData!['callerName'] ?? '',
-            callType: _pendingCallData!['callType'] ?? 'voice_call',
+            callType:   _pendingCallData!['callType']   ?? 'voice_call',
           ),
         );
       }
 
+      // ── Path B ─────────────────────────────────────────────────────────────
       if (!auth.isInitialized) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) ctx.read<AuthProvider>().loadUserFromStorage();
@@ -781,66 +1284,45 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildApp(home: const SplashScreen());
       }
 
+      // ── Path C ─────────────────────────────────────────────────────────────
       if (auth.isAuthenticated && auth.user != null) {
         final user = auth.user!;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
           if (!mounted) return;
           if (_initStarted && _lastInitUserId == user.id) return;
-          _initStarted = true;
+          _initStarted    = true;
           _providersReady = false;
           _lastInitUserId = user.id;
-          final name = user.username.isNotEmpty
-              ? user.username
-              : 'User_${user.mobile.substring(user.mobile.length - 4)}';
           try {
-            await ctx.read<PersonalChatProvider>().initialize();
-            final sock = SocketService().socket;
-            if (sock != null)
-              ctx.read<GroupChatProvider>().setSocket(sock);
-            SocketService().onSocketReady.listen((s) {
-              if (mounted) ctx.read<GroupChatProvider>().setSocket(s);
-            });
-
-            // ✅ FIX — always get fresh token from storage
-            final freshPrefs = await SharedPreferences.getInstance();
-            final freshToken = freshPrefs.getString('auth_token');
-
-            ctx.read<VideoCallProvider>().initialize(
-                userId: user.id,
-                userName: name,
-                authToken: freshToken);
-            ctx.read<VoiceCallProvider>().initialize(
-                userId: user.id,
-                userName: name,
-                authToken: freshToken);
-            ctx.read<MeetingProvider>().initialize(
-                userId: user.id,
-                userName: name,
-                authToken: freshToken);
-
-            await _saveFcmToken();
-            ctx.read<CommentProvider>().setCurrentUserId(user.id ?? '');
+            await _initProviders(ctx, user);
             _providersReady = true;
-            debugPrint(
-                '✅ [PROVIDER INIT] Done | pending=${_pendingCallData != null}');
-            if (mounted) _consumePending();
+            debugPrint('✅ [PROVIDER INIT] Done | pending=${_pendingCallData != null}');
+            if (mounted) {
+              _consumePending();      // existing — handles calls
+              _consumePendingChat();  // ✅ NEW — handles chat FCM tap
+            }
           } catch (e) {
             debugPrint('❌ [PROVIDER INIT] $e');
           }
         });
       }
 
+      // ── Path D ─────────────────────────────────────────────────────────────
       return _buildApp(
         home: auth.isAuthenticated
             ? VoiceCallListener(
-            child: IncomingCallListener(
-                child: MainScreen(key: mainScreenKey, initialIndex: 0)))
+          child: IncomingCallListener(
+            child: MainScreen(key: mainScreenKey, initialIndex: 0),
+          ),
+        )
             : widget.showLanguage
             ? const LanguageSelectionScreen()
             : const SplashScreen(),
       );
     });
   }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   Future<void> _endAllCallKitCalls() async {
     try {
@@ -857,18 +1339,18 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
   Widget _buildApp({required Widget home}) {
     return MaterialApp(
-      title: 'Ixes',
-      theme: AppTheme.lightTheme,
+      title:                      'Ixes',
+      theme:                      AppTheme.lightTheme,
       debugShowCheckedModeBanner: false,
-      navigatorKey: navigatorKey,
-      home: home,
+      navigatorKey:               navigatorKey,
+      home:                       home,
       routes: {
-
-
         '/login': (_) => const LoginScreen(),
-        '/main': (_) => VoiceCallListener(
-            child: IncomingCallListener(
-                child: MainScreen(key: mainScreenKey, initialIndex: 0))),
+        '/main':  (_) => VoiceCallListener(
+          child: IncomingCallListener(
+            child: MainScreen(key: mainScreenKey, initialIndex: 0),
+          ),
+        ),
       },
     );
   }

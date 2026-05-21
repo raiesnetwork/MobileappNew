@@ -15,9 +15,23 @@ class VideoCallService {
 
   // ============================================================================
   // SOCKET CONNECTION
+  // FIX: disposeSocket() before creating a new one to prevent stacking
   // ============================================================================
 
   void connectSocket() {
+    // ✅ FIX: If socket already exists and is connected, reuse it
+    if (_socket != null && _socket!.connected) {
+      debugPrint('✅ Video socket already connected — reusing');
+      return;
+    }
+    // ✅ FIX: Clean up old socket before creating new one
+    if (_socket != null) {
+      _clearAllListeners();
+      _socket!.dispose();
+      _socket = null;
+      _isRegistered = false;
+    }
+
     _socket = IO.io(
       socketUrl,
       IO.OptionBuilder()
@@ -32,7 +46,10 @@ class VideoCallService {
 
     _socket?.onConnectError((error) => debugPrint('❌ Video Socket CONNECT ERROR: $error'));
     _socket?.onError((error) => debugPrint('❌ Video Socket ERROR: $error'));
-    _socket?.onReconnect((attempt) => debugPrint('🔄 Video Socket RECONNECTING (attempt $attempt)'));
+    _socket?.onReconnect((attempt) {
+      debugPrint('🔄 Video Socket RECONNECTING (attempt $attempt)');
+      _isRegistered = false; // ✅ force re-registration after reconnect
+    });
   }
 
   void connect() {
@@ -44,30 +61,42 @@ class VideoCallService {
     _socket?.disconnect();
   }
 
+  // ✅ FIX: Clear all event listeners to prevent stacking
+  void _clearAllListeners() {
+    _socket?.off('connect');
+    _socket?.off('disconnect');
+    _socket?.off('incoming-video-call');
+    _socket?.off('call-accepted');
+    _socket?.off('call-rejected');
+    _socket?.off('video-call-ended');
+    _socket?.off('user-offline');
+    _socket?.off('participant-joined-call');
+    _socket?.off('participant-left-call');
+  }
+
   void dispose() {
     _isRegistered = false;
+    _clearAllListeners();
     _socket?.dispose();
+    _socket = null;
   }
 
   // ============================================================================
-  // ✅ KEY FIX: RELIABLE ensureConnectedAndRegistered using polling
+  // RELIABLE ensureConnectedAndRegistered using polling
   // ============================================================================
   Future<void> ensureConnectedAndRegistered(String userId) async {
     debugPrint('🔌 Video ensureConnectedAndRegistered: start | connected=${_socket?.connected} | registered=$_isRegistered');
 
-    // Step 1: Initialize if null
     if (_socket == null) {
       debugPrint('⚠️ Video socket is null — initializing');
       connectSocket();
     }
 
-    // Step 2: Trigger connect if not connected
     if (_socket?.connected != true) {
       debugPrint('🔌 Video socket not connected — calling connect()');
       _socket?.connect();
     }
 
-    // Step 3: Poll until connected (max 10 seconds)
     const pollInterval = Duration(milliseconds: 200);
     const maxWait = Duration(seconds: 10);
     final deadline = DateTime.now().add(maxWait);
@@ -81,12 +110,10 @@ class VideoCallService {
       await Future.delayed(pollInterval);
     }
 
-    // Step 4: Register
     debugPrint('✅ Video ensureConnectedAndRegistered: connected — registering $userId');
     _socket?.emit('register-user', userId);
     _isRegistered = true;
 
-    // Small buffer for server to process registration
     await Future.delayed(const Duration(milliseconds: 300));
     debugPrint('✅ Video ensureConnectedAndRegistered: done | socketId=${_socket?.id}');
   }
@@ -97,7 +124,7 @@ class VideoCallService {
   void registerUser(String userId) {
     _socket?.emit('register-user', userId);
     _isRegistered = true;
-    debugPrint('📝 Registered user: $userId');
+    debugPrint('📝 Video registered user: $userId');
   }
 
   // ============================================================================
@@ -133,7 +160,7 @@ class VideoCallService {
         'user-busy',
         {'receiverId': receiverId},
         ack: (data) {
-          if (completer.isCompleted) return; // ✅ ignore duplicate responses
+          if (completer.isCompleted) return;
           try {
             if (data == null) {
               completer.complete(null);
@@ -163,16 +190,18 @@ class VideoCallService {
     }
   }
 
-  // FIND initiateVideoCall() and ADD one line at top:
-  void initiateVideoCall({
+  Future<void> initiateVideoCall({
     required String roomName,
-
     required String callerId,
     required String callerName,
     required String receiverId,
   }) async {
-    // ✅ ADD THIS
     await ensureConnectedAndRegistered(callerId);
+
+    if (_socket?.connected != true) {
+      debugPrint('❌ initiateVideoCall: not connected — aborting');
+      return;
+    }
 
     final data = {
       'roomName': roomName,
@@ -181,7 +210,7 @@ class VideoCallService {
       'receiverId': receiverId,
     };
     _socket?.emit('initiate-video-call', data);
-    debugPrint('📞 Initiating call: $data');
+    debugPrint('📞 Initiating video call: $data');
   }
 
   void rejectCall({
@@ -307,8 +336,10 @@ class VideoCallService {
 
   // ============================================================================
   // EVENT LISTENERS
+  // ✅ FIX: Each on*() call uses socket.off() first to prevent stacking
   // ============================================================================
   void onConnect(Function() callback) {
+    _socket?.off('connect');
     _socket?.onConnect((_) {
       debugPrint('✅ Video socket connected');
       callback();
@@ -316,6 +347,7 @@ class VideoCallService {
   }
 
   void onDisconnect(Function() callback) {
+    _socket?.off('disconnect');
     _socket?.onDisconnect((_) {
       debugPrint('❌ Video socket disconnected');
       _isRegistered = false;
@@ -323,13 +355,40 @@ class VideoCallService {
     });
   }
 
-  void onIncomingVideoCall(Function(dynamic) callback) => _socket?.on('incoming-video-call', callback);
-  void onCallAccepted(Function(dynamic) callback) => _socket?.on('call-accepted', callback);
-  void onCallRejected(Function(dynamic) callback) => _socket?.on('call-rejected', callback);
-  void onVideoCallEnded(Function(dynamic) callback) => _socket?.on('video-call-ended', callback);
-  void onUserOffline(Function(dynamic) callback) => _socket?.on('user-offline', callback);
-  void onParticipantJoinedCall(Function(dynamic) callback) => _socket?.on('participant-joined-call', callback);
-  void onParticipantLeftCall(Function(dynamic) callback) => _socket?.on('participant-left-call', callback);
+  void onIncomingVideoCall(Function(dynamic) callback) {
+    _socket?.off('incoming-video-call');
+    _socket?.on('incoming-video-call', callback);
+  }
+
+  void onCallAccepted(Function(dynamic) callback) {
+    _socket?.off('call-accepted');
+    _socket?.on('call-accepted', callback);
+  }
+
+  void onCallRejected(Function(dynamic) callback) {
+    _socket?.off('call-rejected');
+    _socket?.on('call-rejected', callback);
+  }
+
+  void onVideoCallEnded(Function(dynamic) callback) {
+    _socket?.off('video-call-ended');
+    _socket?.on('video-call-ended', callback);
+  }
+
+  void onUserOffline(Function(dynamic) callback) {
+    _socket?.off('user-offline');
+    _socket?.on('user-offline', callback);
+  }
+
+  void onParticipantJoinedCall(Function(dynamic) callback) {
+    _socket?.off('participant-joined-call');
+    _socket?.on('participant-joined-call', callback);
+  }
+
+  void onParticipantLeftCall(Function(dynamic) callback) {
+    _socket?.off('participant-left-call');
+    _socket?.on('participant-left-call', callback);
+  }
 
   void offIncomingVideoCall() => _socket?.off('incoming-video-call');
   void offCallAccepted() => _socket?.off('call-accepted');

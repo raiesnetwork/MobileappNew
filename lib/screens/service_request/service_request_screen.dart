@@ -7,109 +7,99 @@ import 'service_request_deatils_page.dart';
 
 class AllServiceRequestsScreen extends StatefulWidget {
   final String communityId;
-  const AllServiceRequestsScreen({Key? key, required this.communityId}) : super(key: key);
+  const AllServiceRequestsScreen({Key? key, required this.communityId})
+      : super(key: key);
 
   @override
-  State<AllServiceRequestsScreen> createState() => _AllServiceRequestsScreenState();
+  State<AllServiceRequestsScreen> createState() =>
+      _AllServiceRequestsScreenState();
 }
 
-class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
+class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
   String selectedStatus = 'All';
   String selectedPriority = 'All';
   String searchQuery = '';
   String? currentUserId;
   bool _isDeleting = false;
+  String? _deletingRequestId;
 
-  final List<String> statusOptions = ['All', 'Open', 'In Progress', 'Completed', 'Closed'];
+  final List<String> statusOptions = [
+    'All',
+    'Open',
+    'In Progress',
+    'Completed',
+    'Closed'
+  ];
   final List<String> priorityOptions = [
     'All',
     'Critical – Business/essential function is blocked',
     'High – Needs action soon, moderate impact',
     'Medium – Needs attention within a few hours',
-    'Low – Not urgent, can wait'
+    'Low – Not urgent, can wait',
   ];
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadCurrentUserId();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ServiceRequestProvider>(context, listen: false).fetchServiceRequests(communityId: widget.communityId);
+      Provider.of<ServiceRequestProvider>(context, listen: false)
+          .fetchServiceRequests(communityId: widget.communityId);
     });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCurrentUserId() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      currentUserId = prefs.getString('user_id') ?? '65ec4cd00b6a74864052699c'; // Fallback to Raja's ID
+      currentUserId = prefs.getString('user_id') ?? '';
     });
   }
 
+  // ─────────────────────────────────────────────
+  // BUILD
+  // ─────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.grey[50],
-      appBar: AppBar(
-        title: const Text('Service Requests', style: TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
-        scrolledUnderElevation: 0,
-        elevation: 0,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(height: 1, color: Colors.grey[200]),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => CreateServiceRequestScreen(communityId: widget.communityId),
-            ),
-          );
-          if (result == true && mounted) {
-            Provider.of<ServiceRequestProvider>(context, listen: false).fetchServiceRequests(communityId: widget.communityId);
-          }
-        },
-        backgroundColor: Colors.purple[600],
-        foregroundColor: Colors.white,
-        child: const Icon(Icons.add),
-      ),
+      backgroundColor: const Color(0xFFF5F6FA),
+      appBar: _buildAppBar(),
+      floatingActionButton: _buildFAB(),
       body: Consumer<ServiceRequestProvider>(
-        builder: (context, provider, child) {
+        builder: (context, provider, _) {
           if (provider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(
+                child: CircularProgressIndicator(color: Color(0xFF6C5CE7)));
           }
-
           if (provider.error != null) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
-                  const SizedBox(height: 12),
-                  Text('Error loading requests', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[800])),
-                  const SizedBox(height: 6),
-                  Text(provider.error!, style: TextStyle(color: Colors.grey[600]), textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => provider.fetchServiceRequests(communityId: widget.communityId),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            );
+            return _buildErrorState(provider);
           }
 
-          final filteredRequests = _filterRequests(provider.requests);
+          final myRequests = _filterRequests(provider.requests);
+          final assignedRequests = _filterRequests(provider.assignedRequests);
 
           return Column(
             children: [
               _buildFiltersSection(),
               _buildStatsSection(provider.requests),
+              _buildTabBar(),
               Expanded(
-                child: filteredRequests.isEmpty ? _buildEmptyState() : _buildRequestsList(filteredRequests),
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _buildListView(myRequests, provider),
+                    _buildListView(assignedRequests, provider),
+                  ],
+                ),
               ),
             ],
           );
@@ -118,31 +108,110 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // APP BAR
+  // ─────────────────────────────────────────────
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      title: const Text(
+        'Service Requests',
+        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+      ),
+      backgroundColor: Colors.white,
+      foregroundColor: const Color(0xFF1A1A2E),
+      scrolledUnderElevation: 0,
+      elevation: 0,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Container(height: 1, color: const Color(0xFFEEEEF5)),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // FAB
+  // ─────────────────────────────────────────────
+  Widget _buildFAB() {
+    return FloatingActionButton.extended(
+      onPressed: () async {
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                CreateServiceRequestScreen(communityId: widget.communityId),
+          ),
+        );
+        if (result == true && mounted) {
+          Provider.of<ServiceRequestProvider>(context, listen: false)
+              .fetchServiceRequests(communityId: widget.communityId);
+        }
+      },
+      backgroundColor: const Color(0xFF6C5CE7),
+      foregroundColor: Colors.white,
+      icon: const Icon(Icons.add, size: 20),
+      label: const Text('New Request',
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+      elevation: 4,
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // FILTERS
+  // ─────────────────────────────────────────────
   Widget _buildFiltersSection() {
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         children: [
+          // Search
           TextField(
             decoration: InputDecoration(
-              hintText: 'Search requests...',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey[300]!)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Colors.blue)),
+              hintText: 'Search by subject, ID or description...',
+              hintStyle:
+              TextStyle(color: Colors.grey[400], fontSize: 13),
+              prefixIcon:
+              Icon(Icons.search_rounded, size: 20, color: Colors.grey[400]),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[200]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[200]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: Color(0xFF6C5CE7), width: 1.5),
+              ),
               filled: true,
-              fillColor: Colors.grey[50],
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              fillColor: const Color(0xFFF8F8FC),
+              contentPadding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
-            onChanged: (value) => setState(() => searchQuery = value),
+            onChanged: (v) => setState(() => searchQuery = v),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Row(
             children: [
-              Expanded(child: _buildFilterDropdown('Status', selectedStatus, statusOptions, (value) => setState(() => selectedStatus = value!))),
-              const SizedBox(width: 8),
-              Expanded(child: _buildFilterDropdown('Priority', selectedPriority, priorityOptions, (value) => setState(() => selectedPriority = value!))),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Status',
+                  value: selectedStatus,
+                  options: statusOptions,
+                  onChanged: (v) => setState(() => selectedStatus = v!),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildDropdown(
+                  label: 'Priority',
+                  value: selectedPriority,
+                  options: priorityOptions,
+                  onChanged: (v) => setState(() => selectedPriority = v!),
+                  truncate: true,
+                ),
+              ),
             ],
           ),
         ],
@@ -150,242 +219,384 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
     );
   }
 
-  Widget _buildFilterDropdown(String label, String value, List<String> options, void Function(String?) onChanged) {
+  Widget _buildDropdown({
+    required String label,
+    required String value,
+    required List<String> options,
+    required void Function(String?) onChanged,
+    bool truncate = false,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: Colors.grey[600])),
-        const SizedBox(height: 3),
+        Text(label,
+            style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[500],
+                letterSpacing: 0.4)),
+        const SizedBox(height: 4),
         DropdownButtonFormField<String>(
           value: value,
           decoration: InputDecoration(
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey[300]!)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey[300]!)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey[200]!),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey[200]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide:
+              const BorderSide(color: Color(0xFF6C5CE7), width: 1.5),
+            ),
+            filled: true,
+            fillColor: const Color(0xFFF8F8FC),
+            contentPadding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
-          items: options.map((option) => DropdownMenuItem(
-            value: option,
-            child: Text(option == 'All' ? option : _truncateText(option, 15), style: const TextStyle(fontSize: 12)),
-          )).toList(),
+          items: options
+              .map((o) => DropdownMenuItem(
+            value: o,
+            child: Text(
+              truncate && o != 'All'
+                  ? _truncate(o, 14)
+                  : o,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ))
+              .toList(),
           onChanged: onChanged,
+          icon: Icon(Icons.keyboard_arrow_down_rounded,
+              color: Colors.grey[500], size: 18),
         ),
       ],
     );
   }
 
+  // ─────────────────────────────────────────────
+  // STATS BAR
+  // ─────────────────────────────────────────────
   Widget _buildStatsSection(List<Map<String, dynamic>> requests) {
-    final stats = _calculateStats(requests);
+    final total = requests.length;
+    final open = requests.where((r) => r['status'] == 'Open').length;
+    final inProgress =
+        requests.where((r) => r['status'] == 'In Progress').length;
+    final completed =
+        requests.where((r) => r['status'] == 'Completed').length;
+
     return Container(
       color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
       child: Row(
         children: [
-          _buildStatCard('Total', stats['total']!, Colors.blue),
+          _statChip('Total', total, const Color(0xFF6C5CE7)),
           const SizedBox(width: 8),
-          _buildStatCard('Open', stats['open']!, Colors.orange),
+          _statChip('Open', open, const Color(0xFFFF7043)),
           const SizedBox(width: 8),
-          _buildStatCard('In Progress', stats['inProgress']!, Colors.purple),
+          _statChip('In Progress', inProgress, const Color(0xFF9B59B6)),
           const SizedBox(width: 8),
-          _buildStatCard('Completed', stats['completed']!, Colors.green),
+          _statChip('Done', completed, const Color(0xFF00B894)),
         ],
       ),
     );
   }
 
-  Widget _buildStatCard(String label, int count, Color color) {
+  Widget _statChip(String label, int count, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withOpacity(0.15), width: 1),
+        ),
         child: Column(
           children: [
-            Text(count.toString(), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color)),
-            Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w500)),
+            Text(count.toString(),
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: color.withOpacity(0.8),
+                    letterSpacing: 0.3)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildRequestsList(List<Map<String, dynamic>> requests) {
-    return RefreshIndicator(
-      onRefresh: () async => await Provider.of<ServiceRequestProvider>(context, listen: false).fetchServiceRequests(communityId: widget.communityId),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: requests.length,
-        itemBuilder: (context, index) => _buildRequestCard(requests[index]),
+  // ─────────────────────────────────────────────
+  // TAB BAR
+  // ─────────────────────────────────────────────
+  Widget _buildTabBar() {
+    return Container(
+      color: Colors.white,
+      child: TabBar(
+        controller: _tabController,
+        labelColor: const Color(0xFF6C5CE7),
+        unselectedLabelColor: Colors.grey[500],
+        indicatorColor: const Color(0xFF6C5CE7),
+        indicatorWeight: 2.5,
+        labelStyle:
+        const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        unselectedLabelStyle:
+        const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+        tabs: const [
+          Tab(text: 'My Requests'),
+          Tab(text: 'Assigned to Me'),
+        ],
       ),
     );
   }
 
+  // ─────────────────────────────────────────────
+  // LIST VIEW
+  // ─────────────────────────────────────────────
+  Widget _buildListView(
+      List<Map<String, dynamic>> requests, ServiceRequestProvider provider) {
+    return RefreshIndicator(
+      color: const Color(0xFF6C5CE7),
+      onRefresh: () => provider.fetchServiceRequests(
+          communityId: widget.communityId),
+      child: requests.isEmpty
+          ? _buildEmptyState()
+          : ListView.builder(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 90),
+        itemCount: requests.length,
+        itemBuilder: (_, i) => _buildRequestCard(requests[i]),
+      ),
+    );
+  }
+
+  // ─────────────────────────────────────────────
+  // REQUEST CARD
+  // ─────────────────────────────────────────────
   Widget _buildRequestCard(Map<String, dynamic> request) {
     final status = request['status'] ?? 'Unknown';
-    final priority = request['priority'] ?? 'Medium';
-    final statusColor = _getStatusColor(status);
-    final priorityColor = _getPriorityColor(priority);
-    final isCreator = currentUserId != null && request['raisedBy']?['_id'] == currentUserId;
+    final priority = request['priority'] ?? '';
+    final statusColor = _statusColor(status);
+    final priorityColor = _priorityColor(priority);
+    final isCreator = currentUserId != null &&
+        request['raisedBy']?['_id'] == currentUserId;
     final canEditOrDelete = isCreator && status != 'Completed';
+    final hasFiles =
+        (request['files'] as List?)?.isNotEmpty ?? false;
+    final hasNotes =
+        (request['workingNotes'] as List?)?.isNotEmpty ?? false;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => _navigateToRequestDetails(request),
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => _openDetails(request),
         child: Stack(
           children: [
-            Container(
-              padding: const EdgeInsets.all(14),
+            // Left accent bar
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: priorityColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(14),
+                    bottomLeft: Radius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
+                  // Row 1: ID + Status + Menu
                   Row(
                     children: [
-                      Expanded(
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF6C5CE7).withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
                         child: Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: BoxDecoration(color: Colors.blue.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                              child: Icon(Icons.confirmation_number_outlined, size: 12, color: Colors.blue[700]),
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('REQUEST ID', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.grey[500], letterSpacing: 0.5)),
-                                  Text(request['requestId'] ?? 'N/A', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.blue[700]), overflow: TextOverflow.ellipsis),
-                                ],
+                            Icon(Icons.tag,
+                                size: 11,
+                                color: const Color(0xFF6C5CE7)),
+                            const SizedBox(width: 3),
+                            Text(
+                              request['requestId'] ?? 'N/A',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF6C5CE7),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: statusColor.withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: statusColor.withOpacity(0.3), width: 1),
-                            ),
-                            child: Text(status.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: statusColor, letterSpacing: 0.3)),
+                      const Spacer(),
+                      // Status badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                              color: statusColor.withOpacity(0.3), width: 1),
+                        ),
+                        child: Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: statusColor,
+                            letterSpacing: 0.4,
                           ),
-                          if (canEditOrDelete) ...[
-                            const SizedBox(width: 8),
-                            PopupMenuButton<String>(
-                              icon: Icon(Icons.more_vert, size: 20, color: Colors.grey[600]),
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _navigateToEditRequest(request);
-                                } else if (value == 'delete') {
-                                  _showDeleteConfirmation(request);
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Edit', style: TextStyle(fontSize: 14)),
-                                ),
-                                const PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('Delete', style: TextStyle(fontSize: 14, color: Colors.red)),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
+                        ),
                       ),
+                      if (canEditOrDelete) ...[
+                        const SizedBox(width: 4),
+                        _buildCardMenu(request),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 10),
                   // Subject
                   Text(
                     request['subject'] ?? 'No Subject',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, height: 1.2),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1A2E),
+                      height: 1.3,
+                    ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
                   // Description
-                  if (request['description'] != null && request['description'].toString().isNotEmpty)
+                  if ((request['description'] ?? '').toString().isNotEmpty)
                     Text(
                       request['description'],
-                      style: TextStyle(fontSize: 14, color: Colors.grey[600], height: 1.3),
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[500],
+                          height: 1.4),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   const SizedBox(height: 10),
-                  // Priority and Category
-                  Row(
+                  // Priority + Category chips
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: priorityColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: priorityColor.withOpacity(0.3), width: 1),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.flag, size: 12, color: priorityColor),
-                            const SizedBox(width: 3),
-                            Text(_getPriorityLabel(priority), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: priorityColor, letterSpacing: 0.3)),
-                          ],
-                        ),
+                      _chip(
+                        icon: Icons.flag_rounded,
+                        label: _priorityLabel(priority),
+                        color: priorityColor,
                       ),
-                      const SizedBox(width: 20),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(4)),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.category_outlined, size: 18, color: Colors.grey[600]),
-                              const SizedBox(width: 3),
-                              Flexible(
-                                child: Text(
-                                  request['category'] ?? 'Uncategorized',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      _chip(
+                        icon: Icons.category_outlined,
+                        label: request['category'] ?? 'Uncategorized',
+                        color: Colors.grey[600]!,
+                        bgColor: Colors.grey[100]!,
                       ),
+                      if (hasFiles)
+                        _chip(
+                          icon: Icons.attach_file_rounded,
+                          label: '${(request['files'] as List).length} file(s)',
+                          color: Colors.teal,
+                          bgColor: Colors.teal.withOpacity(0.08),
+                        ),
+                      if (hasNotes)
+                        _chip(
+                          icon: Icons.notes_rounded,
+                          label: 'Notes',
+                          color: Colors.amber[700]!,
+                          bgColor: Colors.amber.withOpacity(0.08),
+                        ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  // Bottom info
+                  // Footer
                   Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8F8FC),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     child: Column(
                       children: [
                         Row(
                           children: [
-                            Expanded(child: _buildInfoItem(Icons.person_outline, 'RAISED BY', _getUserName(request['raisedBy']), Colors.blue[600]!)),
-                            if (request['community'] != null) ...[
+                            Expanded(
+                              child: _infoItem(
+                                Icons.person_outline_rounded,
+                                'RAISED BY',
+                                _userName(request['raisedBy']),
+                                const Color(0xFF6C5CE7),
+                              ),
+                            ),
+                            if (request['assignedTo'] != null) ...[
                               const SizedBox(width: 12),
-                              Expanded(child: _buildInfoItem(Icons.group_outlined, 'COMMUNITY', request['community']['name'] ?? 'N/A', Colors.purple[600]!)),
+                              Expanded(
+                                child: _infoItem(
+                                  Icons.assignment_ind_outlined,
+                                  'ASSIGNED TO',
+                                  _userName(request['assignedTo']),
+                                  const Color(0xFF00B894),
+                                ),
+                              ),
                             ],
                           ],
                         ),
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            Expanded(child: _buildInfoItem(Icons.schedule_outlined, 'CREATED', _formatDate(request['createdAt']), Colors.grey[600]!)),
-                            if (request['assignedTo'] != null) ...[
+                            Expanded(
+                              child: _infoItem(
+                                Icons.schedule_outlined,
+                                'CREATED',
+                                _formatDate(request['createdAt']),
+                                Colors.grey[500]!,
+                              ),
+                            ),
+                            if (request['dueDate'] != null) ...[
                               const SizedBox(width: 12),
-                              Expanded(child: _buildInfoItem(Icons.assignment_ind_outlined, 'ASSIGNED', _getUserName(request['assignedTo']), Colors.green[600]!)),
+                              Expanded(
+                                child: _infoItem(
+                                  Icons.event_outlined,
+                                  'DUE DATE',
+                                  _formatDate(request['dueDate']),
+                                  const Color(0xFFFF7043),
+                                ),
+                              ),
                             ],
                           ],
                         ),
@@ -395,11 +606,17 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
                 ],
               ),
             ),
-            if (_isDeleting && request['_id'] == _deletingRequestId)
+            // Deleting overlay
+            if (_isDeleting && _deletingRequestId == request['_id'])
               Positioned.fill(
                 child: Container(
-                  color: Colors.black.withOpacity(0.2),
-                  child: const Center(child: CircularProgressIndicator()),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.8),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Center(
+                      child: CircularProgressIndicator(
+                          color: Color(0xFF6C5CE7))),
                 ),
               ),
           ],
@@ -408,15 +625,72 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
     );
   }
 
-  String? _deletingRequestId;
+  Widget _buildCardMenu(Map<String, dynamic> request) {
+    return PopupMenuButton<String>(
+      icon: Icon(Icons.more_vert_rounded, size: 18, color: Colors.grey[500]),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      onSelected: (v) {
+        if (v == 'edit') _openEdit(request);
+        if (v == 'delete') _confirmDelete(request);
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(
+            value: 'edit',
+            child: Row(children: [
+              Icon(Icons.edit_outlined, size: 16, color: Color(0xFF6C5CE7)),
+              SizedBox(width: 10),
+              Text('Edit', style: TextStyle(fontSize: 14)),
+            ])),
+        const PopupMenuItem(
+            value: 'delete',
+            child: Row(children: [
+              Icon(Icons.delete_outline, size: 16, color: Colors.red),
+              SizedBox(width: 10),
+              Text('Delete',
+                  style: TextStyle(fontSize: 14, color: Colors.red)),
+            ])),
+      ],
+    );
+  }
 
-  Widget _buildInfoItem(IconData icon, String label, String value, Color color) {
+  Widget _chip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    Color? bgColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bgColor ?? color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.25), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: color)),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoItem(IconData icon, String label, String value, Color color) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: const EdgeInsets.all(3),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(3)),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(4),
+          ),
           child: Icon(icon, size: 11, color: color),
         ),
         const SizedBox(width: 6),
@@ -424,9 +698,20 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey[500], letterSpacing: 0.3)),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.grey[500],
+                      letterSpacing: 0.3)),
               const SizedBox(height: 1),
-              Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.grey[700]), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(value,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[700]),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ],
           ),
         ),
@@ -434,67 +719,136 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
     );
   }
 
+  // ─────────────────────────────────────────────
+  // EMPTY / ERROR STATES
+  // ─────────────────────────────────────────────
   Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[400]),
-          const SizedBox(height: 12),
-          Text('No service requests found', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[600])),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6C5CE7).withOpacity(0.08),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.inbox_outlined,
+                size: 40, color: const Color(0xFF6C5CE7).withOpacity(0.5)),
+          ),
+          const SizedBox(height: 16),
+          Text('No requests found',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey[700])),
           const SizedBox(height: 6),
-          Text('Try adjusting your filters or search terms', style: TextStyle(color: Colors.grey[500])),
+          Text('Try adjusting your filters',
+              style: TextStyle(fontSize: 13, color: Colors.grey[500])),
         ],
       ),
     );
   }
 
-  void _navigateToRequestDetails(Map<String, dynamic> request) {
-    Provider.of<ServiceRequestProvider>(context, listen: false).clearCurrentRequest();
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ServiceRequestDetailsScreen(
-          requestId: request['_id'] ?? '', // Use _id for details
-          initialData: request,
-        ),
+  Widget _buildErrorState(ServiceRequestProvider provider) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 48, color: Colors.red[300]),
+          const SizedBox(height: 12),
+          Text('Something went wrong',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.grey[800])),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(provider.error!,
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                textAlign: TextAlign.center),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => provider.fetchServiceRequests(
+                communityId: widget.communityId),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6C5CE7),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8))),
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }
 
-  void _navigateToEditRequest(Map<String, dynamic> request) {
+  // ─────────────────────────────────────────────
+  // NAVIGATION
+  // ─────────────────────────────────────────────
+  void _openDetails(Map<String, dynamic> request) {
+    Provider.of<ServiceRequestProvider>(context, listen: false)
+        .clearCurrentRequest();
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CreateServiceRequestScreen(
+        builder: (_) => ServiceRequestDetailsScreen(
+          requestId: request['_id'] ?? '',
+          initialData: request,
+          communityId: widget.communityId,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) {
+        Provider.of<ServiceRequestProvider>(context, listen: false)
+            .fetchServiceRequests(communityId: widget.communityId);
+      }
+    });
+  }
+
+  void _openEdit(Map<String, dynamic> request) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreateServiceRequestScreen(
           communityId: widget.communityId,
           request: request,
         ),
       ),
     ).then((result) {
       if (result == true && mounted) {
-        Provider.of<ServiceRequestProvider>(context, listen: false).fetchServiceRequests(communityId: widget.communityId);
+        Provider.of<ServiceRequestProvider>(context, listen: false)
+            .fetchServiceRequests(communityId: widget.communityId);
       }
     });
   }
 
-  void _showDeleteConfirmation(Map<String, dynamic> request) {
+  void _confirmDelete(Map<String, dynamic> request) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Request'),
-        content: Text('Are you sure you want to delete "${request['subject']}" (ID: ${request['requestId']})? This action cannot be undone.'),
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Text('Delete Request',
+            style: TextStyle(fontWeight: FontWeight.w700)),
+        content: Text(
+            'Are you sure you want to delete "${request['subject']}"? This cannot be undone.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: Colors.grey[600]))),
+          ElevatedButton(
             onPressed: () async {
               Navigator.pop(context);
               await _deleteRequest(request['_id']);
             },
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8))),
+            child: const Text('Delete'),
           ),
         ],
       ),
@@ -508,34 +862,19 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
       _deletingRequestId = requestId;
     });
     try {
-      final provider = Provider.of<ServiceRequestProvider>(context, listen: false);
-      final result = await provider.deleteServiceRequest(requestId);
+      final provider =
+      Provider.of<ServiceRequestProvider>(context, listen: false);
+      final result = await provider.deleteServiceRequest(requestId,
+          communityId: widget.communityId);
       if (!mounted) return;
-      if (result['error'] == false) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Service request deleted successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        await provider.fetchServiceRequests(communityId: widget.communityId);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message'] ?? 'Failed to delete service request'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showSnack(
+        result['error'] == false
+            ? 'Service request deleted successfully'
+            : (result['message'] ?? 'Failed to delete'),
+        result['error'] == false ? Colors.green : Colors.red,
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (mounted) _showSnack('Error: ${e.toString()}', Colors.red);
     } finally {
       if (mounted) {
         setState(() {
@@ -546,85 +885,82 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen> {
     }
   }
 
-  List<Map<String, dynamic>> _filterRequests(List<Map<String, dynamic>> requests) {
-    return requests.where((request) {
-      final matchesSearch = searchQuery.isEmpty ||
-          (request['subject']?.toLowerCase().contains(searchQuery.toLowerCase()) ?? false) ||
-          (request['description']?.toLowerCase().contains(searchQuery.toLowerCase()) ?? false) ||
-          (request['requestId']?.toLowerCase().contains(searchQuery.toLowerCase()) ?? false);
-      final matchesStatus = selectedStatus == 'All' || request['status'] == selectedStatus;
-      final matchesPriority = selectedPriority == 'All' || request['priority'] == selectedPriority;
-      return matchesSearch && matchesStatus && matchesPriority;
+  // ─────────────────────────────────────────────
+  // HELPERS
+  // ─────────────────────────────────────────────
+  List<Map<String, dynamic>> _filterRequests(
+      List<Map<String, dynamic>> requests) {
+    return requests.where((r) {
+      final q = searchQuery.toLowerCase();
+      final matchSearch = q.isEmpty ||
+          (r['subject']?.toLowerCase().contains(q) ?? false) ||
+          (r['description']?.toLowerCase().contains(q) ?? false) ||
+          (r['requestId']?.toLowerCase().contains(q) ?? false);
+      final matchStatus =
+          selectedStatus == 'All' || r['status'] == selectedStatus;
+      final matchPriority =
+          selectedPriority == 'All' || r['priority'] == selectedPriority;
+      return matchSearch && matchStatus && matchPriority;
     }).toList();
   }
 
-  Map<String, int> _calculateStats(List<Map<String, dynamic>> requests) {
-    return {
-      'total': requests.length,
-      'open': requests.where((r) => r['status'] == 'Open').length,
-      'inProgress': requests.where((r) => r['status'] == 'In Progress').length,
-      'completed': requests.where((r) => r['status'] == 'Completed').length,
-    };
+  void _showSnack(String msg, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
   }
 
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'Open':
-        return Colors.orange;
-      case 'In Progress':
-        return Colors.purple;
-      case 'Completed':
-        return Colors.green;
-      case 'Closed':
-        return Colors.grey;
-      default:
-        return Colors.blue;
+  Color _statusColor(String s) {
+    switch (s) {
+      case 'Open': return const Color(0xFFFF7043);
+      case 'In Progress': return const Color(0xFF9B59B6);
+      case 'Completed': return const Color(0xFF00B894);
+      case 'Closed': return Colors.grey;
+      default: return const Color(0xFF6C5CE7);
     }
   }
 
-  Color _getPriorityColor(String priority) {
-    if (priority.contains('Critical')) return Colors.red;
-    if (priority.contains('High')) return Colors.orange;
-    if (priority.contains('Medium')) return Colors.blue;
-    if (priority.contains('Low')) return Colors.green;
+  Color _priorityColor(String p) {
+    if (p.contains('Critical')) return const Color(0xFFE74C3C);
+    if (p.contains('High')) return const Color(0xFFFF7043);
+    if (p.contains('Medium')) return const Color(0xFF3498DB);
+    if (p.contains('Low')) return const Color(0xFF00B894);
     return Colors.grey;
   }
 
-  String _getPriorityLabel(String priority) {
-    if (priority.contains('Critical')) return 'CRITICAL';
-    if (priority.contains('High')) return 'HIGH';
-    if (priority.contains('Medium')) return 'MEDIUM';
-    if (priority.contains('Low')) return 'LOW';
+  String _priorityLabel(String p) {
+    if (p.contains('Critical')) return 'CRITICAL';
+    if (p.contains('High')) return 'HIGH';
+    if (p.contains('Medium')) return 'MEDIUM';
+    if (p.contains('Low')) return 'LOW';
     return 'UNKNOWN';
   }
 
-  String _getUserName(Map<String, dynamic>? user) {
-    if (user == null) return 'N/A';
-    return user['profile']?['name'] ?? user['email'] ?? 'Unknown User';
+  String _userName(Map<String, dynamic>? u) {
+    if (u == null) return 'N/A';
+    return u['profile']?['name'] ?? u['email'] ?? 'Unknown';
   }
 
-  String _formatDate(String? dateString) {
-    if (dateString == null) return 'N/A';
+  String _formatDate(String? d) {
+    if (d == null) return 'N/A';
     try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-      if (difference.inDays == 0) {
-        return 'Today ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
-      } else if (difference.inDays == 1) {
-        return 'Yesterday';
-      } else if (difference.inDays < 7) {
-        return '${difference.inDays} days ago';
-      } else {
-        return '${date.day}/${date.month}/${date.year}';
-      }
-    } catch (e) {
-      return dateString;
+      final date = DateTime.parse(d);
+      final diff = DateTime.now().difference(date);
+      if (diff.inDays == 0) return 'Today';
+      if (diff.inDays == 1) return 'Yesterday';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (_) {
+      return d;
     }
   }
 
-  String _truncateText(String text, int maxLength) {
-    if (text.length <= maxLength) return text;
-    return '${text.substring(0, maxLength)}...';
+  String _truncate(String text, int max) {
+    return text.length <= max ? text : '${text.substring(0, max)}...';
   }
 }

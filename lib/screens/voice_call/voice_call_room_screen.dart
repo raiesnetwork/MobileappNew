@@ -6,20 +6,15 @@ import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
 import 'package:ixes.app/screens/widgets/video_call.dart';
 import 'package:ixes.app/screens/widgets/voice_call.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../../services/api_service.dart';
 
 class VoiceRoomScreen extends StatefulWidget {
-  // ✅ fromFcmAutoAccept: true when opened via Answer tap from killed state.
-  // When true, closing the screen navigates to MainScreen instead of pop()
-  // so the user doesn't see the connecting splash underneath.
   final bool fromFcmAutoAccept;
-
   const VoiceRoomScreen({Key? key, this.fromFcmAutoAccept = false}) : super(key: key);
 
   @override
@@ -34,7 +29,9 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   bool _isSpeakerOn = true;
   bool _isConnecting = true;
   bool _isEnding = false;
-  bool _hasJoined = false;
+
+  // ✅ FIX: _hasJoined removed — screens now always handle state changes
+  // The old guard caused "stuck on connecting" when remote ended during join
 
   Timer? _callTimer;
   int _callDuration = 0;
@@ -48,6 +45,15 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     _provider = context.read<VoiceCallProvider>();
     debugPrint(
         '🏁 VoiceRoomScreen: initState | callState=${_provider.callState} | acceptedViaCallKit=${_provider.acceptedViaCallKit} | isReceiver=${_provider.isReceiver} | fromFcmAutoAccept=${widget.fromFcmAutoAccept}');
+
+    // ✅ FIX: Check if call already ended before screen was built (race condition)
+    if (_provider.callEndedBeforeJoin || _provider.callState == VoiceCallState.ended) {
+      debugPrint('⚠️ VoiceRoomScreen: call already ended before screen built — closing immediately');
+      _provider.clearCallEndedBeforeJoin();
+      WidgetsBinding.instance.addPostFrameCallback((_) => _closeScreen());
+      return;
+    }
+
     _provider.addListener(_handleCallStateChange);
 
     if (_provider.isReceiver && !_provider.acceptedViaCallKit) {
@@ -86,26 +92,22 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
-    debugPrint('🔔 VoiceRoomScreen: callState=${_provider.callState} | hasJoined=$_hasJoined');
-    if (!_hasJoined) {
-      debugPrint('⚠️ VoiceRoomScreen: ignoring state change — not joined yet');
-      return;
-    }
-    // ✅ Only close on ended, ignore idle
+    debugPrint('🔔 VoiceRoomScreen: callState=${_provider.callState}');
+
+    // ✅ FIX: No _hasJoined guard — always close on ended
+    // If ended during connecting phase, _closeScreen handles gracefully
     if (_provider.callState == VoiceCallState.ended) {
       debugPrint('📴 VoiceRoomScreen: remote ended → closing');
       _closeScreen();
     }
   }
 
-  // ✅ FIX: _closeScreen navigates to MainScreen when fromFcmAutoAccept=true
-  // instead of pop() — this prevents the connecting splash from showing
-  // underneath after the call ends.
   void _closeScreen() {
     if (_isEnding) return;
     _isEnding = true;
     _stopRinging();
     _provider.removeListener(_handleCallStateChange);
+    _provider.clearCallEndedBeforeJoin();
     final room = _room;
     _room = null;
     room?.disconnect();
@@ -113,7 +115,6 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     FlutterCallkitIncoming.endAllCalls();
     if (mounted) {
       if (widget.fromFcmAutoAccept) {
-        // Replace entire stack with MainScreen — splash is removed ✅
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
@@ -144,7 +145,6 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   Future<List<RTCIceServer>> _fetchIceServers() async {
     try {
-      // ✅ Use ApiService.get() instead of raw http.get — includes x-platform header
       final response = await ApiService.get('/api/chat/get-turn-credentials');
 
       if (response.statusCode == 200) {
@@ -178,6 +178,13 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   Future<void> _joinRoom() async {
     try {
+      // ✅ FIX: Check if call ended before we even start joining
+      if (_isEnding || _provider.callState == VoiceCallState.ended) {
+        debugPrint('⚠️ VoiceRoomScreen: call already ended — aborting join');
+        _closeScreen();
+        return;
+      }
+
       final bool isReceiver = _provider.isReceiver;
       final bool wasAutoAccepted = _provider.acceptedViaCallKit;
 
@@ -191,11 +198,23 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         debugPrint('🎙️ VoiceRoomScreen: CALLER side — skipping acceptVoiceCall emit');
       }
 
+      // ✅ FIX: Check again after acceptVoiceCall — remote may have cancelled
+      if (_isEnding || _provider.callState == VoiceCallState.ended) {
+        debugPrint('⚠️ VoiceRoomScreen: call ended during acceptVoiceCall — aborting');
+        _closeScreen();
+        return;
+      }
+
       debugPrint('🎫 VoiceRoomScreen: fetching voice token...');
       bool success = await _provider.fetchVoiceToken();
       if (!success) {
-        debugPrint('⚠️ VoiceRoomScreen: token fetch failed, retrying...');
+        debugPrint('⚠️ VoiceRoomScreen: token fetch failed, retrying in 1s...');
         await Future.delayed(const Duration(seconds: 1));
+        // ✅ FIX: Check again after delay
+        if (_isEnding || _provider.callState == VoiceCallState.ended) {
+          _closeScreen();
+          return;
+        }
         success = await _provider.fetchVoiceToken();
       }
       if (!success) {
@@ -204,6 +223,13 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         return;
       }
       debugPrint('✅ VoiceRoomScreen: token fetched');
+
+      // ✅ FIX: Check again before connecting to LiveKit
+      if (_isEnding || _provider.callState == VoiceCallState.ended) {
+        debugPrint('⚠️ VoiceRoomScreen: call ended before LiveKit connect — aborting');
+        _closeScreen();
+        return;
+      }
 
       final iceServers = await _fetchIceServers();
       debugPrint('🌐 VoiceRoomScreen: using ${iceServers.length} ICE servers');
@@ -215,24 +241,29 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         _provider.voiceToken!,
         roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
         connectOptions: ConnectOptions(
-          rtcConfiguration: RTCConfiguration(
-            iceServers: iceServers,
-
-          ),
+          rtcConfiguration: RTCConfiguration(iceServers: iceServers),
         ),
       );
+
+      // ✅ FIX: Check once more after LiveKit connect
+      if (_isEnding || _provider.callState == VoiceCallState.ended) {
+        debugPrint('⚠️ VoiceRoomScreen: call ended during LiveKit connect — cleaning up');
+        await _room?.disconnect();
+        _room = null;
+        _closeScreen();
+        return;
+      }
 
       await _room!.localParticipant?.setMicrophoneEnabled(true);
       _room!.addListener(_onRoomUpdate);
       _provider.notifyParticipantJoined();
 
-      _hasJoined = true;
-      debugPrint('✅ VoiceRoomScreen: joined LiveKit room | _hasJoined=true');
+      debugPrint('✅ VoiceRoomScreen: joined LiveKit room');
 
       if (mounted) setState(() => _isConnecting = false);
     } catch (e) {
       debugPrint('❌ VoiceRoomScreen: error joining room: $e');
-      _showError('Failed to join call: $e');
+      if (!_isEnding) _showError('Failed to join call: $e');
     }
   }
 
@@ -267,7 +298,6 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     await FlutterCallkitIncoming.endAllCalls();
     if (mounted) {
       if (widget.fromFcmAutoAccept) {
-        // Replace stack with MainScreen — removes splash root ✅
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
@@ -287,6 +317,12 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   void _showError(String message) {
     debugPrint('❌ VoiceRoomScreen: error: $message');
     _stopRinging();
+    _isEnding = true;
+    _provider.removeListener(_handleCallStateChange);
+    final room = _room;
+    _room = null;
+    room?.disconnect();
+    _callTimer?.cancel();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), backgroundColor: Colors.red),
@@ -308,7 +344,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
   @override
   void dispose() {
-    debugPrint('🧹 VoiceRoomScreen: dispose | _hasJoined=$_hasJoined');
+    debugPrint('🧹 VoiceRoomScreen: dispose');
     _stopRinging();
     _provider.removeListener(_handleCallStateChange);
     _callTimer?.cancel();
@@ -341,7 +377,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
 
     return WillPopScope(
       onWillPop: () async {
-        await _endCall(); // ✅ direct end
+        await _endCall();
         return false;
       },
       child: Scaffold(
@@ -378,7 +414,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          _circleIconButton(icon: Icons.keyboard_arrow_down, onTap: () => Navigator.of(context).pop()),
+          _circleIconButton(icon: Icons.keyboard_arrow_down, onTap: () => _endCall()),
           const Spacer(),
           Row(
             children: [
@@ -483,7 +519,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
             onPressed: _toggleSpeaker,
           ),
           GestureDetector(
-            onTap: _endCall, // ✅ direct end
+            onTap: _endCall,
             child: Container(
               width: 68, height: 68,
               decoration: BoxDecoration(
@@ -519,29 +555,6 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         width: 52, height: 52,
         decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         child: Icon(icon, color: Colors.white, size: 24),
-      ),
-    );
-  }
-
-  void _showEndCallDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C2E),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('End Call?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-        content: const Text('Are you sure you want to end this call?', style: TextStyle(color: Colors.white60)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
-          ),
-          TextButton(
-            onPressed: () { Navigator.pop(ctx); _endCall(); },
-            style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-            child: const Text('End Call', style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
-        ],
       ),
     );
   }

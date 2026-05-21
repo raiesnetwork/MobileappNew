@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pin_code_fields/pin_code_fields.dart';
+import '../../app_localisations.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/comment_provider.dart';
 import '../BottomNaviagation.dart';
 
-// ── Design Tokens (mirrors login_screen.dart exactly) ─────────────────────────
 class _C {
   static const bg            = Color(0xFF0A0A0F);
   static const surface       = Color(0xFF13131A);
@@ -62,8 +62,9 @@ class _OTPScreenState extends State<OTPScreen>
   }
 
   Future<void> _verifyOTP() async {
+    final t = AppLocalizations.instance;
     if (_currentOTP.length != 6) {
-      _showSnack('Please enter a valid 6-digit OTP', isError: true);
+      _showSnack(t.invalidOtp, isError: true);
       return;
     }
 
@@ -91,11 +92,12 @@ class _OTPScreenState extends State<OTPScreen>
   }
 
   Future<void> _resendOTP() async {
+    final t = AppLocalizations.instance;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final success = await authProvider.sendOTP(widget.mobile);
     if (!mounted) return;
     _showSnack(
-      success ? 'OTP resent successfully' : authProvider.errorMessage,
+      success ? t.otpResentSuccess : authProvider.errorMessage,
       isError: !success,
     );
   }
@@ -116,9 +118,18 @@ class _OTPScreenState extends State<OTPScreen>
 
   @override
   Widget build(BuildContext context) {
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLocalizations.notifier,
+      builder: (context, _, __) {
+        final t = AppLocalizations.instance;
+        return _buildScaffold(context, t);
+      },
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, AppLocalizations t) {
     return Scaffold(
       backgroundColor: _C.bg,
-      // Keeps  stable when keyboard appears
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: SingleChildScrollView(
@@ -149,8 +160,7 @@ class _OTPScreenState extends State<OTPScreen>
                           decoration: BoxDecoration(
                             color: _C.surfaceHi,
                             borderRadius: BorderRadius.circular(10),
-                            border:
-                            Border.all(color: _C.border, width: 1),
+                            border: Border.all(color: _C.border, width: 1),
                           ),
                           child: const Icon(
                             Icons.arrow_back_ios_new_rounded,
@@ -182,11 +192,11 @@ class _OTPScreenState extends State<OTPScreen>
                     const SizedBox(height: 24),
 
                     // ── Heading ───────────────────────────────────
-                    const Align(
+                    Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Verify your number',
-                        style: TextStyle(
+                        t.verifyYourNumber,
+                        style: const TextStyle(
                           color: _C.textPrimary,
                           fontSize: 26,
                           fontWeight: FontWeight.w700,
@@ -202,7 +212,7 @@ class _OTPScreenState extends State<OTPScreen>
                           style: const TextStyle(
                               color: _C.textSecondary, fontSize: 14),
                           children: [
-                            const TextSpan(text: 'Code sent to '),
+                            TextSpan(text: '${t.codeSentTo} '),
                             TextSpan(
                               text: widget.mobile,
                               style: const TextStyle(
@@ -228,10 +238,9 @@ class _OTPScreenState extends State<OTPScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Label
-                          const Text(
-                            'Enter 6-digit code',
-                            style: TextStyle(
+                          Text(
+                            t.enter6DigitCode,
+                            style: const TextStyle(
                               color: _C.textSecondary,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
@@ -244,27 +253,20 @@ class _OTPScreenState extends State<OTPScreen>
                           LayoutBuilder(
                             builder: (context, constraints) {
                               final totalWidth = constraints.maxWidth;
-
-                              // 🔥 calculate responsive width
                               final fieldWidth = (totalWidth - 40) / 6;
-                              // 40 = total spacing buffer
-
                               return PinCodeTextField(
                                 appContext: context,
                                 length: 6,
                                 controller: _otpController,
                                 keyboardType: TextInputType.number,
                                 animationType: AnimationType.fade,
-                                animationDuration: const Duration(milliseconds: 180),
-
+                                animationDuration:
+                                const Duration(milliseconds: 180),
                                 pinTheme: PinTheme(
                                   shape: PinCodeFieldShape.box,
                                   borderRadius: BorderRadius.circular(10),
-
-                                  // ✅ dynamic sizing
                                   fieldHeight: 52,
                                   fieldWidth: fieldWidth.clamp(38.0, 52.0),
-
                                   activeFillColor: _C.surfaceHi,
                                   activeColor: _C.accent,
                                   inactiveFillColor: _C.surfaceHi,
@@ -272,20 +274,16 @@ class _OTPScreenState extends State<OTPScreen>
                                   selectedFillColor: _C.surfaceHi,
                                   selectedColor: _C.accent,
                                 ),
-
                                 enableActiveFill: true,
                                 cursorColor: _C.accent,
-
                                 textStyle: const TextStyle(
                                   color: _C.textPrimary,
                                   fontSize: 20,
                                   fontWeight: FontWeight.w600,
                                 ),
-
                                 onChanged: (value) {
                                   setState(() => _currentOTP = value);
                                 },
-
                                 onCompleted: (_) => _verifyOTP(),
                               );
                             },
@@ -321,9 +319,9 @@ class _OTPScreenState extends State<OTPScreen>
                                       color: Colors.white,
                                     ),
                                   )
-                                      : const Text(
-                                    'Verify & Sign In',
-                                    style: TextStyle(
+                                      : Text(
+                                    t.verifyAndSignIn,
+                                    style: const TextStyle(
                                       fontSize: 15,
                                       fontWeight: FontWeight.w600,
                                       letterSpacing: 0.2,
@@ -342,11 +340,11 @@ class _OTPScreenState extends State<OTPScreen>
                               Expanded(
                                   child: Divider(
                                       color: _C.border, thickness: 1)),
-                              const Padding(
-                                padding:
-                                EdgeInsets.symmetric(horizontal: 14),
-                                child: Text('or',
-                                    style: TextStyle(
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 14),
+                                child: Text(t.or,
+                                    style: const TextStyle(
                                       color: _C.textMuted,
                                       fontSize: 12,
                                     )),
@@ -378,9 +376,9 @@ class _OTPScreenState extends State<OTPScreen>
                                   onPressed: authProvider.isLoading
                                       ? null
                                       : _resendOTP,
-                                  child: const Text(
-                                    'Resend code',
-                                    style: TextStyle(
+                                  child: Text(
+                                    t.resendCode,
+                                    style: const TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
                                       color: _C.textSecondary,
@@ -397,10 +395,10 @@ class _OTPScreenState extends State<OTPScreen>
                     const SizedBox(height: 24),
 
                     // ── Footer hint ───────────────────────────────
-                    const Text(
-                      'Didn\'t get the code? Check your spam or try resend.',
+                    Text(
+                      t.didntGetCode,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                      style: const TextStyle(
                         color: _C.textMuted,
                         fontSize: 12,
                       ),

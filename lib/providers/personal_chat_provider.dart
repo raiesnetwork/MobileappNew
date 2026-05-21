@@ -412,14 +412,19 @@ class PersonalChatProvider with ChangeNotifier {
   Future<void> fetchConversation(String userId) async {
     if (_isDisposed) return;
 
-    if (_currentReceiverId != userId) {
+    final isNewConversation = _currentReceiverId != userId;
+    if (isNewConversation) {
       _messages = [];
       _currentReceiverId = userId;
     }
 
-    _isConversationLoading = true;
+    // ← Don't show loading spinner if we already have messages (resume case)
+    if (_messages.isEmpty) {
+      _isConversationLoading = true;
+      _safeNotifyListeners();
+    }
+
     _error = null;
-    _safeNotifyListeners();
 
     try {
       if (_currentUserId != null) {
@@ -436,17 +441,27 @@ class PersonalChatProvider with ChangeNotifier {
             .map((m) => _processMessage(m as Map<String, dynamic>))
             .toList();
 
+        // Keep only optimistic messages not yet confirmed by server
         final fetchedIds = fetched.map((m) => m['_id'].toString()).toSet();
-        final preserved  = _messages.where(
-              (m) => !fetchedIds.contains(m['_id'].toString()) &&
-              m['isOptimistic'] != true,
+        final optimisticOnly = _messages.where(
+              (m) => m['isOptimistic'] == true &&
+              !fetchedIds.contains(m['_id'].toString()),
         ).toList();
 
-        _messages = [...preserved, ...fetched];
-        _messages.sort((a, b) => DateTime.parse(a['createdAt'])
-            .compareTo(DateTime.parse(b['createdAt'])));
+        // Merge: server messages + pending optimistic only
+        _messages = [...fetched, ...optimisticOnly];
 
-        print('✅ Loaded ${_messages.length} messages');
+        // Sort only by createdAt — stable, no reordering tricks
+        _messages.sort((a, b) {
+          try {
+            return DateTime.parse(a['createdAt'])
+                .compareTo(DateTime.parse(b['createdAt']));
+          } catch (_) {
+            return 0;
+          }
+        });
+
+        print('✅ Loaded ${_messages.length} messages (${optimisticOnly.length} optimistic pending)');
       } else {
         _error = result['message'] ?? 'Failed to fetch conversation';
       }

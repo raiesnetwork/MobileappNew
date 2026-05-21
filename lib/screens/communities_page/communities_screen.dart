@@ -34,6 +34,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     super.initState();
     _searchController.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+
       if (!mounted) return;
       final provider = Provider.of<CommunityProvider>(context, listen: false);
       if (provider.communities['message'] == 'Not loaded') {
@@ -65,8 +66,9 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
       _filteredCommunities = List.from(_allLoadedCommunities);
     } else {
       _filteredCommunities = _allLoadedCommunities.where((community) {
-        final communityName = (community['name'] as String?)?.toLowerCase() ?? '';
-        return communityName.contains(_searchQuery);
+        final name = (community['name'] as String?)?.toLowerCase() ?? '';
+        final description = (community['description'] as String?)?.toLowerCase() ?? '';
+        return name.contains(_searchQuery) || description.contains(_searchQuery);
       }).toList();
     }
   }
@@ -355,18 +357,18 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     final communityList = (provider.communities['data'] as List<dynamic>?) ?? [];
     final totalPages = provider.communities['totalPages'] ?? 1;
 
-    // Update all loaded communities when provider data changes
     if (communityList.isNotEmpty) {
-      _allLoadedCommunities = List.from(communityList);
-      if (_filteredCommunities.isEmpty && _searchQuery.isEmpty) {
-        _filteredCommunities = List.from(_allLoadedCommunities);
-      } else if (_searchQuery.isNotEmpty) {
-        _filterCommunities();
+      final existingIds = _allLoadedCommunities.map((c) => c['_id']).toSet();
+      for (final community in communityList) {
+        if (!existingIds.contains(community['_id'])) {
+          _allLoadedCommunities.add(community);
+        }
       }
+      _filterCommunities();
     }
 
     // Use filtered communities for display
-    final displayList = _searchQuery.isNotEmpty ? _filteredCommunities : communityList;
+    final displayList = _filteredCommunities;
 
     return Scaffold(
       appBar: AppBar(

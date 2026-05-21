@@ -88,6 +88,9 @@ class AuthService {
     }
   }
 
+  // ONLY the loginWithOTP method needs changing — add x-platform header.
+// Replace your existing loginWithOTP with this:
+
   static Future<Map<String, dynamic>> loginWithOTP({
     required String mobile,
     required String otp,
@@ -109,7 +112,10 @@ class AuthService {
 
       final response = await http.post(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'x-platform': 'mobile',   // ← FIX: was missing
+        },
         body: jsonEncode(body),
       );
 

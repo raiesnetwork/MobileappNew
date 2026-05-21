@@ -5,8 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 
-// ✅ Only need mainScreenKey — no individual screen imports needed
 import 'package:ixes.app/screens/BottomNaviagation.dart';
+import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -30,26 +30,16 @@ class _NotificationScreenState extends State<NotificationScreen> {
         .loadNotifications();
   }
 
-  // ✅ MAIN NAVIGATION METHOD — pops screen then switches tab in MainScreen
   void _navigateFromNotification(Map<String, dynamic> notification) {
     final type = notification['type'] ?? '';
     print('🔔 Tapped notification → type: "$type"');
     print('🔔 relatedData: ${notification['relatedData']}');
     print('🔔 full notification: $notification');
-    final provider =
-    Provider.of<NotificationProvider>(context, listen: false);
 
-    // Mark this notification type as read
+    final provider = Provider.of<NotificationProvider>(context, listen: false);
     provider.markTypesAsRead([type]);
 
     final relatedData = notification['relatedData'] as Map<String, dynamic>?;
-
-    // ✅ Tab indices in MainScreen PageView:
-    // 0 → FeedScreen
-    // 1 → NewaScreen
-    // 2 → PersonalChatScreen
-    // 3 → CommunitiesScreen
-    // 4 → DashboardScreen
 
     const postTypes = [
       'post', 'like', 'comment', 'PostLike', 'PostComment',
@@ -61,24 +51,26 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const dashTypes = [
       'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct', 'ServiceReq'
+      'SubDomain', 'AddProduct',
     ];
+    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
-    // ✅ Close NotificationScreen first
     Navigator.pop(context);
 
     if (postTypes.contains(type)) {
-      // Extract postId from relatedData
       final postId = relatedData?['postId']?.toString() ??
           relatedData?['referenceId']?.toString() ??
           notification['referenceId']?.toString() ??
           notification['postId']?.toString();
 
-      // Switch to Home tab (0) with postId
+      if (postId == null || postId.isEmpty) {
+        mainScreenKey.currentState?.navigateToTab(0);
+        return;
+      }
+
       mainScreenKey.currentState?.navigateToTab(0, postId: postId);
 
     } else if (chatTypes.contains(type)) {
-      // Extract sender info for direct chat navigation
       final senderId = relatedData?['senderId']?.toString() ??
           relatedData?['userId']?.toString() ??
           notification['senderId']?.toString();
@@ -92,7 +84,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
           relatedData?['userProfile'] ??
           notification['senderProfile'];
 
-      // Switch to Chats tab (2), opens ChatDetailScreen if senderId available
       mainScreenKey.currentState?.navigateToTab(
         2,
         chatUserId: senderId,
@@ -100,21 +91,38 @@ class _NotificationScreenState extends State<NotificationScreen> {
         chatUserProfile: senderProfile,
       );
 
+    } else if (serviceReqTypes.contains(type)) {
+      // Extract service request ID
+      final serviceReqId = relatedData?['serviceReqId']?.toString() ??
+          relatedData?['assignedServiceReqId']?.toString() ??
+          notification['referenceId']?.toString();
+
+      if (serviceReqId != null && serviceReqId.isNotEmpty) {
+        // Navigate directly to service request details
+        Navigator.push(
+          mainScreenKey.currentContext!,
+          MaterialPageRoute(
+            builder: (context) => ServiceRequestDetailsScreen(
+              requestId: serviceReqId,
+            ),
+          ),
+        );
+      } else {
+        // No ID — go to dashboard tab (service requests are there)
+        mainScreenKey.currentState?.navigateToTab(4);
+      }
+
     } else if (communityTypes.contains(type)) {
-      // Switch to Communities tab (3)
       mainScreenKey.currentState?.navigateToTab(3);
 
     } else if (dashTypes.contains(type)) {
-      // Switch to Dashboard tab (4)
       mainScreenKey.currentState?.navigateToTab(4);
 
     } else {
-      // Unknown type — fallback to Home tab
       mainScreenKey.currentState?.navigateToTab(0);
     }
   }
 
-  // ✅ Icon per notification type
   IconData _getNotificationIcon(String type) {
     const postTypes = [
       'post', 'like', 'comment', 'PostLike', 'PostComment', 'PostShare', 'Post', 'Announcement'
@@ -125,17 +133,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const dashTypes = [
       'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct', 'ServiceReq'
+      'SubDomain', 'AddProduct',
     ];
+    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
     if (postTypes.contains(type)) return Icons.article;
     if (chatTypes.contains(type)) return Icons.chat_bubble;
     if (communityTypes.contains(type)) return Icons.group;
+    if (serviceReqTypes.contains(type)) return Icons.support_agent_outlined;
     if (dashTypes.contains(type)) return Icons.dashboard;
     return Icons.notifications;
   }
 
-  // ✅ Color per notification type
   Color _getNotificationColor(String type, bool isUnread) {
     if (!isUnread) return Colors.grey.shade400;
 
@@ -148,19 +157,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const dashTypes = [
       'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct', 'ServiceReq'
+      'SubDomain', 'AddProduct',
     ];
+    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
     if (postTypes.contains(type)) return const Color(0xFFFF9800);
     if (chatTypes.contains(type)) return const Color(0xFF9C27B0);
     if (communityTypes.contains(type)) return const Color(0xFFFF4081);
+    if (serviceReqTypes.contains(type)) return const Color(0xFF00BCD4);
     if (dashTypes.contains(type)) return const Color(0xFF2196F3);
     return Colors.blue;
   }
 
   Future<void> _clearAllNotifications() async {
-    final provider =
-    Provider.of<NotificationProvider>(context, listen: false);
+    final provider = Provider.of<NotificationProvider>(context, listen: false);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -168,8 +178,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         title: const Text('Clear All Notifications'),
         content: const Text(
             'Are you sure you want to clear all notifications? This action cannot be undone.'),
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -263,8 +272,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   onPressed: _clearAllNotifications,
                   icon: const Icon(Icons.clear_all, size: 18),
                   label: const Text('Clear All'),
-                  style:
-                  TextButton.styleFrom(foregroundColor: Colors.red),
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
                 );
               }
               return const SizedBox.shrink();
@@ -292,8 +300,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   const SizedBox(height: 16),
                   Text(
                     'No notifications found.',
-                    style: TextStyle(
-                        fontSize: 16, color: Colors.grey.shade600),
+                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
                   ),
                 ],
               ),
@@ -318,16 +325,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 final iconColor = _getNotificationColor(type, isUnread);
 
                 return GestureDetector(
-                  onTap: () => _navigateFromNotification(item), // ✅ tap to navigate
+                  onTap: () => _navigateFromNotification(item),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color:
-                      isUnread ? Colors.blue.shade50 : Colors.white,
+                      color: isUnread ? Colors.blue.shade50 : Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       border: isUnread
-                          ? Border.all(
-                          color: Colors.blue.shade200, width: 1)
+                          ? Border.all(color: Colors.blue.shade200, width: 1)
                           : null,
                       boxShadow: [
                         BoxShadow(
@@ -348,15 +353,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
                               : Colors.grey.shade100,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(iconData,
-                            color: iconColor, size: 24), // ✅ type-based icon
+                        child: Icon(iconData, color: iconColor, size: 24),
                       ),
                       title: Text(
                         message,
                         style: TextStyle(
-                          fontWeight: isUnread
-                              ? FontWeight.w600
-                              : FontWeight.w500,
+                          fontWeight:
+                          isUnread ? FontWeight.w600 : FontWeight.w500,
                           fontSize: 14,
                         ),
                       ),
@@ -370,10 +373,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: iconColor
-                                      .withOpacity(0.1), // ✅ type-colored badge
-                                  borderRadius:
-                                  BorderRadius.circular(12),
+                                  color: iconColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
                                   type,
@@ -404,13 +405,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
                         width: 10,
                         height: 10,
                         decoration: BoxDecoration(
-                          color: iconColor, // ✅ type-colored dot
+                          color: iconColor,
                           shape: BoxShape.circle,
                         ),
                       )
                           : const Icon(Icons.chevron_right,
-                          color: Colors.grey,
-                          size: 18), // ✅ arrow hint for read
+                          color: Colors.grey, size: 18),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
                       ),

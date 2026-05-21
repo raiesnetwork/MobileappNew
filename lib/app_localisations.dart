@@ -71,6 +71,40 @@ class AppLocalizations {
   String get verifyingGoogle      => _t('verifyingGoogle');
   String get securingSession      => _t('securingSession');
   String otpSentToMsg(String mobile) => '${_t('otpSentTo')} $mobile';
+  // ── OTP Screen ──────────────────────────────────────────────────────────
+  String get verifyYourNumber  => _t('verifyYourNumber');
+  String get codeSentTo        => _t('codeSentTo');
+  String get enter6DigitCode   => _t('enter6DigitCode');
+  String get verifyAndSignIn   => _t('verifyAndSignIn');
+  String get resendCode        => _t('resendCode');
+  String get didntGetCode      => _t('didntGetCode');
+  String get invalidOtp        => _t('invalidOtp');
+  String get otpResentSuccess  => _t('otpResentSuccess');
+  // ── Signup Screen ────────────────────────────────────────────────────────
+  String get createAccount          => _t('createAccount');
+  String get joinIxes               => _t('joinIxes');
+  String get mobileNumberLabel      => _t('mobileNumberLabel');
+  String get usernameLabel          => _t('usernameLabel');
+  String get usernamePlaceholder    => _t('usernamePlaceholder');
+  String get enterUsernameError     => _t('enterUsernameError');
+  String get usernameMinLength      => _t('usernameMinLength');
+  String get passwordLabel          => _t('passwordLabel');
+  String get passwordMinChars       => _t('passwordMinChars');
+  String get enterPasswordError     => _t('enterPasswordError');
+  String get passwordMinLength      => _t('passwordMinLength');
+  String get confirmPasswordLabel   => _t('confirmPasswordLabel');
+  String get reenterPassword        => _t('reenterPassword');
+  String get confirmPasswordError   => _t('confirmPasswordError');
+  String get passwordsNotMatch      => _t('passwordsNotMatch');
+  String get termsTitle             => _t('termsTitle');
+  String get termsSubtitle          => _t('termsSubtitle');
+  String get agreeToTermsError      => _t('agreeToTermsError');
+  String get createAccountBtn       => _t('createAccountBtn');
+  String get alreadyHaveAccount     => _t('alreadyHaveAccount');
+  String get signIn                 => _t('signIn');
+  String get enterMobileNumberHint  => _t('enterMobileNumberHint');
+  String get enterValidNumber       => _t('enterValidNumber');
+  String get signUpFailed           => _t('signUpFailed');
 }
 
 const Map<String, Map<String, String>> _translations = {
@@ -108,6 +142,38 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'Signing you in',
     'verifyingGoogle':        'Verifying your Google account,\nplease wait...',
     'securingSession':        'Securing your session...',
+    'verifyYourNumber': 'Verify your number',
+    'codeSentTo':       'Code sent to',
+    'enter6DigitCode':  'Enter 6-digit code',
+    'verifyAndSignIn':  'Verify & Sign In',
+    'resendCode':       'Resend code',
+    'didntGetCode':     'Didn\'t get the code? Check your spam or try resend.',
+    'invalidOtp':       'Please enter a valid 6-digit OTP',
+    'otpResentSuccess': 'OTP resent successfully',
+    'createAccount':        'Create account',
+    'joinIxes':             'Join iXES and connect with your community',
+    'mobileNumberLabel':    'Mobile Number',
+    'usernameLabel':        'Username',
+    'usernamePlaceholder':  'e.g. john_doe',
+    'enterUsernameError':   'Enter a username',
+    'usernameMinLength':    'At least 3 characters',
+    'passwordLabel':        'Password',
+    'passwordMinChars':     'Min. 6 characters',
+    'enterPasswordError':   'Enter a password',
+    'passwordMinLength':    'At least 6 characters',
+    'confirmPasswordLabel': 'Confirm Password',
+    'reenterPassword':      'Re-enter your password',
+    'confirmPasswordError': 'Confirm your password',
+    'passwordsNotMatch':    'Passwords do not match',
+    'termsTitle':           'Terms & Conditions',
+    'termsSubtitle':        'I agree to the terms and conditions',
+    'agreeToTermsError':    'Please agree to the terms and conditions',
+    'createAccountBtn':     'Create Account',
+    'alreadyHaveAccount':   'Already have an account?  ',
+    'signIn':               'Sign In',
+    'enterMobileNumberHint':'Enter mobile number',
+    'enterValidNumber':     'Enter a valid 10-digit number',
+    'signUpFailed':         'Sign up failed. Try again.',
   },
   'te': {
     'chooseLanguage':         'మీ భాష ఎంచుకోండి',
@@ -143,6 +209,38 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'లాగిన్ అవుతున్నారు',
     'verifyingGoogle':        'మీ Google ఖాతాను ధృవీకరిస్తున్నాం,\nదయచేసి వేచి ఉండండి...',
     'securingSession':        'సెషన్ సురక్షితం చేస్తున్నాం...',
+    'verifyYourNumber': 'మీ నంబర్‌ను ధృవీకరించండి',
+    'codeSentTo':       'కోడ్ పంపబడింది',
+    'enter6DigitCode':  '6-అంకెల కోడ్ నమోదు చేయండి',
+    'verifyAndSignIn':  'ధృవీకరించి సైన్ ఇన్ చేయండి',
+    'resendCode':       'కోడ్ మళ్ళీ పంపండి',
+    'didntGetCode':     'కోడ్ రాలేదా? స్పామ్ చెక్ చేయండి.',
+    'invalidOtp':       'చెల్లుబాటు అయ్యే 6-అంకెల OTP నమోదు చేయండి',
+    'otpResentSuccess': 'OTP మళ్ళీ పంపబడింది',
+    'createAccount':        'ఖాతా సృష్టించండి',
+    'joinIxes':             'iXES లో చేరండి మరియు మీ కమ్యూనిటీతో కనెక్ట్ అవ్వండి',
+    'mobileNumberLabel':    'మొబైల్ నంబర్',
+    'usernameLabel':        'వినియోగదారు పేరు',
+    'usernamePlaceholder':  'ఉదా. john_doe',
+    'enterUsernameError':   'వినియోగదారు పేరు నమోదు చేయండి',
+    'usernameMinLength':    'కనీసం 3 అక్షరాలు',
+    'passwordLabel':        'పాస్‌వర్డ్',
+    'passwordMinChars':     'కనీసం 6 అక్షరాలు',
+    'enterPasswordError':   'పాస్‌వర్డ్ నమోదు చేయండి',
+    'passwordMinLength':    'కనీసం 6 అక్షరాలు',
+    'confirmPasswordLabel': 'పాస్‌వర్డ్ నిర్ధారించండి',
+    'reenterPassword':      'మీ పాస్‌వర్డ్ మళ్ళీ నమోదు చేయండి',
+    'confirmPasswordError': 'మీ పాస్‌వర్డ్ నిర్ధారించండి',
+    'passwordsNotMatch':    'పాస్‌వర్డ్‌లు సరిపోలడం లేదు',
+    'termsTitle':           'నిబంధనలు & షరతులు',
+    'termsSubtitle':        'నేను నిబంధనలు మరియు షరతులకు అంగీకరిస్తున్నాను',
+    'agreeToTermsError':    'దయచేసి నిబంధనలకు అంగీకరించండి',
+    'createAccountBtn':     'ఖాతా సృష్టించండి',
+    'alreadyHaveAccount':   'ఇప్పటికే ఖాతా ఉందా?  ',
+    'signIn':               'సైన్ ఇన్',
+    'enterMobileNumberHint':'మొబైల్ నంబర్ నమోదు చేయండి',
+    'enterValidNumber':     'చెల్లుబాటు అయ్యే 10-అంకెల నంబర్ నమోదు చేయండి',
+    'signUpFailed':         'సైన్ అప్ విఫలమైంది. మళ్ళీ ప్రయత్నించండి.',
   },
   'hi': {
     'chooseLanguage':         'अपनी भाषा चुनें',
@@ -178,6 +276,38 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'साइन इन हो रहे हैं',
     'verifyingGoogle':        'आपका Google खाता सत्यापित हो रहा है,\nकृपया प्रतीक्षा करें...',
     'securingSession':        'सत्र सुरक्षित किया जा रहा है...',
+    'verifyYourNumber': 'अपना नंबर सत्यापित करें',
+    'codeSentTo':       'कोड भेजा गया',
+    'enter6DigitCode':  '6-अंकीय कोड दर्ज करें',
+    'verifyAndSignIn':  'सत्यापित करें और साइन इन करें',
+    'resendCode':       'कोड फिर से भेजें',
+    'didntGetCode':     'कोड नहीं मिला? स्पैम जांचें।',
+    'invalidOtp':       'कृपया वैध 6-अंकीय OTP दर्ज करें',
+    'otpResentSuccess': 'OTP फिर से भेजा गया',
+    'createAccount':        'खाता बनाएं',
+    'joinIxes':             'iXES से जुड़ें और अपने समुदाय से जुड़ें',
+    'mobileNumberLabel':    'मोबाइल नंबर',
+    'usernameLabel':        'उपयोगकर्ता नाम',
+    'usernamePlaceholder':  'जैसे john_doe',
+    'enterUsernameError':   'उपयोगकर्ता नाम दर्ज करें',
+    'usernameMinLength':    'कम से कम 3 अक्षर',
+    'passwordLabel':        'पासवर्ड',
+    'passwordMinChars':     'कम से कम 6 अक्षर',
+    'enterPasswordError':   'पासवर्ड दर्ज करें',
+    'passwordMinLength':    'कम से कम 6 अक्षर',
+    'confirmPasswordLabel': 'पासवर्ड की पुष्टि करें',
+    'reenterPassword':      'पासवर्ड दोबारा दर्ज करें',
+    'confirmPasswordError': 'अपना पासवर्ड कन्फर्म करें',
+    'passwordsNotMatch':    'पासवर्ड मेल नहीं खाते',
+    'termsTitle':           'नियम और शर्तें',
+    'termsSubtitle':        'मैं नियम और शर्तों से सहमत हूं',
+    'agreeToTermsError':    'कृपया नियम और शर्तों से सहमत हों',
+    'createAccountBtn':     'खाता बनाएं',
+    'alreadyHaveAccount':   'पहले से खाता है?  ',
+    'signIn':               'साइन इन',
+    'enterMobileNumberHint':'मोबाइल नंबर दर्ज करें',
+    'enterValidNumber':     'एक वैध 10-अंकीय नंबर दर्ज करें',
+    'signUpFailed':         'साइन अप विफल रहा। पुनः प्रयास करें।',
   },
   'ta': {
     'chooseLanguage':         'உங்கள் மொழியை தேர்ந்தெடுக்கவும்',
@@ -213,6 +343,38 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'உள்நுழைகிறோம்',
     'verifyingGoogle':        'உங்கள் Google கணக்கை சரிபார்க்கிறோம்,\nதயவுசெய்து காத்திருக்கவும்...',
     'securingSession':        'அமர்வை பாதுகாக்கிறோம்...',
+    'verifyYourNumber': 'உங்கள் எண்ணை சரிபார்க்கவும்',
+    'codeSentTo':       'குறியீடு அனுப்பப்பட்டது',
+    'enter6DigitCode':  '6-இலக்க குறியீட்டை உள்ளிடவும்',
+    'verifyAndSignIn':  'சரிபார்த்து உள்நுழையவும்',
+    'resendCode':       'குறியீட்டை மீண்டும் அனுப்பு',
+    'didntGetCode':     'குறியீடு கிடைக்கவில்லையா? ஸ்பேம் சரிபார்க்கவும்.',
+    'invalidOtp':       'சரியான 6-இலக்க OTP உள்ளிடவும்',
+    'otpResentSuccess': 'OTP மீண்டும் அனுப்பப்பட்டது',
+    'createAccount':        'கணக்கை உருவாக்கு',
+    'joinIxes':             'iXES இல் சேர்ந்து உங்கள் சமூகத்துடன் இணையுங்கள்',
+    'mobileNumberLabel':    'மொபைல் எண்',
+    'usernameLabel':        'பயனர் பெயர்',
+    'usernamePlaceholder':  'எ.கா. john_doe',
+    'enterUsernameError':   'பயனர் பெயரை உள்ளிடவும்',
+    'usernameMinLength':    'குறைந்தது 3 எழுத்துக்கள்',
+    'passwordLabel':        'கடவுச்சொல்',
+    'passwordMinChars':     'குறைந்தது 6 எழுத்துக்கள்',
+    'enterPasswordError':   'கடவுச்சொல்லை உள்ளிடவும்',
+    'passwordMinLength':    'குறைந்தது 6 எழுத்துக்கள்',
+    'confirmPasswordLabel': 'கடவுச்சொல்லை உறுதிப்படுத்தவும்',
+    'reenterPassword':      'கடவுச்சொல்லை மீண்டும் உள்ளிடவும்',
+    'confirmPasswordError': 'கடவுச்சொல்லை உறுதிப்படுத்தவும்',
+    'passwordsNotMatch':    'கடவுச்சொற்கள் பொருந்தவில்லை',
+    'termsTitle':           'விதிமுறைகள் & நிபந்தனைகள்',
+    'termsSubtitle':        'விதிமுறைகளுக்கு சம்மதிக்கிறேன்',
+    'agreeToTermsError':    'விதிமுறைகளுக்கு சம்மதிக்கவும்',
+    'createAccountBtn':     'கணக்கை உருவாக்கு',
+    'alreadyHaveAccount':   'ஏற்கனவே கணக்கு உள்ளதா?  ',
+    'signIn':               'உள்நுழைய',
+    'enterMobileNumberHint':'மொபைல் எண்ணை உள்ளிடவும்',
+    'enterValidNumber':     'சரியான 10-இலக்க எண்ணை உள்ளிடவும்',
+    'signUpFailed':         'பதிவு தோல்வியடைந்தது. மீண்டும் முயலவும்.',
   },
   'kn': {
     'chooseLanguage':         'ನಿಮ್ಮ ಭಾಷೆಯನ್ನು ಆರಿಸಿ',
@@ -248,6 +410,38 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'ಸೈನ್ ಇನ್ ಆಗುತ್ತಿದ್ದೇವೆ',
     'verifyingGoogle':        'ನಿಮ್ಮ Google ಖಾತೆಯನ್ನು ಪರಿಶೀಲಿಸುತ್ತಿದ್ದೇವೆ,\nದಯವಿಟ್ಟು ನಿರೀಕ್ಷಿಸಿ...',
     'securingSession':        'ಸೆಶನ್ ಸುರಕ್ಷಿತಗೊಳಿಸುತ್ತಿದ್ದೇವೆ...',
+    'verifyYourNumber': 'ನಿಮ್ಮ ಸಂಖ್ಯೆಯನ್ನು ಪರಿಶೀಲಿಸಿ',
+    'codeSentTo':       'ಕೋಡ್ ಕಳುಹಿಸಲಾಗಿದೆ',
+    'enter6DigitCode':  '6-ಅಂಕಿ ಕೋಡ್ ನಮೂದಿಸಿ',
+    'verifyAndSignIn':  'ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಸೈನ್ ಇನ್ ಮಾಡಿ',
+    'resendCode':       'ಕೋಡ್ ಮತ್ತೆ ಕಳುಹಿಸಿ',
+    'didntGetCode':     'ಕೋಡ್ ಸಿಗಲಿಲ್ಲವೇ? ಸ್ಪ್ಯಾಮ್ ಪರಿಶೀಲಿಸಿ.',
+    'invalidOtp':       'ಮಾನ್ಯ 6-ಅಂಕಿ OTP ನಮೂದಿಸಿ',
+    'otpResentSuccess': 'OTP ಮತ್ತೆ ಕಳುಹಿಸಲಾಗಿದೆ',
+    'createAccount':        'ಖಾತೆ ರಚಿಸಿ',
+    'joinIxes':             'iXES ಗೆ ಸೇರಿ ಮತ್ತು ನಿಮ್ಮ ಸಮುದಾಯದೊಂದಿಗೆ ಸಂಪರ್ಕ ಸಾಧಿಸಿ',
+    'mobileNumberLabel':    'ಮೊಬೈಲ್ ಸಂಖ್ಯೆ',
+    'usernameLabel':        'ಬಳಕೆದಾರ ಹೆಸರು',
+    'usernamePlaceholder':  'ಉದಾ. john_doe',
+    'enterUsernameError':   'ಬಳಕೆದಾರ ಹೆಸರು ನಮೂದಿಸಿ',
+    'usernameMinLength':    'ಕನಿಷ್ಠ 3 ಅಕ್ಷರಗಳು',
+    'passwordLabel':        'ಪಾಸ್‌ವರ್ಡ್',
+    'passwordMinChars':     'ಕನಿಷ್ಠ 6 ಅಕ್ಷರಗಳು',
+    'enterPasswordError':   'ಪಾಸ್‌ವರ್ಡ್ ನಮೂದಿಸಿ',
+    'passwordMinLength':    'ಕನಿಷ್ಠ 6 ಅಕ್ಷರಗಳು',
+    'confirmPasswordLabel': 'ಪಾಸ್‌ವರ್ಡ್ ದೃಢೀಕರಿಸಿ',
+    'reenterPassword':      'ಪಾಸ್‌ವರ್ಡ್ ಮತ್ತೆ ನಮೂದಿಸಿ',
+    'confirmPasswordError': 'ನಿಮ್ಮ ಪಾಸ್‌ವರ್ಡ್ ದೃಢೀಕರಿಸಿ',
+    'passwordsNotMatch':    'ಪಾಸ್‌ವರ್ಡ್‌ಗಳು ಹೊಂದಿಕೆಯಾಗುತ್ತಿಲ್ಲ',
+    'termsTitle':           'ನಿಯಮಗಳು & ಷರತ್ತುಗಳು',
+    'termsSubtitle':        'ನಿಯಮಗಳಿಗೆ ಒಪ್ಪಿಗೆ ನೀಡುತ್ತೇನೆ',
+    'agreeToTermsError':    'ದಯವಿಟ್ಟು ನಿಯಮಗಳಿಗೆ ಒಪ್ಪಿಗೆ ನೀಡಿ',
+    'createAccountBtn':     'ಖಾತೆ ರಚಿಸಿ',
+    'alreadyHaveAccount':   'ಈಗಾಗಲೇ ಖಾತೆ ಇದೆಯೇ?  ',
+    'signIn':               'ಸೈನ್ ಇನ್',
+    'enterMobileNumberHint':'ಮೊಬೈಲ್ ಸಂಖ್ಯೆ ನಮೂದಿಸಿ',
+    'enterValidNumber':     'ಮಾನ್ಯ 10-ಅಂಕಿ ಸಂಖ್ಯೆ ನಮೂದಿಸಿ',
+    'signUpFailed':         'ಸೈನ್ ಅಪ್ ವಿಫಲವಾಗಿದೆ. ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.',
   },
   'ml': {
     'chooseLanguage':         'നിങ്ങളുടെ ഭാഷ തിരഞ്ഞെടുക്കുക',
@@ -283,5 +477,39 @@ const Map<String, Map<String, String>> _translations = {
     'signingYouIn':           'സൈൻ ഇൻ ചെയ്യുന്നു',
     'verifyingGoogle':        'നിങ്ങളുടെ Google അക്കൗണ്ട് പരിശോധിക്കുന്നു,\nദയവായി കാത്തിരിക്കുക...',
     'securingSession':        'സെഷൻ സുരക്ഷിതമാക്കുന്നു...',
+    'verifyYourNumber': 'നിങ്ങളുടെ നമ്പർ സ്ഥിരീകരിക്കുക',
+    'codeSentTo':       'കോഡ് അയച്ചു',
+    'enter6DigitCode':  '6-അക്ക കോഡ് നൽകുക',
+    'verifyAndSignIn':  'സ്ഥിരീകരിച്ച് സൈൻ ഇൻ ചെയ്യുക',
+    'resendCode':       'കോഡ് വീണ്ടും അയക്കുക',
+    'didntGetCode':     'കോഡ് ലഭിച്ചില്ലേ? സ്പാം പരിശോധിക്കുക.',
+    'invalidOtp':       'സാധുവായ 6-അക്ക OTP നൽകുക',
+    'otpResentSuccess': 'OTP വീണ്ടും അയച്ചു',
+    'createAccount':        'അക്കൗണ്ട് ഉണ്ടാക്കുക',
+    'joinIxes':             'iXES ൽ ചേർന്ന് നിങ്ങളുടെ കമ്മ്യൂണിറ്റിയുമായി ബന്ധപ്പെടുക',
+    'mobileNumberLabel':    'മൊബൈൽ നമ്പർ',
+    'usernameLabel':        'ഉപയോക്തൃ നാമം',
+    'usernamePlaceholder':  'ഉദാ. john_doe',
+    'enterUsernameError':   'ഉപയോക്തൃ നാമം നൽകുക',
+    'usernameMinLength':    'കുറഞ്ഞത് 3 അക്ഷരങ്ങൾ',
+    'passwordLabel':        'പാസ്‌വേഡ്',
+    'passwordMinChars':     'കുറഞ്ഞത് 6 അക്ഷരങ്ങൾ',
+    'enterPasswordError':   'പാസ്‌വേഡ് നൽകുക',
+    'passwordMinLength':    'കുറഞ്ഞത് 6 അക്ഷരങ്ങൾ',
+    'confirmPasswordLabel': 'പാസ്‌വേഡ് സ്ഥിരീകരിക്കുക',
+    'reenterPassword':      'പാസ്‌വേഡ് വീണ്ടും നൽകുക',
+    'confirmPasswordError': 'പാസ്‌വേഡ് സ്ഥിരീകരിക്കുക',
+    'passwordsNotMatch':    'പാസ്‌വേഡുകൾ പൊരുത്തപ്പെടുന്നില്ല',
+    'termsTitle':           'നിബന്ധനകളും വ്യവസ്ഥകളും',
+    'termsSubtitle':        'നിബന്ധനകൾക്ക് ഞാൻ സമ്മതിക്കുന്നു',
+    'agreeToTermsError':    'ദയവായി നിബന്ധനകൾക്ക് സമ്മതിക്കുക',
+    'createAccountBtn':     'അക്കൗണ്ട് ഉണ്ടാക്കുക',
+    'alreadyHaveAccount':   'ഇതിനകം അക്കൗണ്ട് ഉണ്ടോ?  ',
+    'signIn':               'സൈൻ ഇൻ',
+    'enterMobileNumberHint':'മൊബൈൽ നമ്പർ നൽകുക',
+    'enterValidNumber':     'സാധുവായ 10-അക്ക നമ്പർ നൽകുക',
+    'signUpFailed':         'സൈൻ അപ്പ് പരാജയപ്പെട്ടു. വീണ്ടും ശ്രമിക്കുക.',
+
   },
+
 };
