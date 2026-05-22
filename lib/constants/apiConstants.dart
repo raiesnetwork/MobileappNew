@@ -1,6 +1,6 @@
 
  const String apiBaseUrl = 'https://api.ixes.ai/';
-//const String apiBaseUrl = "http://192.168.0.199:5000/";
+//const String apiBaseUrl = "http://10.116.128.61:5000/";
 const String SIGNUP = 'api/auth/signup';
 const String GETALLPOST = 'api/mobile/posts';
 const String GETALLNOTIFICATIONS = 'api/notifications';

@@ -64,7 +64,6 @@ class CommentProvider with ChangeNotifier {
 
       if (isRefresh || offset == 0) {
         _posts = newPosts;
-        // ✅ Re-inject any injected posts that are not in the fresh list
         for (final injected in _injectedPosts) {
           final exists = _posts.any((p) => p.id == injected.id);
           if (!exists) {
@@ -80,7 +79,6 @@ class CommentProvider with ChangeNotifier {
     } else {
       if (isRefresh || offset == 0) {
         _posts = [];
-        // ✅ Re-inject even when server returns nothing
         for (final injected in _injectedPosts) {
           _posts.add(injected);
         }
@@ -125,22 +123,18 @@ class CommentProvider with ChangeNotifier {
     }
   }
 
-  // ✅ FIXED: checks _injectedPosts first so comments survive feed refreshes
   List<Comment> getCommentsForPost(String postId) {
     try {
-      // Check injected posts FIRST — survives feed refreshes
       final injectedIdx = _injectedPosts.indexWhere((p) => p.id == postId);
       if (injectedIdx != -1) {
         return _injectedPosts[injectedIdx].comments;
       }
 
-      // Then regular posts
       final postInMain = _posts.indexWhere((p) => p.id == postId);
       if (postInMain != -1) {
         return _posts[postInMain].comments;
       }
 
-      // Then community posts
       final postInCommunity = _communityPosts.indexWhere((p) => p.id == postId);
       if (postInCommunity != -1) {
         return _communityPosts[postInCommunity].comments;
@@ -193,19 +187,19 @@ class CommentProvider with ChangeNotifier {
           userId: newCommentData?['userId']?['_id']?.toString() ?? _currentUserId,
         );
 
-        // ✅ Add to community posts
+        // Add to community posts
         final cIndex = _communityPosts.indexWhere((p) => p.id == postId);
         if (cIndex != -1) {
           _communityPosts[cIndex].comments.add(realComment);
         }
 
-        // ✅ Add to regular posts
+        // Add to regular posts
         final pIndex = _posts.indexWhere((p) => p.id == postId);
         if (pIndex != -1) {
           _posts[pIndex].comments.add(realComment);
         }
 
-        // ✅ Add to injected posts
+        // Add to injected posts
         final injIdx = _injectedPosts.indexWhere((p) => p.id == postId);
         if (injIdx != -1) {
           _injectedPosts[injIdx].comments.add(realComment);
@@ -213,18 +207,6 @@ class CommentProvider with ChangeNotifier {
 
         _isPosting = false;
         notifyListeners();
-
-        // Background refresh
-        if (communityId != null) {
-          fetchCommunityPosts(
-            communityId: communityId,
-            offset: 0,
-            limit: _communityPosts.length > limit ? _communityPosts.length : limit,
-          );
-        } else {
-          fetchAllPosts(offset: offset, limit: limit);
-        }
-
         return true;
       } else {
         _isPosting = false;
@@ -515,7 +497,8 @@ class CommentProvider with ChangeNotifier {
     // Optimistic update for _posts
     final postIndex = _posts.indexWhere((p) => p.id == postId);
     if (postIndex != -1) {
-      final commentIndex = _posts[postIndex].comments.indexWhere((c) => c.id == commentId);
+      final commentIndex =
+      _posts[postIndex].comments.indexWhere((c) => c.id == commentId);
       if (commentIndex != -1) {
         _posts[postIndex].comments[commentIndex] = Comment(
           id: commentId,
@@ -533,14 +516,19 @@ class CommentProvider with ChangeNotifier {
     // Optimistic update for _communityPosts
     final cPostIndex = _communityPosts.indexWhere((p) => p.id == postId);
     if (cPostIndex != -1) {
-      final commentIndex = _communityPosts[cPostIndex].comments.indexWhere((c) => c.id == commentId);
+      final commentIndex = _communityPosts[cPostIndex]
+          .comments
+          .indexWhere((c) => c.id == commentId);
       if (commentIndex != -1) {
         _communityPosts[cPostIndex].comments[commentIndex] = Comment(
           id: commentId,
           content: commentContent,
-          createdAt: _communityPosts[cPostIndex].comments[commentIndex].createdAt,
-          userName: _communityPosts[cPostIndex].comments[commentIndex].userName,
-          profileImage: _communityPosts[cPostIndex].comments[commentIndex].profileImage,
+          createdAt:
+          _communityPosts[cPostIndex].comments[commentIndex].createdAt,
+          userName:
+          _communityPosts[cPostIndex].comments[commentIndex].userName,
+          profileImage:
+          _communityPosts[cPostIndex].comments[commentIndex].profileImage,
           isAdmin: _communityPosts[cPostIndex].comments[commentIndex].isAdmin,
           userId: _communityPosts[cPostIndex].comments[commentIndex].userId,
         );
@@ -548,18 +536,24 @@ class CommentProvider with ChangeNotifier {
       }
     }
 
-    // ✅ Optimistic update for _injectedPosts
+    // Optimistic update for _injectedPosts
     final injPostIndex = _injectedPosts.indexWhere((p) => p.id == postId);
     if (injPostIndex != -1) {
-      final commentIndex = _injectedPosts[injPostIndex].comments.indexWhere((c) => c.id == commentId);
+      final commentIndex = _injectedPosts[injPostIndex]
+          .comments
+          .indexWhere((c) => c.id == commentId);
       if (commentIndex != -1) {
         _injectedPosts[injPostIndex].comments[commentIndex] = Comment(
           id: commentId,
           content: commentContent,
-          createdAt: _injectedPosts[injPostIndex].comments[commentIndex].createdAt,
-          userName: _injectedPosts[injPostIndex].comments[commentIndex].userName,
-          profileImage: _injectedPosts[injPostIndex].comments[commentIndex].profileImage,
-          isAdmin: _injectedPosts[injPostIndex].comments[commentIndex].isAdmin,
+          createdAt:
+          _injectedPosts[injPostIndex].comments[commentIndex].createdAt,
+          userName:
+          _injectedPosts[injPostIndex].comments[commentIndex].userName,
+          profileImage:
+          _injectedPosts[injPostIndex].comments[commentIndex].profileImage,
+          isAdmin:
+          _injectedPosts[injPostIndex].comments[commentIndex].isAdmin,
           userId: _injectedPosts[injPostIndex].comments[commentIndex].userId,
         );
         notifyListeners();
@@ -572,11 +566,6 @@ class CommentProvider with ChangeNotifier {
     );
 
     if (result['success']) {
-      if (communityId != null) {
-        fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
-      } else {
-        fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
-      }
       return true;
     } else {
       return false;
@@ -605,7 +594,7 @@ class CommentProvider with ChangeNotifier {
       notifyListeners();
     }
 
-    // ✅ Optimistic update for _injectedPosts
+    // Optimistic update for _injectedPosts
     final injPostIndex = _injectedPosts.indexWhere((p) => p.id == postId);
     if (injPostIndex != -1) {
       _injectedPosts[injPostIndex].comments.removeWhere((c) => c.id == commentId);
@@ -615,11 +604,6 @@ class CommentProvider with ChangeNotifier {
     final result = await CommentService.deleteComment(commentId: commentId);
 
     if (result['success']) {
-      if (communityId != null) {
-        fetchCommunityPosts(communityId: communityId, offset: offset, limit: limit);
-      } else {
-        fetchAllPosts(offset: offset, limit: limit, isRefresh: true);
-      }
       return true;
     } else {
       return false;
@@ -681,7 +665,6 @@ class CommentProvider with ChangeNotifier {
     }
   }
 
-  // ✅ FIXED: stores in _injectedPosts separately so it survives feed refreshes
   void injectSinglePost(Post post) {
     final idx = _injectedPosts.indexWhere((p) => p.id == post.id);
     if (idx != -1) {

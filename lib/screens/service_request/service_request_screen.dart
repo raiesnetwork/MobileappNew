@@ -7,8 +7,14 @@ import 'service_request_deatils_page.dart';
 
 class AllServiceRequestsScreen extends StatefulWidget {
   final String communityId;
-  const AllServiceRequestsScreen({Key? key, required this.communityId})
-      : super(key: key);
+  final bool isUserMode;
+  final int initialTabIndex;
+  const AllServiceRequestsScreen({
+    Key? key,
+    required this.communityId,
+    this.isUserMode = false,
+    this.initialTabIndex = 0,
+  }) : super(key: key);
 
   @override
   State<AllServiceRequestsScreen> createState() =>
@@ -44,11 +50,20 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTabIndex, // ✅ lands on correct tab
+    );
     _loadCurrentUserId();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<ServiceRequestProvider>(context, listen: false)
-          .fetchServiceRequests(communityId: widget.communityId);
+      final provider =
+      Provider.of<ServiceRequestProvider>(context, listen: false);
+      if (widget.isUserMode) {
+        provider.fetchServiceRequests(userId: widget.communityId); // ✅ userId-based
+      } else {
+        provider.fetchServiceRequests(communityId: widget.communityId);
+      }
     });
   }
 
@@ -84,16 +99,26 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
             return _buildErrorState(provider);
           }
 
+          // ✅ In user mode: assignedRequests has the data (from userAssignedRequests)
+          //    In community mode: requests has the data
           final myRequests = _filterRequests(provider.requests);
-          final assignedRequests = _filterRequests(provider.assignedRequests);
+          final assignedRequests = widget.isUserMode
+              ? _filterRequests(provider.assignedRequests)  // ✅ correct source
+              : _filterRequests(provider.assignedRequests);
 
           return Column(
             children: [
               _buildFiltersSection(),
-              _buildStatsSection(provider.requests),
-              _buildTabBar(),
+              _buildStatsSection(
+                widget.isUserMode
+                    ? provider.assignedRequests
+                    : provider.requests,
+              ),
+              _buildTabBar(), // ✅ hidden in user mode
               Expanded(
-                child: TabBarView(
+                child: widget.isUserMode
+                    ? _buildListView(assignedRequests, provider) // ✅ direct list
+                    : TabBarView(
                   controller: _tabController,
                   children: [
                     _buildListView(myRequests, provider),
@@ -132,6 +157,7 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
   // FAB
   // ─────────────────────────────────────────────
   Widget _buildFAB() {
+    if (widget.isUserMode) return const SizedBox.shrink(); // ✅ hide FAB
     return FloatingActionButton.extended(
       onPressed: () async {
         final result = await Navigator.push(
@@ -337,6 +363,7 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
   // TAB BAR
   // ─────────────────────────────────────────────
   Widget _buildTabBar() {
+    if (widget.isUserMode) return const SizedBox.shrink(); // ✅ hide tabs
     return Container(
       color: Colors.white,
       child: TabBar(
@@ -364,8 +391,9 @@ class _AllServiceRequestsScreenState extends State<AllServiceRequestsScreen>
       List<Map<String, dynamic>> requests, ServiceRequestProvider provider) {
     return RefreshIndicator(
       color: const Color(0xFF6C5CE7),
-      onRefresh: () => provider.fetchServiceRequests(
-          communityId: widget.communityId),
+      onRefresh: () => widget.isUserMode
+          ? provider.fetchServiceRequests(userId: widget.communityId)
+          : provider.fetchServiceRequests(communityId: widget.communityId),
       child: requests.isEmpty
           ? _buildEmptyState()
           : ListView.builder(

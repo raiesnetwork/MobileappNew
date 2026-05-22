@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'package:ixes.app/providers/meeting_provider.dart';
@@ -215,11 +216,8 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
   Future<void> _startScreenShare() async {
     if (Platform.isAndroid) {
-      // Start ScreenShareService (foregroundServiceType=mediaProjection) BEFORE
-      // flutter_webrtc calls MediaProjection.start() — Android 14 requirement.
       try {
         await _screenShareChannel.invokeMethod('startScreenShareService');
-        // Give the FGS time to fully register with the system
         await Future.delayed(const Duration(milliseconds: 300));
       } catch (e) {
         debugPrint('⚠️ Could not start screen share service: $e');
@@ -230,7 +228,6 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
 
     await _localParticipant!.setScreenShareEnabled(true);
     if (mounted) setState(() => _isScreenSharing = true);
-    debugPrint('✅ Screen share started');
   }
 
   Future<void> _stopScreenShare() async {

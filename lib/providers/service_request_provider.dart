@@ -108,6 +108,19 @@ class ServiceRequestProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+  int _assignedToMeCount = 0;
+  int get assignedToMeCount => _assignedToMeCount;
+
+  Future<void> fetchAssignedToMeCount(String userId) async {
+    try {
+      final response = await _service.getAllServiceRequests(userId: userId);
+      if (response['error'] == false) {
+        _assignedToMeCount =
+            (response['userAssignedRequests'] as List?)?.length ?? 0;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
 
   // ─────────────────────────────────────────────
   // GET BY ID
@@ -192,11 +205,13 @@ class ServiceRequestProvider extends ChangeNotifier {
       if (response['error'] == false) {
         _error = null;
 
-        // FIX 1: Always set _currentRequest from the response so
-        // attachments / status / notes appear immediately in the UI.
         if (response['data'] != null) {
           _currentRequest = Map<String, dynamic>.from(
               response['data'] as Map<String, dynamic>);
+        } else if (files != null && files.isNotEmpty && _currentRequest != null) {
+          // Backend didn't return updated data — keep existing currentRequest
+          // and call getServiceRequestById to get the latest including new files
+          await getServiceRequestById(requestId);
         }
 
         // FIX 2: Notify immediately so screen re-renders with new
@@ -278,5 +293,11 @@ class ServiceRequestProvider extends ChangeNotifier {
   void clearCurrentRequest() {
     _currentRequest = null;
     notifyListeners();
+  }
+  void injectFiles(List<Map<String, dynamic>> files) {
+    if (_currentRequest != null) {
+      _currentRequest!['files'] = files;
+      notifyListeners();
+    }
   }
 }

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
+import 'package:ixes.app/providers/attendance_provider.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter_background/flutter_background.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
@@ -31,7 +33,7 @@ import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
 import 'package:ixes.app/screens/auth/launguage_selection_page.dart';
 import 'package:ixes.app/screens/chats_page/chat_detail_screen.dart';
-
+import 'package:ixes.app/screens/chats_page/group_chat/group_chat_detail.dart';
 import 'package:ixes.app/screens/video_call/video_call.dart';
 import 'package:ixes.app/screens/voice_call/voice_call_room_screen.dart';
 import 'package:ixes.app/screens/widgets/video_call.dart';
@@ -57,8 +59,6 @@ const _uuid = Uuid();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // File-scope call state
-// Lives outside any class so the FCM background isolate and foreground app
-// can both access it without passing references around.
 // ─────────────────────────────────────────────────────────────────────────────
 
 Map<String, dynamic>? _pendingCallData;
@@ -86,13 +86,11 @@ bool _isCallExpired() {
   return DateTime.now().difference(at) > _callTTL;
 }
 
-// Broadcast stream used to push call events into the app while providers
-// may not yet be ready.
 final StreamController<Map<String, dynamic>> _callStream =
 StreamController<Map<String, dynamic>>.broadcast();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ NEW: File-scope pending chat state
+// File-scope pending PERSONAL chat state
 // ─────────────────────────────────────────────────────────────────────────────
 
 Map<String, dynamic>? _pendingChatData;
@@ -108,7 +106,23 @@ void _clearChatState() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CallKit UI helper — top-level so _firebaseBackgroundHandler can call it
+// File-scope pending GROUP chat state
+// ─────────────────────────────────────────────────────────────────────────────
+
+Map<String, dynamic>? _pendingGroupData;
+
+void _storePendingGroup(Map<String, dynamic> data) {
+  _pendingGroupData = data;
+  debugPrint('💾 [PENDING GROUP] Stored | groupId=${data['groupId']} | groupName=${data['groupName']}');
+}
+
+void _clearGroupState() {
+  _pendingGroupData = null;
+  debugPrint('🧹 [GROUP STATE] Cleared');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CallKit UI helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _showCallkitIncoming({
@@ -140,16 +154,16 @@ Future<void> _showCallkitIncoming({
       'callType':   callType,
     },
     android: const AndroidParams(
-      isCustomNotification:               true,
-      isShowLogo:                         false,
-      ringtonePath:                       'system_ringtone_default',
-      backgroundColor:                    '#0D0D14',
-      backgroundUrl:                      null,
-      actionColor:                        '#4CAF50',
-      textColor:                          '#ffffff',
+      isCustomNotification:                true,
+      isShowLogo:                          false,
+      ringtonePath:                        'system_ringtone_default',
+      backgroundColor:                     '#0D0D14',
+      backgroundUrl:                       null,
+      actionColor:                         '#4CAF50',
+      textColor:                           '#ffffff',
       incomingCallNotificationChannelName: 'Incoming Calls',
       missedCallNotificationChannelName:   'Missed Calls',
-      isShowCallID:                       false,
+      isShowCallID:                        false,
     ),
     ios: const IOSParams(
       iconName:                              'AppIcon',
@@ -161,18 +175,18 @@ Future<void> _showCallkitIncoming({
       audioSessionActive:                    true,
       audioSessionPreferredSampleRate:       44100.0,
       audioSessionPreferredIOBufferDuration: 0.005,
-      supportsDTMF:      true,
-      supportsHolding:   true,
-      supportsGrouping:  false,
+      supportsDTMF:       true,
+      supportsHolding:    true,
+      supportsGrouping:   false,
       supportsUngrouping: false,
-      ringtonePath:      'system_ringtone_default',
+      ringtonePath:       'system_ringtone_default',
     ),
   ));
   debugPrint('✅ [CALLKIT UI] Shown | room=$roomName | uuid=$callUUID');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FCM background handler — must be a top-level function
+// FCM background handler
 // ─────────────────────────────────────────────────────────────────────────────
 
 @pragma('vm:entry-point')
@@ -201,13 +215,12 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       callType:   type,
     );
   }
-  // ✅ NOTE: Chat notifications don't need background handler processing —
-  // the system notification is shown automatically by FCM when app is in
-  // background/killed (because backend sends both notification + data keys).
+  // Chat and GroupChat notifications: system notification shown automatically
+  // by FCM — no manual handling needed in background handler.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FCM helpers
+// FCM token helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _saveFcmToken() async {
@@ -234,7 +247,7 @@ Future<void> _saveFcmToken() async {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ✅ NEW: Navigate to ChatDetailScreen from FCM tap
+// Navigate to ChatDetailScreen from FCM tap
 // ─────────────────────────────────────────────────────────────────────────────
 
 void _navigateToChat({
@@ -257,10 +270,8 @@ void _navigateToChat({
 
   debugPrint('💬 [CHAT NAV] Navigating to ChatDetailScreen | sender=$senderName');
 
-  // Go to main screen (chats tab = index 2) first
   nav.pushNamedAndRemoveUntil('/main', (route) => false);
 
-  // Then push ChatDetailScreen on top after a short delay so main screen settles
   Future.delayed(const Duration(milliseconds: 400), () {
     navigatorKey.currentState?.push(
       MaterialPageRoute(
@@ -281,9 +292,51 @@ void _navigateToChat({
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Navigate to GroupChatDetailPage from FCM tap
+// ─────────────────────────────────────────────────────────────────────────────
+
+void _navigateToGroup({
+  required String groupId,
+  required String groupName,
+}) {
+  final nav = navigatorKey.currentState;
+  final ctx = navigatorKey.currentContext;
+
+  if (nav == null || ctx == null) {
+    debugPrint('⚠️ [GROUP NAV] Navigator not ready — storing pending');
+    _storePendingGroup({
+      'groupId':   groupId,
+      'groupName': groupName,
+    });
+    return;
+  }
+
+  debugPrint('💬 [GROUP NAV] Navigating to GroupChatDetailPage | group=$groupName');
+
+  nav.pushNamedAndRemoveUntil('/main', (route) => false);
+
+  Future.delayed(const Duration(milliseconds: 400), () {
+    navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => GroupChatDetailPage(
+          groupId:   groupId,
+          groupName: groupName,
+          isAdmin:   false,
+        ),
+      ),
+    );
+    _clearGroupState();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FCM init — handles all 3 app states for calls, personal chat, group chat
+// ─────────────────────────────────────────────────────────────────────────────
+
 Future<void> _initFCM() async {
   try {
-    // ── Listen for call intents from native Kotlin ─────────────────────
+    // ── Listen for call intents from native Kotlin ──────────────────────────
     const _callChannel = MethodChannel('com.ixes.app/calls');
     _callChannel.setMethodCallHandler((call) async {
       if (call.method == 'incomingCall') {
@@ -318,18 +371,19 @@ Future<void> _initFCM() async {
       }
     });
 
-    // ── Handle app opened from killed state via notification tap ────────
+    // ── App opened from KILLED state via notification tap ───────────────────
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
       final d    = initialMessage.data;
       final type = d['type'] ?? '';
 
+      // Call
       if (type == 'voice_call' || type == 'video_call') {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
         if (roomName.isNotEmpty && callerId.isNotEmpty) {
-          debugPrint('📲 [FCM INITIAL] Killed state tap | type=$type');
+          debugPrint('📲 [FCM INITIAL] Killed state call tap | type=$type');
           await _showCallkitIncoming(
             roomName:   roomName,
             callerId:   callerId,
@@ -339,13 +393,13 @@ Future<void> _initFCM() async {
         }
       }
 
-      // ✅ NEW: Chat notification tap — killed state
+      // Personal chat — killed state
       if (type == 'chat') {
         final senderId       = d['senderId']       ?? '';
         final senderName     = d['senderName']     ?? 'Chat';
         final conversationId = d['conversationId'] ?? '';
         if (senderId.isNotEmpty) {
-          debugPrint('💬 [FCM INITIAL] Chat tap from killed state | sender=$senderName');
+          debugPrint('💬 [FCM INITIAL] Personal chat tap from killed state | sender=$senderName');
           _storePendingChat({
             'senderId':       senderId,
             'senderName':     senderName,
@@ -353,19 +407,33 @@ Future<void> _initFCM() async {
           });
         }
       }
+
+      // Group chat — killed state
+      if (type == 'GroupChat') {
+        final groupId   = d['groupId']   ?? '';
+        final groupName = d['groupName'] ?? 'Group';
+        if (groupId.isNotEmpty) {
+          debugPrint('💬 [FCM INITIAL] Group chat tap from killed state | group=$groupName');
+          _storePendingGroup({
+            'groupId':   groupId,
+            'groupName': groupName,
+          });
+        }
+      }
     }
 
-    // ── Handle app foregrounded from notification tap ───────────────────
+    // ── App foregrounded from BACKGROUND via notification tap ───────────────
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) async {
       final d    = msg.data;
       final type = d['type'] ?? '';
 
+      // Call
       if (type == 'voice_call' || type == 'video_call') {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
         if (roomName.isNotEmpty && callerId.isNotEmpty) {
-          debugPrint('📲 [FCM OPENED] Background tap | type=$type');
+          debugPrint('📲 [FCM OPENED] Background call tap | type=$type');
           await Future.delayed(const Duration(milliseconds: 500));
           final ctx = navigatorKey.currentContext;
           bool socketHandled = false;
@@ -388,13 +456,13 @@ Future<void> _initFCM() async {
         }
       }
 
-      // ✅ NEW: Chat notification tap — background state
+      // Personal chat — background state
       if (type == 'chat') {
         final senderId       = d['senderId']       ?? '';
         final senderName     = d['senderName']     ?? 'Chat';
         final conversationId = d['conversationId'] ?? '';
         if (senderId.isNotEmpty) {
-          debugPrint('💬 [FCM OPENED] Chat tap from background | sender=$senderName');
+          debugPrint('💬 [FCM OPENED] Personal chat tap from background | sender=$senderName');
           await Future.delayed(const Duration(milliseconds: 500));
           _navigateToChat(
             senderId:       senderId,
@@ -403,9 +471,23 @@ Future<void> _initFCM() async {
           );
         }
       }
+
+      // Group chat — background state
+      if (type == 'GroupChat') {
+        final groupId   = d['groupId']   ?? '';
+        final groupName = d['groupName'] ?? 'Group';
+        if (groupId.isNotEmpty) {
+          debugPrint('💬 [FCM OPENED] Group chat tap from background | group=$groupName');
+          await Future.delayed(const Duration(milliseconds: 500));
+          _navigateToGroup(
+            groupId:   groupId,
+            groupName: groupName,
+          );
+        }
+      }
     });
 
-    // ── existing code from here ─────────────────────────────────────────
+    // ── App FOREGROUND — onMessage ──────────────────────────────────────────
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
@@ -431,7 +513,7 @@ Future<void> _initFCM() async {
             final vcState = ctx.read<VideoCallProvider>().callState;
             final vState  = ctx.read<VoiceCallProvider>().callState;
             socketHandled = vcState == CallState.ringing ||
-                vState  == VoiceCallState.ringing;
+                vState == VoiceCallState.ringing;
           } catch (_) {}
         }
 
@@ -440,7 +522,7 @@ Future<void> _initFCM() async {
           return;
         }
 
-        debugPrint('⚠️ [FG FCM] Socket missed after 800 ms — showing CallKit');
+        debugPrint('⚠️ [FG FCM] Socket missed after 800ms — showing CallKit');
         await _showCallkitIncoming(
           roomName:   d['roomName']   ?? '',
           callerId:   d['callerId']   ?? '',
@@ -448,8 +530,8 @@ Future<void> _initFCM() async {
           callType:   type,
         );
       }
-      // ✅ NOTE: Foreground chat messages are handled by socket (real-time),
-      // so no FCM action needed here for type == 'chat'.
+
+      // chat and GroupChat foreground messages handled by socket — no action needed
     });
   } catch (e) {
     debugPrint('❌ [FCM INIT] $e');
@@ -457,7 +539,7 @@ Future<void> _initFCM() async {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Startup: restore a pending call if the app was launched by CallKit accept
+// Startup: restore pending call if app launched by CallKit accept
 // ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _checkActiveCallsOnStartup() async {
@@ -507,28 +589,12 @@ void main() async {
   print('📱 Platform: ${Platform.operatingSystem}');
   print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  SocketService().onConnectionChanged.listen((c)  => print('🌐 [SOCKET] connected=$c'));
-  SocketService().onSocketReady.listen((s) {
-    print('✅ [SOCKET READY] id=${s.id} | transport=${s.io.engine?.transport?.name}');
-  });
-  SocketService().onNewMessage.listen((d)        => print('📩 [MSG] $d'));
-  SocketService().onMessageDeleted.listen((d)    => print('🗑️ [MSG DEL] $d'));
-  SocketService().onMessageEdited.listen((d)     => print('✏️ [MSG EDIT] $d'));
-  SocketService().onReadStatusUpdated.listen((d) => print('👁️ [READ] $d'));
-
   FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
 
   await _initFCM();
   await _checkActiveCallsOnStartup();
 
-  const androidConfig = FlutterBackgroundAndroidConfig(
-    notificationTitle:      'Screen Sharing',
-    notificationText:       'Ixes meeting is running in background',
-    notificationImportance: AndroidNotificationImportance.normal,
-    notificationIcon:       AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
-  );
-  await FlutterBackground.initialize(androidConfig: androidConfig);
-  await AppLocalizations.load();
+  // ... existing setup ...
 
   final prefs    = await SharedPreferences.getInstance();
   final token    = prefs.getString('auth_token');
@@ -537,6 +603,29 @@ void main() async {
 
   print('🔐 authToken exists = ${token != null}');
   print('👤 userId = $userId');
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  🧪 RAW SOCKET TEST — bypass entire SocketService
+  // ════════════════════════════════════════════════════════════════════════
+  Future.delayed(const Duration(seconds: 5), () {
+    print('🧪 [TEST] Starting RAW socket test v2 (Map config)');
+
+    final testSocket = IO.io(
+      'http://10.116.128.61:5000',
+      <String, dynamic>{
+        'transports': ['polling'],
+        'autoConnect': true,
+        'forceNew': true,
+        'query': {'userId': 'test_raw_123'},
+      },
+    );
+
+    testSocket.onConnect((_) => print('🧪 ✅ CONNECTED: ${testSocket.id}'));
+    testSocket.onConnectError((e) => print('🧪 ❌ CONNECT ERR: $e'));
+    testSocket.onError((e) => print('🧪 💥 ERR: $e'));
+    testSocket.onDisconnect((r) => print('🧪 🔌 DISCONNECTED: $r'));
+    testSocket.onAny((event, data) => print('🧪 🔔 event=$event | data=$data'));
+  });
 
   runApp(IxesApp(
     initialToken:  token,
@@ -586,6 +675,7 @@ class IxesApp extends StatelessWidget {
           ChangeNotifierProvider(create: (_) => ProfileProvider()),
           ChangeNotifierProvider(create: (_) => DashboardProvider()),
           ChangeNotifierProvider(create: (_) => MeetingOverlayService()),
+          ChangeNotifierProvider(create: (_) => AttendanceProvider()),
         ],
         child: AppWithLifecycleObserver(
           initialToken:  initialToken,
@@ -598,7 +688,7 @@ class IxesApp extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Connecting splash — shown while providers init on cold-launch via CallKit
+// Connecting splash
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _CallConnectingSplash extends StatelessWidget {
@@ -897,7 +987,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     });
   }
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
+  // ── Call navigation ────────────────────────────────────────────────────────
 
   Future<void> _navigate(Map<String, dynamic> data) async {
     final roomName   = data['roomName']   ?? '';
@@ -962,7 +1052,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     _navigate(data);
   }
 
-  // ✅ NEW: Consume pending chat navigation after providers are ready
+  // Consume pending personal chat navigation after providers are ready
   void _consumePendingChat() {
     final data = _pendingChatData;
     if (data == null) return;
@@ -971,6 +1061,17 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       senderId:       data['senderId']       ?? '',
       senderName:     data['senderName']     ?? 'Chat',
       conversationId: data['conversationId'] ?? '',
+    );
+  }
+
+  // Consume pending group chat navigation after providers are ready
+  void _consumePendingGroup() {
+    final data = _pendingGroupData;
+    if (data == null) return;
+    _pendingGroupData = null;
+    _navigateToGroup(
+      groupId:   data['groupId']   ?? '',
+      groupName: data['groupName'] ?? 'Group',
     );
   }
 
@@ -1053,7 +1154,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         final vcState = ctx.read<VideoCallProvider>().callState;
         final vState  = ctx.read<VoiceCallProvider>().callState;
         alreadyRinging = vcState == CallState.ringing ||
-            vState  == VoiceCallState.ringing;
+            vState == VoiceCallState.ringing;
       } catch (_) {}
 
       if (alreadyRinging) {
@@ -1063,10 +1164,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       }
 
       _handledRoomNames.add(roomName);
-
-      debugPrint(
-        '📲 [RESUME] Surfacing call in-app | room=$roomName | caller=$callerName | type=$callType',
-      );
+      debugPrint('📲 [RESUME] Surfacing call in-app | room=$roomName | caller=$callerName | type=$callType');
 
       if (callType == 'video_call') {
         ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
@@ -1172,7 +1270,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       ).timeout(const Duration(seconds: 5));
       debugPrint('✅ [REJECT REST] Sent via API | room=$roomName');
     } on TimeoutException {
-      debugPrint('⏰ [REJECT REST] Timed out after 5 s | room=$roomName');
+      debugPrint('⏰ [REJECT REST] Timed out after 5s | room=$roomName');
     } catch (e) {
       debugPrint('❌ [REJECT REST] API call failed: $e');
     }
@@ -1241,11 +1339,14 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     }
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Builder(builder: (ctx) {
       final auth = ctx.watch<AuthProvider>();
 
+      // ── Path A: cold launch via CallKit accept ──────────────────────────
       if (_pendingCallData != null &&
           _pendingCallData!['autoAccept'] == true &&
           auth.isAuthenticated &&
@@ -1276,7 +1377,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         );
       }
 
-      // ── Path B ─────────────────────────────────────────────────────────────
+      // ── Path B: auth not yet loaded ─────────────────────────────────────
       if (!auth.isInitialized) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) ctx.read<AuthProvider>().loadUserFromStorage();
@@ -1284,7 +1385,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildApp(home: const SplashScreen());
       }
 
-      // ── Path C ─────────────────────────────────────────────────────────────
+      // ── Path C: authenticated — normal boot ─────────────────────────────
       if (auth.isAuthenticated && auth.user != null) {
         final user = auth.user!;
         WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -1296,10 +1397,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
           try {
             await _initProviders(ctx, user);
             _providersReady = true;
-            debugPrint('✅ [PROVIDER INIT] Done | pending=${_pendingCallData != null}');
+            debugPrint('✅ [PROVIDER INIT] Done | pendingCall=${_pendingCallData != null} | pendingChat=${_pendingChatData != null} | pendingGroup=${_pendingGroupData != null}');
             if (mounted) {
-              _consumePending();      // existing — handles calls
-              _consumePendingChat();  // ✅ NEW — handles chat FCM tap
+              _consumePending();       // calls
+              _consumePendingChat();   // personal chat FCM tap
+              _consumePendingGroup();  // group chat FCM tap
             }
           } catch (e) {
             debugPrint('❌ [PROVIDER INIT] $e');
@@ -1307,7 +1409,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         });
       }
 
-      // ── Path D ─────────────────────────────────────────────────────────────
+      // ── Path D: render home ─────────────────────────────────────────────
       return _buildApp(
         home: auth.isAuthenticated
             ? VoiceCallListener(

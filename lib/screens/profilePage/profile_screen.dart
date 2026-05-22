@@ -8,7 +8,10 @@ import '../../providers/announcement_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/campaign_provider.dart';
 import '../../providers/profile_provider.dart';
+import '../../providers/service_request_provider.dart';
 import '../auth/login_screen.dart';
+
+import '../service_request/service_request_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -66,6 +69,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       _animationController.forward();
       profileProvider.getUserProfile();
       profileProvider.getDashboardData();
+      // ✅ fetch assigned service request count
+      final userId = authProvider.user?.id;
+      if (userId != null) {
+        context.read<ServiceRequestProvider>().fetchAssignedToMeCount(userId);
+      }
       return;
     }
 
@@ -78,12 +86,19 @@ class _ProfileScreenState extends State<ProfileScreen>
         .getUserProfile()
         .then((_) => _animationController.forward());
     profileProvider.getDashboardData();
+
+    // ✅ fetch assigned service request count
+    final userId = authProvider.user?.id;
+    if (userId != null) {
+      context.read<ServiceRequestProvider>().fetchAssignedToMeCount(userId);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<AuthProvider, ProfileProvider>(
-      builder: (context, authProvider, profileProvider, _) {
+    // ✅ Consumer3 — added ServiceRequestProvider
+    return Consumer3<AuthProvider, ProfileProvider, ServiceRequestProvider>(
+      builder: (context, authProvider, profileProvider, srProvider, _) {
         final user = authProvider.user;
         final profile = profileProvider.userProfile;
         final dashboard = profileProvider.dashboardData;
@@ -111,7 +126,13 @@ class _ProfileScreenState extends State<ProfileScreen>
             child: SlideTransition(
               position: _slideAnimation,
               child: _buildProfileContent(
-                  user, profile, dashboard, authProvider, profileProvider),
+                user,
+                profile,
+                dashboard,
+                authProvider,
+                profileProvider,
+                srProvider, // ✅ pass srProvider
+              ),
             ),
           ),
         );
@@ -167,6 +188,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       Map<String, dynamic>? dashboard,
       AuthProvider authProvider,
       ProfileProvider profileProvider,
+      ServiceRequestProvider srProvider, // ✅ added
       ) {
     return CustomScrollView(
       controller: _scrollController,
@@ -216,7 +238,11 @@ class _ProfileScreenState extends State<ProfileScreen>
 
         // ── Stats strip ─────────────────────────────────────────────────
         SliverToBoxAdapter(
-          child: _buildDashboardStats(dashboard),
+          child: _buildDashboardStats(
+            dashboard,
+            srProvider.assignedToMeCount, // ✅
+            authProvider.user?.id,         // ✅
+          ),
         ),
 
         // ── Personal info card ──────────────────────────────────────────
@@ -270,7 +296,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.only(top: 8, bottom: 16, left: 24, right: 24),
+              padding: const EdgeInsets.only(
+                  top: 8, bottom: 16, left: 24, right: 24),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -323,12 +350,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ),
                   ),
 
-                  // Contact chips — only rendered when data exists
+                  // Contact chips
                   Builder(builder: (context) {
-                    final phone = (profile?['mobile'] ?? user?.mobile ?? '')
+                    final phone =
+                    (profile?['mobile'] ?? user?.mobile ?? '')
                         .toString()
                         .trim();
-                    final email = (profile?['email'] ?? '').toString().trim();
+                    final email =
+                    (profile?['email'] ?? '').toString().trim();
 
                     final chips = <Widget>[
                       if (phone.isNotEmpty && phone != 'null')
@@ -365,7 +394,12 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   // ── Stats ────────────────────────────────────────────────────────────────
-  Widget _buildDashboardStats(Map<String, dynamic>? dashboard) {
+  // ✅ Updated signature — takes assignedSRCount and userId
+  Widget _buildDashboardStats(
+      Map<String, dynamic>? dashboard,
+      int assignedSRCount,
+      String? userId,
+      ) {
     final stats = [
       _StatData(
         label: 'Communities',
@@ -373,6 +407,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         icon: Icons.groups_rounded,
         color: const Color(0xFF4F8EF7),
         bgColor: const Color(0xFFEBF2FF),
+        onTap: null,
       ),
       _StatData(
         label: 'Campaigns',
@@ -380,6 +415,7 @@ class _ProfileScreenState extends State<ProfileScreen>
         icon: Icons.campaign_rounded,
         color: const Color(0xFF9B59F5),
         bgColor: const Color(0xFFF3EEFF),
+        onTap: null,
       ),
       _StatData(
         label: 'Services',
@@ -387,6 +423,27 @@ class _ProfileScreenState extends State<ProfileScreen>
         icon: Icons.room_service_rounded,
         color: const Color(0xFFFF8C42),
         bgColor: const Color(0xFFFFF1E8),
+        onTap: null,
+      ),
+      // ✅ NEW — Service Requests tile
+      _StatData(
+        label: 'Requests',
+        value: assignedSRCount.toString(),
+        icon: Icons.assignment_ind_rounded,
+        color: const Color(0xFF00B894),
+        bgColor: const Color(0xFFE8FBF5),
+        onTap: userId != null
+            ? () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AllServiceRequestsScreen(
+              communityId: userId,
+              isUserMode: true,
+              initialTabIndex: 1,
+            ),
+          ),
+        )
+            : null,
       ),
     ];
 
@@ -429,40 +486,53 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
+  // ✅ Updated to handle onTap and arrow indicator
   Widget _buildStatTile(_StatData s) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: s.bgColor,
-            borderRadius: BorderRadius.circular(14),
+    return GestureDetector(
+      onTap: s.onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: s.bgColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(s.icon, color: s.color, size: 22),
           ),
-          child: Icon(s.icon, color: s.color, size: 24),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          s.value,
-          style: const TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF1A1A2E),
-            height: 1,
+          const SizedBox(height: 10),
+          Text(
+            s.value,
+            style: const TextStyle(
+              fontSize: 22, // slightly smaller to fit 4 tiles
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF1A1A2E),
+              height: 1,
+            ),
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          s.label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Color(0xFF9494AA),
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.2,
+          const SizedBox(height: 4),
+          Text(
+            s.label,
+            style: const TextStyle(
+              fontSize: 11,
+              color: Color(0xFF9494AA),
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.2,
+            ),
           ),
-        ),
-      ],
+          // ✅ small arrow for tappable tiles
+          if (s.onTap != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Icon(Icons.arrow_forward_ios_rounded,
+                  size: 9, color: s.color),
+            )
+          else
+            const SizedBox(height: 13), // keep height consistent
+        ],
+      ),
     );
   }
 
@@ -644,7 +714,8 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             onPressed: authProvider.isLoading
                 ? null
-                : () => _handleLogout(context, authProvider, profileProvider),
+                : () =>
+                _handleLogout(context, authProvider, profileProvider),
           ),
         ),
       ]),
@@ -810,8 +881,7 @@ class _CollapsedProfileTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     final img = getProfileImage(profile);
     final name = profile?['name'] ?? user?.username ?? '';
-    final initial =
-    name.isNotEmpty ? name[0].toUpperCase() : 'U';
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
 
     return Row(children: [
       CircleAvatar(
@@ -902,12 +972,14 @@ class _ContactChip extends StatelessWidget {
   }
 }
 
+// ✅ Updated — added onTap field
 class _StatData {
   final String label;
   final String value;
   final IconData icon;
   final Color color;
   final Color bgColor;
+  final VoidCallback? onTap;
 
   const _StatData({
     required this.label,
@@ -915,6 +987,7 @@ class _StatData {
     required this.icon,
     required this.color,
     required this.bgColor,
+    this.onTap,
   });
 }
 

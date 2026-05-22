@@ -99,7 +99,7 @@
 
     google_sign_in:
     # firebase_auth: ^5.5.4
-    geocoding: ^2.1.0
+
     http: ^1.2.2
     sms_autofill: ^2.4.1
     skeletonizer:
@@ -117,6 +117,9 @@
     permission_handler: ^11.0.0
     app_links: ^6.0.0
     mime: ^1.0.4
+    geolocator: ^13.0.2
+    geocoding: ^3.0.0
+
 
 
 

@@ -293,14 +293,14 @@ class _FeedScreenState extends State<FeedScreen> {
         ? provider.communityPosts
         : provider.posts;
 
-    final previousCount = posts.length;
+    final previousCount = _allPostsCache.length;
 
+    final newPosts = currentPosts.sublist(previousCount);
     setState(() {
       posts = List.from(currentPosts);
-      _originalPosts = List.from(currentPosts);
-      _allPostsCache = List.from(currentPosts);
+      _originalPosts.addAll(newPosts);
+      _allPostsCache.addAll(newPosts);
       _currentPage++;
-      // ✅ If no new posts were added, there are no more pages
       _hasMorePosts = currentPosts.length > previousCount;
       isLoadingMore = false;
     });
@@ -315,18 +315,69 @@ class _FeedScreenState extends State<FeedScreen> {
       _currentSearchQuery = query;
 
       if (query.isEmpty) {
-        // If search is empty, show original posts
         _isSearching = false;
-        posts = List.from(_originalPosts);
+        posts = List.from(_allPostsCache);
       } else {
-        // Filter posts based on search query
         _isSearching = true;
-        posts = _originalPosts.where((post) {
+        posts = _allPostsCache.where((post) {
           return post.username.toLowerCase().contains(query.toLowerCase()) ||
               post.postContent.toLowerCase().contains(query.toLowerCase());
         }).toList();
       }
     });
+
+    // If searching and results are less than 3, fetch more from server
+    if (query.isNotEmpty) {
+      _fetchMoreForSearch(query);
+    }
+  }
+
+  Future<void> _fetchMoreForSearch(String query) async {
+    final provider = context.read<CommentProvider>();
+    int offset = _allPostsCache.length;
+
+    // Keep fetching until we have enough results or no more posts
+    while (true) {
+      if (isCommunityFeed) {
+        await provider.fetchCommunityPosts(
+          communityId: widget.communityId!,
+          offset: offset,
+          limit: _postsPerPage,
+        );
+      } else {
+        await provider.fetchAllPosts(
+          offset: offset,
+          limit: _postsPerPage,
+          isRefresh: false,
+        );
+      }
+
+      if (!mounted) return;
+
+      final currentPosts =
+      isCommunityFeed ? provider.communityPosts : provider.posts;
+
+      // No new posts came back — stop
+      if (currentPosts.length <= _allPostsCache.length) break;
+
+      final newPosts = currentPosts.sublist(_allPostsCache.length);
+
+      setState(() {
+        _allPostsCache.addAll(newPosts);
+        _originalPosts.addAll(newPosts);
+
+        // Re-filter with updated cache
+        posts = _allPostsCache.where((post) {
+          return post.username.toLowerCase().contains(query.toLowerCase()) ||
+              post.postContent.toLowerCase().contains(query.toLowerCase());
+        }).toList();
+      });
+
+      offset = _allPostsCache.length;
+
+      // Stop if the last fetch returned less than a full page (no more data)
+      if (newPosts.length < _postsPerPage) break;
+    }
   }
 
   Widget _buildProfileImage(String profileImageString, String username,

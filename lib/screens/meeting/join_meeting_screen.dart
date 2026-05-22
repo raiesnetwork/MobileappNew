@@ -28,9 +28,23 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
   void initState() {
     super.initState();
 
-    // ✅ ADD THIS — if opened via deep link, prefill and auto join
     if (widget.prefilledMeetingId != null) {
-      _meetingIdController.text = widget.prefilledMeetingId!;
+      String id = widget.prefilledMeetingId!.trim();
+
+      // ✅ Clean URL to extract just the meeting ID
+      if (id.startsWith('http://') || id.startsWith('https://')) {
+        try {
+          final uri = Uri.parse(id);
+          final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+          if (segments.length >= 2 && segments[0] == 'meeting') {
+            id = segments[1];
+          } else if (segments.isNotEmpty) {
+            id = segments.last;
+          }
+        } catch (_) {}
+      }
+
+      _meetingIdController.text = id; // ✅ Always stores clean ID
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _joinMeeting(context);
       });
@@ -292,7 +306,8 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     if (input.startsWith('http://') || input.startsWith('https://')) {
       try {
         final uri = Uri.parse(input);
-        final segments = uri.pathSegments;
+        // Filter out empty segments caused by trailing slashes
+        final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
         if (segments.length >= 2 && segments[0] == 'meeting') {
           meetingId = segments[1];
         } else if (segments.isNotEmpty) {

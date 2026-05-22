@@ -37,23 +37,31 @@ class ScreenShareService : Service() {
             .setOngoing(true)
             .build()
 
-        // ✅ Use MEDIA_PROJECTION type on Android 10+ (required so flutter_webrtc's
-        // MediaProjection can start). We do NOT pass a token here — we let flutter_webrtc
-        // handle the permission grant entirely. The OS only requires that a FGS with
-        // mediaProjection type is RUNNING before MediaProjection.start() is called.
-        // On Android 14, not passing the token here is fine because flutter_webrtc
-        // already gets the token from its own permission dialog and passes it to
-        // MediaProjectionManager internally.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                1001,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
-            Log.d(TAG, "Started with MEDIA_PROJECTION type")
-        } else {
-            startForeground(1001, notification)
-            Log.d(TAG, "Started plain (Android 9-)")
+        when {
+            // Android 14+ → BOTH mediaProjection + specialUse
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
+                startForeground(
+                    1001,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+                Log.d(TAG, "✅ Started with MEDIA_PROJECTION | SPECIAL_USE (Android 14+)")
+            }
+            // Android 10–13 → mediaProjection only
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                startForeground(
+                    1001,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+                Log.d(TAG, "✅ Started with MEDIA_PROJECTION (Android 10-13)")
+            }
+            // Android 9 and below
+            else -> {
+                startForeground(1001, notification)
+                Log.d(TAG, "✅ Started plain (Android 9-)")
+            }
         }
 
         return START_STICKY
@@ -63,6 +71,7 @@ class ScreenShareService : Service() {
 
     override fun onDestroy() {
         stopForeground(STOP_FOREGROUND_REMOVE)
+        Log.d(TAG, "🛑 ScreenShareService destroyed")
         super.onDestroy()
     }
 }

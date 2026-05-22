@@ -6,6 +6,7 @@ import 'package:ixes.app/constants/constants.dart';
 import 'package:ixes.app/screens/service_request/service_request_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../providers/auth_provider.dart';
 import '../../providers/communities_provider.dart';
 import '../announcement_page/announcement_screen.dart';
 import '../home/feedpage/feed_screen.dart';
@@ -18,6 +19,7 @@ import 'community_services.dart';
 import 'community_stats.dart';
 import 'create_community_screen.dart';
 import 'invite_status_screen.dart';
+import 'mark_attendance_screen.dart';
 
 class CommunityInfoScreen extends StatefulWidget {
   final String communityId;
@@ -1225,6 +1227,24 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         Colors.cyan,
         () => _showExitCommunityDialog(communityId, communityName, provider),
       ),
+      const SizedBox(width: 8),
+      _buildActionButton(
+        Icons.how_to_reg_outlined,
+        Colors.indigo,
+            () {
+          final studentId = context.read<AuthProvider>().user?.id ?? '';
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MarkAttendanceScreen(
+                communityId: communityId,
+                communityName: communityName,
+                studentId: studentId,
+              ),
+            ),
+          );
+        },
+      ),
     ];
 
     final nonAdminButtons = [
@@ -1239,6 +1259,24 @@ class _CommunityInfoScreenState extends State<CommunityInfoScreen> {
         Icons.exit_to_app_outlined,
         Colors.cyan,
         () => _showExitCommunityDialog(communityId, communityName, provider),
+      ),
+      const SizedBox(width: 8),
+      _buildActionButton(
+        Icons.how_to_reg_outlined,
+        Colors.indigo,
+            () {
+          final studentId = context.read<AuthProvider>().user?.id ?? '';
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MarkAttendanceScreen(
+                communityId: communityId,
+                communityName: communityName,
+                studentId: studentId,
+              ),
+            ),
+          );
+        },
       ),
     ];
 

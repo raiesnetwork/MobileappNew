@@ -403,10 +403,10 @@ class _ServiceRequestDetailsScreenState
                 _infoRow('Category', request['category'] ?? 'N/A'),
                 _infoRow('Priority', _priorityLabel(request['priority'] ?? '')),
                 _infoRow('Source', request['source'] ?? 'Manual'),
-                if (request['email'] != null && (request['email'] as String).isNotEmpty)
-                  _infoRow('Email', request['email']),
+                if (request['raisedBy'] is Map && request['raisedBy']?['email'] != null)
+                  _infoRow('Contact', request['raisedBy']['email']),
                 if (request['community'] != null)
-                  _infoRow('Community', request['community']['name'] ?? 'N/A'),
+                  _infoRow('Community', _communityName(request['community'])),
               ],
             ),
           ),
@@ -419,16 +419,16 @@ class _ServiceRequestDetailsScreenState
             child: Column(
               children: [
                 _infoRow('Raised By', _userName(request['raisedBy'])),
-                if (request['raisedBy']?['email'] != null)
-                  _infoRow('Contact', request['raisedBy']['email']),
+                if (request['raisedBy'] is Map &&
+                    (request['raisedBy']['email'] ?? '').toString().isNotEmpty)
+                  _infoRow('Contact', request['raisedBy']['email'].toString()),
                 _infoRow(
                     'Assigned To',
                     request['assignedTo'] != null
                         ? _userName(request['assignedTo'])
                         : 'Not assigned'),
                 if (request['completedBy'] != null)
-                  _infoRow('Completed By',
-                      _userName(request['completedBy'])),
+                  _infoRow('Completed By', _userName(request['completedBy'])),
               ],
             ),
           ),
@@ -756,44 +756,25 @@ class _ServiceRequestDetailsScreenState
   // TAB 3: ATTACHMENTS
   // ─────────────────────────────────────────────
   Widget _buildAttachmentsTab(Map<String, dynamic> request) {
-    final files =
-    List<Map<String, dynamic>>.from(request['files'] ?? []);
+    final files = List<Map<String, dynamic>>.from(request['files'] ?? []);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Upload area
           _buildUploadArea(),
           const SizedBox(height: 16),
-          // Existing files
+
           if (files.isEmpty && _pendingFiles.isEmpty)
             _buildEmptyTab(Icons.attach_file_rounded, 'No attachments',
                 'Upload photos or files to add attachments')
           else ...[
-            if (files.isNotEmpty) ...[
-              Text('Uploaded Files',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey[700])),
-              const SizedBox(height: 10),
-              ...files.map((f) => _buildFileItem(f)).toList(),
-              const SizedBox(height: 16),
-            ],
             if (_pendingFiles.isNotEmpty) ...[
               Text('Pending Upload (${_pendingFiles.length})',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.orange[700])),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.orange[700])),
               const SizedBox(height: 10),
-              ..._pendingFiles
-                  .asMap()
-                  .entries
-                  .map((e) => _buildPendingFile(e.key, e.value))
-                  .toList(),
+              ..._pendingFiles.asMap().entries.map((e) => _buildPendingFile(e.key, e.value)).toList(),
               const SizedBox(height: 16),
               SizedBox(
                 width: double.infinity,
@@ -803,25 +784,26 @@ class _ServiceRequestDetailsScreenState
                     backgroundColor: _accent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   icon: _isUploadingFiles
-                      ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                      ? const SizedBox(width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.cloud_upload_outlined, size: 18),
                   label: Text(
-                    _isUploadingFiles
-                        ? 'Uploading...'
-                        : 'Upload ${_pendingFiles.length} file(s)',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700, fontSize: 14),
+                    _isUploadingFiles ? 'Uploading...' : 'Upload ${_pendingFiles.length} file(s)',
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+            ],
+
+            if (files.isNotEmpty) ...[
+              Text('Uploaded Files',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.grey[700])),
+              const SizedBox(height: 10),
+              ...files.asMap().entries.map((e) => _buildFileItem(e.value, e.key + 1)).toList(),
             ],
           ],
         ],
@@ -981,8 +963,26 @@ class _ServiceRequestDetailsScreenState
 
       if (mounted) {
         if (result['error'] == false) {
+          // ✅ Manually inject uploaded files into currentRequest immediately
+          final provider = Provider.of<ServiceRequestProvider>(context, listen: false);
+          final existingFiles = List<Map<String, dynamic>>.from(
+            provider.currentRequest?['files'] ?? [],
+          );
+          for (final file in _pendingFiles) {
+            existingFiles.add({
+              'fileName': file.path.split('/').last,
+              'fileUrl': '',       // no URL yet — show as pending
+              'uploadedBy': 'You',
+              'uploadedAt': DateTime.now().toIso8601String(),
+            });
+          }
+          provider.injectFiles(existingFiles);
+
           setState(() => _pendingFiles.clear());
           _showSnack('Files uploaded successfully', Colors.green);
+
+          // Also refresh from server to get real URLs
+          await provider.getServiceRequestById(widget.requestId);
         } else {
           _showSnack(result['message'] ?? 'Upload failed', Colors.red);
         }
@@ -993,91 +993,122 @@ class _ServiceRequestDetailsScreenState
   }
 
 
-  Widget _buildFileItem(Map<String, dynamic> file) {
-    final name = file['fileName'] ?? 'Unknown file';
+  // ✅ Updated _buildFileItem with tappable thumbnail
+  Widget _buildFileItem(Map<String, dynamic> file, int index) {
+    final originalName = file['fileName'] ?? 'Unknown file';
     final url = file['fileUrl'] ?? '';
     final uploadedBy = file['uploadedBy'] ?? '';
-    final isImage = name.toLowerCase().endsWith('.jpg') ||
-        name.toLowerCase().endsWith('.jpeg') ||
-        name.toLowerCase().endsWith('.png') ||
-        name.toLowerCase().endsWith('.gif') ||
-        name.toLowerCase().endsWith('.webp');
+    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp']
+        .any((ext) => originalName.toLowerCase().endsWith('.$ext'));
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey[200]!),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 1))
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: isImage
-                  ? Colors.blue.withOpacity(0.08)
-                  : Colors.grey[100],
-              borderRadius: BorderRadius.circular(8),
+    // ✅ Rename display name
+    final ext = originalName.contains('.')
+        ? originalName.split('.').last.toLowerCase()
+        : '';
+    final displayName = isImage
+        ? 'Image $index${ext.isNotEmpty ? '.$ext' : ''}'
+        : 'File $index${ext.isNotEmpty ? '.$ext' : ''}';
+
+    return GestureDetector(
+      onTap: (isImage && url.isNotEmpty)
+          ? () => _openFullscreen(url, displayName)
+          : url.isNotEmpty
+          ? () async {
+        try { await launchUrl(Uri.parse(url)); } catch (_) { _showSnack('Cannot open file', Colors.red); }
+      }
+          : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.grey[200]!),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 6, offset: const Offset(0, 1))],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: isImage ? Colors.blue.withOpacity(0.08) : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: isImage && url.isNotEmpty
+                  ? ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        Icon(Icons.image_outlined, color: Colors.blue[400], size: 22)),
+              )
+                  : Icon(
+                isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+                color: isImage ? Colors.blue[400] : Colors.grey[500],
+                size: 22,
+              ),
             ),
-            child: isImage && url.isNotEmpty
-                ? ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(url,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(
-                      Icons.image_outlined,
-                      color: Colors.blue[400],
-                      size: 22)),
-            )
-                : Icon(
-              isImage
-                  ? Icons.image_outlined
-                  : Icons.insert_drive_file_outlined,
-              color: isImage ? Colors.blue[400] : Colors.grey[500],
-              size: 22,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(displayName,  // ✅ shows "Image 1.jpg" instead of "scaled100.jpg"
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  if (uploadedBy.isNotEmpty)
+                    Text('by $uploadedBy',
+                        style: TextStyle(fontSize: 11, color: Colors.grey[500])),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis),
-                if (uploadedBy.isNotEmpty)
-                  Text('by $uploadedBy',
-                      style: TextStyle(
-                          fontSize: 11, color: Colors.grey[500])),
-              ],
+            Icon(
+              isImage ? Icons.fullscreen_rounded : Icons.open_in_new_rounded,
+              size: 18,
+              color: Colors.grey[400],
             ),
-          ),
-          if (url.isNotEmpty)
-            IconButton(
-              icon: Icon(Icons.open_in_new_rounded,
-                  size: 18, color: _accent),
-              onPressed: () async {
-                try {
-                  await launchUrl(Uri.parse(url));
-                } catch (_) {
-                  _showSnack('Cannot open file', Colors.red);
-                }
-              },
-            ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+  // ✅ Add this new method anywhere in the class
+  void _openFullscreen(String url, String name) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text(name, style: const TextStyle(fontSize: 14)),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.open_in_new_rounded),
+              onPressed: () async {
+                try { await launchUrl(Uri.parse(url)); } catch (_) {}
+              },
+            ),
+          ],
+        ),
+        body: Center(
+          child: InteractiveViewer(
+            minScale: 0.5,
+            maxScale: 4.0,
+            child: Image.network(
+              url,
+              fit: BoxFit.contain,
+              loadingBuilder: (_, child, progress) => progress == null
+                  ? child
+                  : const Center(child: CircularProgressIndicator(color: Colors.white)),
+              errorBuilder: (_, __, ___) =>
+              const Icon(Icons.broken_image, color: Colors.white, size: 48),
+            ),
+          ),
+        ),
+      ),
+    ));
   }
 
   Widget _buildPendingFile(int index, File file) {
@@ -1365,6 +1396,12 @@ class _ServiceRequestDetailsScreenState
       RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     ));
   }
+  String _communityName(dynamic c) {
+    if (c == null) return 'N/A';
+    if (c is String) return c;
+    if (c is Map) return c['name'] ?? 'N/A';
+    return 'N/A';
+  }
 
   Color _statusColor(String s) {
     switch (s) {
@@ -1402,9 +1439,22 @@ class _ServiceRequestDetailsScreenState
     return p.isEmpty ? 'UNKNOWN' : p.toUpperCase();
   }
 
-  String _userName(Map<String, dynamic>? u) {
+  String _userName(dynamic u) {
     if (u == null) return 'N/A';
-    return u['profile']?['name'] ?? u['email'] ?? 'Unknown';
+    if (u is String) return u.isNotEmpty ? 'User' : 'N/A'; // plain unpopulated ID
+    if (u is Map) {
+      final name = u['profile']?['name']?.toString() ?? '';
+      final email = u['email']?.toString() ?? '';
+      final mobile = u['mobile']?.toString() ?? '';
+      return name.isNotEmpty
+          ? name
+          : email.isNotEmpty
+          ? email
+          : mobile.isNotEmpty
+          ? mobile
+          : 'Unknown';
+    }
+    return 'Unknown';
   }
 
   String _formatDetailed(String? d) {
