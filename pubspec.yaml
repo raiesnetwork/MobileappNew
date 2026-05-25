@@ -126,7 +126,7 @@
 
 
     open_file: ^3.5.9
-    socket_io_client: ^2.0.3+1
+    socket_io_client: ^3.1.2
 
   #  font_awesome_flutter: ^10.7.0
 

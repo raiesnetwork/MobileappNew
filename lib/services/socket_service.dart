@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:ixes.app/constants/apiConstants.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -82,20 +83,19 @@ class SocketService {
         await _disposeSocket();
       }
 
-      const String serverUrl = 'https://api.ixes.ai';
-      print('🌐 [SOCKET] Connecting to: $serverUrl for user $userId');
+      print('🌐 [SOCKET] Connecting to: $apiBaseUrl for user $userId');
 
       _socket = IO.io(
-        serverUrl,
+        apiBaseUrl,
         IO.OptionBuilder()
-            .setTransports(['polling', 'websocket'])
+            .setTransports(['websocket'])
+            .enableAutoConnect()
+      .enableReconnection()
+      .setReconnectionAttempts(5)
+      .setReconnectionDelay(3000)
+      .setTimeout(30000)
             .setQuery({'userId': userId, 'token': token})
-            .enableForceNew()
-            .enableReconnection()
-            .setReconnectionAttempts(999999)
-            .setReconnectionDelay(2000)
-            .setTimeout(45000)
-            .disableAutoConnect()
+            
             .build(),
       );
 
