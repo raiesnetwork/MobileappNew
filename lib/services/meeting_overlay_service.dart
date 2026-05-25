@@ -349,11 +349,11 @@ class MeetingOverlayService extends ChangeNotifier {
       child: CircleAvatar(
         radius: 30,
         backgroundColor: const Color(0xFF2196F3),
-        child: Text(
-          _localParticipant!.identity.substring(0, 1).toUpperCase(),
-          style: const TextStyle(
+        child: const Text(
+          'You',
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 24,
+            fontSize: 18,
             fontWeight: FontWeight.bold,
           ),
         ),

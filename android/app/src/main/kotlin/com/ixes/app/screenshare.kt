@@ -14,13 +14,49 @@ class ScreenShareService : Service() {
 
     companion object {
         private const val TAG = "ScreenShareService"
+        private const val CHANNEL_ID = "screen_share_channel"
+        private const val NOTIFICATION_ID = 1001
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val channelId = "screen_share_channel"
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("Screen Sharing Active")
+            .setContentText("Ixes is sharing your screen")
+            .setSmallIcon(android.R.drawable.ic_menu_slideshow)
+            .setOngoing(true)
+            .build()
 
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+                Log.d(TAG, "✅ Started with MEDIA_PROJECTION")
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+                Log.d(TAG, "✅ Started plain (Android 9-)")
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "❌ SecurityException: ${e.message}")
+            stopSelf()
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to start: ${e.message}")
+            stopSelf()
+        }
+
+        return START_STICKY
+    }
+
+    private fun createNotificationChannel() {
         val channel = NotificationChannel(
-            channelId,
+            CHANNEL_ID,
             "Screen Sharing",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
@@ -29,48 +65,17 @@ class ScreenShareService : Service() {
         }
         getSystemService(NotificationManager::class.java)
             .createNotificationChannel(channel)
-
-        val notification = Notification.Builder(this, channelId)
-            .setContentTitle("Screen Sharing Active")
-            .setContentText("Ixes is sharing your screen")
-            .setSmallIcon(android.R.drawable.ic_menu_slideshow)
-            .setOngoing(true)
-            .build()
-
-        when {
-            // Android 14+ → BOTH mediaProjection + specialUse
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
-                startForeground(
-                    1001,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                )
-                Log.d(TAG, "✅ Started with MEDIA_PROJECTION | SPECIAL_USE (Android 14+)")
-            }
-            // Android 10–13 → mediaProjection only
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
-                startForeground(
-                    1001,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                )
-                Log.d(TAG, "✅ Started with MEDIA_PROJECTION (Android 10-13)")
-            }
-            // Android 9 and below
-            else -> {
-                startForeground(1001, notification)
-                Log.d(TAG, "✅ Started plain (Android 9-)")
-            }
-        }
-
-        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         Log.d(TAG, "🛑 ScreenShareService destroyed")
         super.onDestroy()
     }

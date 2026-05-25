@@ -84,10 +84,12 @@ class ApiService {
   }
 
   static void _handleResponse(http.Response response) {
-    if ((response.statusCode == 401 || response.statusCode == 403)
-        && onUnauthorized != null) {
+    if (response.statusCode == 401 && onUnauthorized != null) {
+      print('🔐 [AUTH] 401 Unauthorized — logging out');
       onUnauthorized!();
     }
+    // 403 is "Forbidden" — request was rejected for some other reason,
+    // not because the session expired. Don't logout the user for that.
   }
 
   static String _clean(String endpoint) {

@@ -521,8 +521,7 @@ class _AnimatedCampaignCardState extends State<_AnimatedCampaignCard>
                 Container(height: 1, color: _border),
 
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   child: Row(
                     children: [
                       _FooterChip(
@@ -531,6 +530,7 @@ class _AnimatedCampaignCardState extends State<_AnimatedCampaignCard>
                         color: _textMuted,
                       ),
                       const Spacer(),
+                      // Unpaid — visible to all members
                       _ActionBtn(
                         icon: Icons.group_add_outlined,
                         label: 'Unpaid',
@@ -548,23 +548,26 @@ class _AnimatedCampaignCardState extends State<_AnimatedCampaignCard>
                           );
                         },
                       ),
-                      const SizedBox(width: 8),
-                      _ActionBtn(
-                        icon: Icons.people_rounded,
-                        label: 'Members',
-                        color: _accent,
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CampaignMembersScreen(
-                                campaignId: campaign['_id'],
+                      // Members — admin only
+                      if (campaign['isUserAdmin'] == true) ...[
+                        const SizedBox(width: 8),
+                        _ActionBtn(
+                          icon: Icons.people_rounded,
+                          label: 'Members',
+                          color: _accent,
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => CampaignMembersScreen(
+                                  campaignId: campaign['_id'],
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                      ),
+                            );
+                          },
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -756,54 +759,52 @@ class _AnimatedCampaignCardState extends State<_AnimatedCampaignCard>
                       ),
                       const SizedBox(height: 24),
 
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _SheetButton(
-                              label: 'All Members',
-                              icon: Icons.people_rounded,
-                              color: _accent,
-                              onTap: () {
-                                Navigator.pop(context);
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        CampaignMembersScreen(
+                      if (campaign['isUserAdmin'] == true)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SheetButton(
+                                label: 'Unpaid',
+                                icon: Icons.schedule_rounded,
+                                color: _gold,
+                                outline: true,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => UnpaidCommunityMembersScreen(
+                                        communityId: campaign['community']?['_id'] ?? '',
+                                        campaignId: campaign['_id'],
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            if (campaign['isUserAdmin'] == true) ...[
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _SheetButton(
+                                  label: 'All Members',
+                                  icon: Icons.people_rounded,
+                                  color: _accent,
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => CampaignMembersScreen(
                                           campaignId: campaign['_id'],
                                         ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: _SheetButton(
-                              label: 'Unpaid',
-                              icon: Icons.schedule_rounded,
-                              color: _gold,
-                              outline: true,
-                              onTap: () {
-                                Navigator.pop(context);
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) =>
-                                        UnpaidCommunityMembersScreen(
-                                          communityId:
-                                          campaign['community']
-                                          ?['_id'] ??
-                                              '',
-                                          campaignId: campaign['_id'],
-                                        ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                       const SizedBox(height: 32),
                     ],
                   ),

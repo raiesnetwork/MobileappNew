@@ -514,25 +514,55 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
+// Add these fields near your other _myProducts fields
+  int _currentPage = 1;
+  int _totalPages = 1;
+  bool _isLoadingMore = false;
+
+  bool get isLoadingMore => _isLoadingMore;
+  bool get hasMoreProducts => _currentPage < _totalPages;
+
+// Replace your existing fetchMyProducts with this
   Future<void> fetchMyProducts() async {
+    _currentPage = 1;
+    _myProducts = [];
     _isMyProductsLoading = true;
     _hasMyProductsError = false;
     _myProductsMessage = '';
-    _myProducts = [];
     notifyListeners();
 
-    final response = await _service.getMyProducts();
+    final response = await _service.getMyProducts(page: 1);
+
     if (!response['error']) {
-      _myProducts = response['data'] ?? [];
-      _myProductsMessage =
-          response['message'] ?? 'Products fetched successfully';
+      _myProducts = List.from(response['data'] ?? []);
+      _totalPages = response['totalPages'] ?? 1;
+      _myProductsMessage = response['message'] ?? 'Success';
     } else {
       _hasMyProductsError = true;
-      _myProductsMessage = response['message'] ?? 'Failed to fetch products';
-      _myProducts = [];
+      _myProductsMessage = response['message'] ?? 'Failed';
     }
 
     _isMyProductsLoading = false;
+    notifyListeners();
+  }
+
+// Add this new method
+  Future<void> loadMoreProducts() async {
+    if (_isLoadingMore || !hasMoreProducts) return;
+
+    _isLoadingMore = true;
+    notifyListeners();
+
+    final nextPage = _currentPage + 1;
+    final response = await _service.getMyProducts(page: nextPage);
+
+    if (!response['error']) {
+      _myProducts.addAll(response['data'] ?? []);
+      _currentPage = nextPage;
+      _totalPages = response['totalPages'] ?? _totalPages;
+    }
+
+    _isLoadingMore = false;
     notifyListeners();
   }
 
@@ -661,9 +691,9 @@ class ServicesProvider with ChangeNotifier {
   List<dynamic> _myBookings = [];
   bool _isLoadingBookings = false;
   String _bookingsError = '';
-  int _currentPage = 1;
+
   int _totalBookings = 0;
-  int _totalPages = 0;
+
   String? _paymentStatusFilter;
 
   // Bookings getters

@@ -2,6 +2,7 @@ package com.ixes.app
 
 import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import io.flutter.embedding.android.FlutterActivity
@@ -15,7 +16,6 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        // ── Existing screen share channel ──────────────────────────────
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -36,24 +36,18 @@ class MainActivity : FlutterActivity() {
                 }
             }
 
-        // ── New call channel ───────────────────────────────────────────
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                result.notImplemented()
-            }
+            .setMethodCallHandler { _, result -> result.notImplemented() }
 
-        // ── Create notification channel for calls ──────────────────────
         createCallNotificationChannel()
     }
 
-    // Called when app is already running and a new intent arrives
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleCallIntent(intent)
     }
 
-    // Called when app launches fresh from a notification tap
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleCallIntent(intent)
     }
@@ -66,9 +60,6 @@ class MainActivity : FlutterActivity() {
         val callerId   = intent.getStringExtra("callerId")   ?: return
         val callerName = intent.getStringExtra("callerName") ?: "Incoming Call"
 
-        android.util.Log.d("IXES_CALL", "📲 handleCallIntent: type=$type room=$roomName")
-
-        // Send to Flutter — engine may not be ready yet, so post with delay
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
                 MethodChannel(messenger, CALL_CHANNEL).invokeMethod(
@@ -77,12 +68,11 @@ class MainActivity : FlutterActivity() {
                         "type"       to type,
                         "roomName"   to roomName,
                         "callerId"   to callerId,
-                        "callerName" to callerName,
+                        "callerName" to callerName
                     )
                 )
-                android.util.Log.d("IXES_CALL", "✅ Sent incomingCall to Flutter")
             }
-        }, 2000) // 2s delay — wait for Flutter engine to be ready
+        }, 2000)
     }
 
     private fun createCallNotificationChannel() {

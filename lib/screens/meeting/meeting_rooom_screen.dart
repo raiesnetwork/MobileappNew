@@ -218,16 +218,29 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
     if (Platform.isAndroid) {
       try {
         await _screenShareChannel.invokeMethod('startScreenShareService');
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 800));
       } catch (e) {
-        debugPrint('⚠️ Could not start screen share service: $e');
         _showScreenShareError('Could not start screen share service: $e');
         return;
       }
     }
 
-    await _localParticipant!.setScreenShareEnabled(true);
-    if (mounted) setState(() => _isScreenSharing = true);
+    try {
+      await _localParticipant!.setScreenShareEnabled(
+        true,
+        screenShareCaptureOptions: const ScreenShareCaptureOptions(
+          useiOSBroadcastExtension: false,
+          captureScreenAudio: false,
+          maxFrameRate: 15,
+        ),
+      );
+      if (mounted) setState(() => _isScreenSharing = true);
+    } catch (e) {
+      if (Platform.isAndroid) {
+        _screenShareChannel.invokeMethod('stopScreenShareService').catchError((_) {});
+      }
+      _showScreenShareError('Screen sharing was cancelled or failed.');
+    }
   }
 
   Future<void> _stopScreenShare() async {

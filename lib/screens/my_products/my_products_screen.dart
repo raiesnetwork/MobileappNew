@@ -18,6 +18,7 @@ class MyProductsScreen extends StatefulWidget {
 class _MyProductsScreenState extends State<MyProductsScreen> {
   String _selectedPriceOption = 'all';
   String _searchQuery = '';
+  final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -29,11 +30,20 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
         provider.fetchMyProducts();
       }
     });
+
+    // Load more when user scrolls within 300px of the bottom
+    _scrollController.addListener(() {
+      if (_scrollController.position.pixels >=
+          _scrollController.position.maxScrollExtent - 300) {
+        context.read<ServicesProvider>().loadMoreProducts();
+      }
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -344,16 +354,27 @@ class _MyProductsScreenState extends State<MyProductsScreen> {
                 ),
               )
                   : GridView.builder(
+                controller: _scrollController,       // 👈 add this line
                 padding: const EdgeInsets.all(16.0),
-                gridDelegate:
-                const SliverGridDelegateWithFixedCrossAxisCount(
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
                   crossAxisSpacing: 12,
                   mainAxisSpacing: 12,
                   childAspectRatio: 0.75,
                 ),
-                itemCount: filteredProducts.length,
+                // 👇 +1 extra slot for the bottom loader
+                itemCount: filteredProducts.length +
+                    (servicesProvider.isLoadingMore ? 1 : 0),
                 itemBuilder: (context, index) {
+                  // Show loader as last item
+                  if (index >= filteredProducts.length) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
                   final product = filteredProducts[index];
                   return ProductGridCard(
                     product: product,

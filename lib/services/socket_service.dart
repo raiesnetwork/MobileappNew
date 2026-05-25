@@ -54,13 +54,8 @@ class SocketService {
     } catch (_) {}
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  CONNECT
-  // ════════════════════════════════════════════════════════════════════════
   Future<bool> connect() async {
-    if (_isConnected && _socket != null) {
-      return true;
-    }
+    if (_isConnected && _socket != null) return true;
 
     if (_isConnecting) {
       int attempts = 0;
@@ -83,21 +78,23 @@ class SocketService {
         return false;
       }
 
-
       if (_socket != null) {
         await _disposeSocket();
       }
 
+      const String serverUrl = 'https://api.ixes.ai';
+      print('🌐 [SOCKET] Connecting to: $serverUrl for user $userId');
+
       _socket = IO.io(
-        'wss//api.ixes.ai',
+        serverUrl,
         IO.OptionBuilder()
             .setTransports(['polling', 'websocket'])
-            .setQuery({'userId': userId})
+            .setQuery({'userId': userId, 'token': token})
             .enableForceNew()
             .enableReconnection()
             .setReconnectionAttempts(999999)
             .setReconnectionDelay(2000)
-            .setTimeout(20000)
+            .setTimeout(45000)
             .disableAutoConnect()
             .build(),
       );
@@ -107,17 +104,11 @@ class SocketService {
         _isConnecting = false;
         _reconnectCount = 0;
         _safeAdd(_connectionController, true);
-
-        try {
-          _socket!.emit("joinUser", userId);
-        } catch (_) {}
-
+        try { _socket!.emit("joinUser", userId); } catch (_) {}
         _cancelReconnectTimer();
-
         if (!_socketReadyController.isClosed && _socket != null) {
           _safeAdd(_socketReadyController, _socket!);
         }
-
         print('✅ Socket connected: ${_socket?.id}');
       });
 
@@ -144,12 +135,7 @@ class SocketService {
         _startReconnectTimer();
       });
 
-      _socket!.onAny((event, data) {
-        print('🔔 [Socket ANY] event=$event | data=$data');
-      });
-
       _setupEventListeners();
-
       _socket!.connect();
 
       return true;
@@ -166,9 +152,7 @@ class SocketService {
     return false;
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  EVENT LISTENERS
-  // ════════════════════════════════════════════════════════════════════════
+
   void _setupEventListeners() {
     if (_socket == null) return;
 

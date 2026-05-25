@@ -538,9 +538,6 @@ Future<void> _initFCM() async {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Startup: restore pending call if app launched by CallKit accept
-// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _checkActiveCallsOnStartup() async {
   try {
@@ -575,63 +572,58 @@ Future<void> _checkActiveCallsOnStartup() async {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// main()
-// ─────────────────────────────────────────────────────────────────────────────
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  // Catch all uncaught async errors (including SocketException)
+  runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await Firebase.initializeApp();
 
-  print('\n');
-  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  print('🚀 APP STARTED');
-  print('📱 Platform: ${Platform.operatingSystem}');
-  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    // Silence specific noisy exceptions
+    FlutterError.onError = (FlutterErrorDetails details) {
+      final ex = details.exception.toString();
+      if (ex.contains('Reading from a closed socket') ||
+          ex.contains('SocketException')) {
+        // swallow — known noise from socket.io polling reconnects
+        return;
+      }
+      FlutterError.presentError(details);
+    };
 
-  FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
+    print('\n');
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    print('🚀 APP STARTED');
+    print('📱 Platform: ${Platform.operatingSystem}');
+    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  await _initFCM();
-  await _checkActiveCallsOnStartup();
+    FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
 
-  // ... existing setup ...
+    await _initFCM();
+    await _checkActiveCallsOnStartup();
 
-  final prefs    = await SharedPreferences.getInstance();
-  final token    = prefs.getString('auth_token');
-  final userId   = prefs.getString('user_id');
-  final language = prefs.getString('app_language');
+    final prefs    = await SharedPreferences.getInstance();
+    final token    = prefs.getString('auth_token');
+    final userId   = prefs.getString('user_id');
+    final language = prefs.getString('app_language');
 
-  print('🔐 authToken exists = ${token != null}');
-  print('👤 userId = $userId');
+    print('🔐 authToken exists = ${token != null}');
+    print('👤 userId = $userId');
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  🧪 RAW SOCKET TEST — bypass entire SocketService
-  // ════════════════════════════════════════════════════════════════════════
-  Future.delayed(const Duration(seconds: 5), () {
-    print('🧪 [TEST] Starting RAW socket test v2 (Map config)');
-
-    final testSocket = IO.io(
-      'http://10.116.128.61:5000',
-      <String, dynamic>{
-        'transports': ['polling'],
-        'autoConnect': true,
-        'forceNew': true,
-        'query': {'userId': 'test_raw_123'},
-      },
-    );
-
-    testSocket.onConnect((_) => print('🧪 ✅ CONNECTED: ${testSocket.id}'));
-    testSocket.onConnectError((e) => print('🧪 ❌ CONNECT ERR: $e'));
-    testSocket.onError((e) => print('🧪 💥 ERR: $e'));
-    testSocket.onDisconnect((r) => print('🧪 🔌 DISCONNECTED: $r'));
-    testSocket.onAny((event, data) => print('🧪 🔔 event=$event | data=$data'));
+    runApp(IxesApp(
+      initialToken:  token,
+      initialUserId: userId,
+      showLanguage:  language == null,
+    ));
+  }, (error, stack) {
+    // Catches errors that escape the Flutter error handler
+    final msg = error.toString();
+    if (msg.contains('Reading from a closed socket') ||
+        msg.contains('SocketException')) {
+      // swallow silently
+      return;
+    }
+    print('💥 Uncaught zone error: $error');
   });
-
-  runApp(IxesApp(
-    initialToken:  token,
-    initialUserId: userId,
-    showLanguage:  language == null,
-  ));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1385,6 +1377,12 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildApp(home: const SplashScreen());
       }
 
+      // ── Path B.5: auth loaded, NOT authenticated — keep SplashScreen mounted
+      //    so its 3-second timer can run and navigate to language/login
+      if (!auth.isAuthenticated) {
+        return _buildApp(home: const SplashScreen());
+      }
+
       // ── Path C: authenticated — normal boot ─────────────────────────────
       if (auth.isAuthenticated && auth.user != null) {
         final user = auth.user!;
@@ -1409,17 +1407,13 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         });
       }
 
-      // ── Path D: render home ─────────────────────────────────────────────
+      // ── Path D: render home (authenticated only — unauthenticated handled at Path B.5)
       return _buildApp(
-        home: auth.isAuthenticated
-            ? VoiceCallListener(
+        home: VoiceCallListener(
           child: IncomingCallListener(
             child: MainScreen(key: mainScreenKey, initialIndex: 0),
           ),
-        )
-            : widget.showLanguage
-            ? const LanguageSelectionScreen()
-            : const SplashScreen(),
+        ),
       );
     });
   }

@@ -436,40 +436,29 @@ class ServicesService {
     }
   }
 
-  Future<Map<String, dynamic>> getMyProducts() async {
+  Future<Map<String, dynamic>> getMyProducts({int page = 1}) async {
     try {
-      final response = await ApiService.get('/api/mobile/all-products');
+      final response = await ApiService.get('/api/mobile/all-products?page=$page');
       ApiService.checkResponse(response);
-
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');   // Keep this for debugging
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
+        final products = decoded['data']?['products'] as List? ?? [];
+        final totalPages = decoded['data']?['totalPages'] as int? ?? 1;
 
-        // Correct parsing for your actual API structure
-        final productsList = decoded['data']?['products'] ?? [];
+        print('📦 Page $page loaded: ${products.length} products (totalPages: $totalPages)');
 
         return {
-          'error': decoded['error'] ?? false,
-          'message': decoded['message'] ?? 'Products fetched successfully',
-          'data': productsList,        // ← Now correctly passing the products list
+          'error': false,
+          'message': 'Success',
+          'data': products,
+          'totalPages': totalPages,
         };
       } else {
-        final decoded = jsonDecode(response.body);
-        return {
-          'error': true,
-          'message': decoded['message'] ?? 'Failed to fetch products',
-          'data': []
-        };
+        return {'error': true, 'message': 'Failed', 'data': [], 'totalPages': 1};
       }
     } catch (e) {
-      print('❌ Error in getMyProducts: $e');
-      return {
-        'error': true,
-        'message': 'Error fetching products: ${e.toString()}',
-        'data': []
-      };
+      return {'error': true, 'message': '$e', 'data': [], 'totalPages': 1};
     }
   }
 

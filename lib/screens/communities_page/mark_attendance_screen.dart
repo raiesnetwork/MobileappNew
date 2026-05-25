@@ -531,6 +531,7 @@ class _AlreadyMarkedView extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
+
           // Status pill
           Container(
             padding:
