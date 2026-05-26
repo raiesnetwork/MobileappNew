@@ -171,31 +171,62 @@ class CampaignProvider with ChangeNotifier {
   }
 
   String? getCampaignImageUrl(Map<String, dynamic> campaign) {
-    final imageFields = ['coverImage', 'coverImageUrl', 'image'];
+    final imageFields = ['coverImage', 'coverImageUrl', 'image', 'cover_image'];
 
     for (final field in imageFields) {
-      if (campaign[field] != null && campaign[field].toString().isNotEmpty) {
-        String imageUrl = campaign[field].toString().trim();
-        String originalUrl = imageUrl;
+      final raw = campaign[field];
+      if (raw == null) continue;
 
-        if (imageUrl.startsWith('http://') ||
-            imageUrl.startsWith('https://') ||
-            imageUrl.contains('amazonaws.com') ||
-            imageUrl.contains('cloudfront.net')) {
-          print('🌐 Using full URL: $imageUrl');
-          return imageUrl;
-        }
+      String imageUrl = raw.toString().trim();
+      if (imageUrl.isEmpty) continue;
 
-        if (imageUrl.isNotEmpty) {
-          imageUrl = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
-          final finalUrl = '${apiBaseUrl}$imageUrl';
-          print('🔗 Converted "$originalUrl" → "$finalUrl"');
-          return finalUrl;
-        }
+      // Filter out junk values
+      if (imageUrl == 'null' ||
+          imageUrl == 'undefined' ||
+          imageUrl == '[object Object]' ||
+          imageUrl.toLowerCase() == 'false') {
+        continue;
       }
+
+      // 1. Base64 data URL
+      if (imageUrl.startsWith('data:')) {
+        return imageUrl;
+      }
+
+      // 2. Full HTTPS URL
+      if (imageUrl.startsWith('https://')) {
+        return imageUrl;
+      }
+
+      // 3. HTTP → upgrade to HTTPS
+      if (imageUrl.startsWith('http://')) {
+        return imageUrl.replaceFirst('http://', 'https://');
+      }
+
+      // 4. S3 hostname without scheme
+      if (imageUrl.contains('amazonaws.com') ||
+          imageUrl.contains('cloudfront.net')) {
+        return 'https://$imageUrl';
+      }
+
+      // 5. Bare S3 key (e.g. "uuid-filename.jpg")
+      final lower = imageUrl.toLowerCase();
+      final looksLikeImage = lower.endsWith('.jpg') ||
+          lower.endsWith('.jpeg') ||
+          lower.endsWith('.png') ||
+          lower.endsWith('.webp') ||
+          lower.endsWith('.gif');
+
+      if (looksLikeImage && !imageUrl.contains(' ')) {
+        final key = imageUrl.startsWith('/') ? imageUrl.substring(1) : imageUrl;
+        const bucket = 'ixescloudpublic';
+        const region = 'ap-south-1';
+        return 'https://$bucket.s3.$region.amazonaws.com/$key';
+      }
+
+      print('⚠️ Unrecognized image format for ${campaign['_id']}: "$imageUrl"');
     }
 
-    print('⚠️ No image URL found for campaign: ${campaign['_id']}');
     return null;
   }
 

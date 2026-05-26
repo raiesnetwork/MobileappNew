@@ -8,6 +8,8 @@ import 'campaign_members.dart';
 import 'campaigns_info screen.dart';
 import 'create_campaign_screen.dart';
 import '../home/feedpage/sharepost_screen.dart';
+import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class CampaignsScreen extends StatefulWidget {
   final Widget Function(String?, {bool isProfileImage}) buildImageWidget;
@@ -177,45 +179,110 @@ class _CampaignsScreenState extends State<CampaignsScreen>
     );
   }
 
-  Widget _buildCampaignImage(String imageUrl) {
-    try {
-      if (imageUrl.isEmpty) return _buildImagePlaceholder();
-      if (imageUrl.startsWith('http://') ||
-          imageUrl.startsWith('https://') ||
-          imageUrl.contains('amazonaws.com') ||
-          imageUrl.contains('cloudfront.net')) {
-        return Image.network(
-          imageUrl,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return Container(
-              color: const Color(0xFFF3F4F6),
-              child: const Center(
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Primary),
-              ),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) =>
-              _buildImagePlaceholder(),
-        );
-      } else {
-        return widget.buildImageWidget(imageUrl, isProfileImage: false);
+  String? getCampaignImageUrl(Map<String, dynamic> campaign) {
+    final imageFields = ['coverImage', 'coverImageUrl', 'image', 'cover_image'];
+
+    for (final field in imageFields) {
+      final raw = campaign[field];
+      if (raw == null) continue;
+
+      String imageUrl = raw.toString().trim();
+      if (imageUrl.isEmpty) continue;
+
+      // Filter out junk values
+      if (imageUrl == 'null' ||
+          imageUrl == 'undefined' ||
+          imageUrl == '[object Object]' ||
+          imageUrl.toLowerCase() == 'false') {
+        continue;
       }
-    } catch (e) {
-      return _buildImagePlaceholder();
+
+      // 1. Base64 data URL
+      if (imageUrl.startsWith('data:')) {
+        return imageUrl;
+      }
+
+      // 2. Full HTTPS URL
+      if (imageUrl.startsWith('https://')) {
+        return imageUrl;
+      }
+
+      // 3. HTTP → upgrade to HTTPS
+      if (imageUrl.startsWith('http://')) {
+        return imageUrl.replaceFirst('http://', 'https://');
+      }
+
+      // 4. S3 hostname without scheme
+      if (imageUrl.contains('amazonaws.com') ||
+          imageUrl.contains('cloudfront.net')) {
+        return 'https://$imageUrl';
+      }
+
+// 5. Bare filename — likely stale seed data, skip to show placeholder
+      print('⚠️ Skipping bare filename for ${campaign['_id']}: "$imageUrl"');
     }
+
+    return null;
   }
 
-  Widget _buildImagePlaceholder() {
+  Widget _buildCampaignImage(String rawCoverImage) {
+    // Wrap the raw string in a map so getCampaignImageUrl can process it
+    final imageUrl = getCampaignImageUrl({'coverImage': rawCoverImage});
+
+    if (imageUrl == null) {
+      return _buildImagePlaceholder(isError: false);
+    }
+
+    // Handle base64 inline
+    if (imageUrl.startsWith('data:')) {
+      try {
+        final base64Data = imageUrl.split(',').last;
+        return Image.memory(
+          base64Decode(base64Data),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _buildImagePlaceholder(isError: true),
+        );
+      } catch (e) {
+        print('❌ Base64 decode failed: $e');
+        return _buildImagePlaceholder(isError: true);
+      }
+    }
+
+    // Network image
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      placeholder: (_, __) => _buildImagePlaceholder(isLoading: true),
+      errorWidget: (_, url, error) {
+        print('❌ Image load failed: $url → $error');
+        return _buildImagePlaceholder(isError: true);
+      },
+    );
+  }
+
+  Widget _buildImagePlaceholder({bool isError = false, bool isLoading = false}) {
     return Container(
       decoration: const BoxDecoration(color: _accentLight),
-      child: const Center(
-        child: Icon(Icons.campaign_outlined, color: _accent, size: 36),
+      child: Center(
+        child: isLoading
+            ? const SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            color: _accent,
+            strokeWidth: 2,
+          ),
+        )
+            : Icon(
+          isError ? Icons.broken_image_outlined : Icons.campaign_outlined,
+          color: _accent,
+          size: 36,
+        ),
       ),
     );
   }
+
+
 
   @override
   Widget build(BuildContext context) {

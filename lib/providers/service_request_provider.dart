@@ -202,25 +202,27 @@ class ServiceRequestProvider extends ChangeNotifier {
         files: files,
       );
 
-      if (response['error'] == false) {
-        _error = null;
+      if (response['data'] != null) {
+        final newData = Map<String, dynamic>.from(
+            response['data'] as Map<String, dynamic>);
 
-        if (response['data'] != null) {
-          _currentRequest = Map<String, dynamic>.from(
-              response['data'] as Map<String, dynamic>);
-        } else if (files != null && files.isNotEmpty && _currentRequest != null) {
-          // Backend didn't return updated data — keep existing currentRequest
-          // and call getServiceRequestById to get the latest including new files
-          await getServiceRequestById(requestId);
+        // ✅ Backend doesn't return files on PUT — preserve existing ones
+        if (newData['files'] == null && _currentRequest?['files'] != null) {
+          newData['files'] = _currentRequest!['files'];
         }
 
-        // FIX 2: Notify immediately so screen re-renders with new
-        // data before the list refresh below completes.
-        _isLoading = false;
-        notifyListeners();
+        _currentRequest = newData;
+      }
 
-        // Refresh the list in the background (non-blocking for UI).
-        await fetchServiceRequests(communityId: communityId);
+      _isLoading = false;
+      notifyListeners();
+
+      await fetchServiceRequests(communityId: communityId);
+
+// ✅ Always refresh from server to get real file URLs after upload
+      if (files != null && files.isNotEmpty) {
+        await getServiceRequestById(requestId);
+
 
         return {
           'error': false,

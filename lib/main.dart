@@ -6,7 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
 import 'package:ixes.app/providers/attendance_provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:flutter_background/flutter_background.dart';
+
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';

@@ -1,14 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:ixes.app/constants/constants.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../providers/communities_provider.dart';
-import '../service_request/service_request_screen.dart';
 import 'community_info_screen.dart';
 import 'create_community_screen.dart';
 
@@ -26,15 +22,12 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   int _currentPage = 1;
   bool _isLoadingMore = false;
   Timer? _debounce;
-  List<dynamic> _filteredCommunities = [];
-  List<dynamic> _allLoadedCommunities = [];
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-
       if (!mounted) return;
       final provider = Provider.of<CommunityProvider>(context, listen: false);
       if (provider.communities['message'] == 'Not loaded') {
@@ -56,30 +49,8 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     _debounce = Timer(const Duration(milliseconds: 300), () {
       setState(() {
         _searchQuery = _searchController.text.trim().toLowerCase();
-        _filterCommunities();
       });
     });
-  }
-
-  void _filterCommunities() {
-    if (_searchQuery.isEmpty) {
-      _filteredCommunities = List.from(_allLoadedCommunities);
-    } else {
-      _filteredCommunities = _allLoadedCommunities.where((community) {
-        final name = (community['name'] as String?)?.toLowerCase() ?? '';
-        final description = (community['description'] as String?)?.toLowerCase() ?? '';
-        return name.contains(_searchQuery) || description.contains(_searchQuery);
-      }).toList();
-    }
-  }
-
-  Future<void> _loadMoreCommunities() async {
-    if (_isLoadingMore || _searchQuery.isNotEmpty) return; // Don't load more during search
-    setState(() => _isLoadingMore = true);
-    final provider = Provider.of<CommunityProvider>(context, listen: false);
-    _currentPage++;
-    await provider.fetchCommunities(page: _currentPage);
-    setState(() => _isLoadingMore = false);
   }
 
   void _clearSearch() {
@@ -87,8 +58,19 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     _searchFocusNode.unfocus();
     setState(() {
       _searchQuery = '';
-      _filterCommunities();
     });
+  }
+
+  Future<void> _loadMoreCommunities() async {
+    if (_isLoadingMore || _searchQuery.isNotEmpty) return;
+
+    final provider = Provider.of<CommunityProvider>(context, listen: false);
+    if (provider.isLoading) return; // ✅ don't load more while join is in progress
+
+    setState(() => _isLoadingMore = true);
+    _currentPage++;
+    await provider.fetchCommunities(page: _currentPage);
+    setState(() => _isLoadingMore = false);
   }
 
   Widget _buildImageWidget(String? imageData, {bool isProfileImage = false}) {
@@ -103,9 +85,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     }
 
     if (isProfileImage) {
-      // Circular avatar for profile images
       ImageProvider? imageProvider;
-
       try {
         if (imageData.startsWith('data:')) {
           final base64Data = imageData.split(',')[1];
@@ -126,7 +106,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
             : null,
       );
     } else {
-      // Regular image for non-profile images
       if (imageData.startsWith('data:')) {
         final base64Data = imageData.split(',')[1];
         return ClipRRect(
@@ -170,9 +149,7 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     final isPrivate = community['isPrivate'] ?? false;
     final requestStatus = community['requestStatus'];
 
-    if (isJoined) {
-      return 'Joined';
-    }
+    if (isJoined) return 'Joined';
     if (isPrivate) {
       switch (requestStatus) {
         case 'pending':
@@ -190,19 +167,14 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     final isJoined = community['isJoined'] ?? false;
     final requestStatus = community['requestStatus'];
 
-    if (isJoined) {
-      return Colors.green;
-    }
-    if (requestStatus == 'pending') {
-      return Colors.orange;
-    }
+    if (isJoined) return Colors.green;
+    if (requestStatus == 'pending') return Colors.orange;
     return Primary;
   }
 
   bool _isActionEnabled(Map<String, dynamic> community) {
     final isJoined = community['isJoined'] ?? false;
     final requestStatus = community['requestStatus'];
-
     return !isJoined && requestStatus != 'pending';
   }
 
@@ -210,42 +182,77 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     if (!_isActionEnabled(community)) return;
 
     final provider = Provider.of<CommunityProvider>(context, listen: false);
+
+    // ✅ Read isPrivate BEFORE the call — from community object
+    final isPrivate = community['isPrivate'] == true;
+
+    print('🔍 isPrivate: $isPrivate | community: ${community['name']}');
+    print('🔍 isPrivate raw value: ${community['isPrivate']} | type: ${community['isPrivate'].runtimeType}');
+
+
     final result = await provider.joinCommunity(community['_id'] as String);
 
     if (!mounted) return;
 
     final message = result['message']?.toString() ?? '';
-    final isError = result['error'] == true || result['success'] == false;
 
     final needsOnboarding = message.toLowerCase().contains('onboarding') ||
-        message.toLowerCase().contains('finish') ||
-        message.toLowerCase().contains('complete');
+        message.toLowerCase().contains('finish your onboarding') ||
+        message.toLowerCase().contains('complete your onboarding');
+    print('🔍 message: $message | needsOnboarding: $needsOnboarding | isSuccess: ${result['success']}');
 
     if (needsOnboarding) {
       _showOnboardingDialog();
       return;
     }
 
-    // ✅ Show appropriate message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message.isNotEmpty ? message : (isError ? 'Failed' : 'Success')),
-        backgroundColor: isError ? Colors.red : Colors.green,
-      ),
-    );
+    // Check already joined
+    if (message.toLowerCase().contains('already')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Already a member of this community'),
+          backgroundColor: Colors.blue,
+        ),
+      );
+      return;
+    }
+
+    final isSuccess = result['success'] == true;
+
+    if (isSuccess) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isPrivate
+                ? 'Join request sent successfully'
+                : 'Joined successfully',
+          ),
+          // ✅ Green for both — orange for private if you prefer
+          backgroundColor: isPrivate ? Colors.orange : Colors.green,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message.isNotEmpty ? message : 'Failed to join'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
+
   void _showOnboardingDialog() {
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Icon
               Container(
                 width: 72,
                 height: 72,
@@ -257,8 +264,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                     color: Primary, size: 36),
               ),
               const SizedBox(height: 16),
-
-              // Title
               const Text(
                 'Complete Onboarding First',
                 style: TextStyle(
@@ -269,8 +274,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 10),
-
-              // Subtitle
               Text(
                 'You need to complete your onboarding steps before joining a community. It only takes a few minutes!',
                 style: TextStyle(
@@ -281,8 +284,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
-
-              // Complete Onboarding button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -307,8 +308,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 ),
               ),
               const SizedBox(height: 10),
-
-              // Cancel button
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -354,21 +353,21 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = Provider.of<CommunityProvider>(context);
-    final communityList = (provider.communities['data'] as List<dynamic>?) ?? [];
+    final communityList =
+        (provider.communities['data'] as List<dynamic>?) ?? [];
     final totalPages = provider.communities['totalPages'] ?? 1;
 
-    if (communityList.isNotEmpty) {
-      final existingIds = _allLoadedCommunities.map((c) => c['_id']).toSet();
-      for (final community in communityList) {
-        if (!existingIds.contains(community['_id'])) {
-          _allLoadedCommunities.add(community);
-        }
-      }
-      _filterCommunities();
-    }
-
-    // Use filtered communities for display
-    final displayList = _filteredCommunities;
+    // ✅ Filter directly from provider data — no local cache needed
+    final displayList = _searchQuery.isEmpty
+        ? communityList
+        : communityList.where((community) {
+      final name =
+          (community['name'] as String?)?.toLowerCase() ?? '';
+      final description =
+          (community['description'] as String?)?.toLowerCase() ?? '';
+      return name.contains(_searchQuery) ||
+          description.contains(_searchQuery);
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -388,7 +387,8 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
         ),
         actions: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: GestureDetector(
               onTap: () {
                 Navigator.push(
@@ -399,7 +399,8 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 );
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                   color: Primary,
                   borderRadius: BorderRadius.circular(20),
@@ -427,37 +428,34 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: GestureDetector(
-              onTap: () {
-                _searchFocusNode.requestFocus();
-              },
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                decoration: InputDecoration(
-                  hintText: 'Search ...',
-                  prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                  suffixIcon: _searchQuery.isNotEmpty
-                      ? IconButton(
-                    icon: const Icon(Icons.clear, color: Colors.grey),
-                    onPressed: _clearSearch,
-                  )
-                      : null,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide.none,
-                  ),
-                  filled: true,
-                  fillColor: Colors.grey[200],
+            padding:
+            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              decoration: InputDecoration(
+                hintText: 'Search ...',
+                prefixIcon:
+                const Icon(Icons.search, color: Colors.grey),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                  icon: const Icon(Icons.clear, color: Colors.grey),
+                  onPressed: _clearSearch,
+                )
+                    : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
                 ),
+                filled: true,
+                fillColor: Colors.grey[200],
               ),
             ),
           ),
           Expanded(
             child: provider.isLoading && communityList.isEmpty
                 ? const Center(child: CircularProgressIndicator())
-                : provider.error != null
+                : provider.error != null && communityList.isEmpty
                 ? Center(child: Text('Error: ${provider.error}'))
                 : provider.communities['error'] == true
                 ? Center(
@@ -468,16 +466,21 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
             )
                 : RefreshIndicator(
               onRefresh: () async {
-                setState(() => _currentPage = 1);
-                await provider.fetchCommunities(page: _currentPage);
+                setState(() {
+                  _currentPage = 1;
+                  _searchQuery = '';
+                  _searchController.clear();
+                });
+                await provider.fetchCommunities(page: 1);
               },
               child: NotificationListener<ScrollNotification>(
                 onNotification: (scrollInfo) {
-                  if (scrollInfo.metrics.pixels ==
-                      scrollInfo.metrics.maxScrollExtent &&
+                  if (scrollInfo.metrics.pixels >=
+                      scrollInfo.metrics.maxScrollExtent - 100 &&
                       !_isLoadingMore &&
+                      !provider.isLoading &&        // ✅ don't load more if provider is loading
                       _currentPage < totalPages &&
-                      _searchQuery.isEmpty) { // Only load more when not searching
+                      _searchQuery.isEmpty) {
                     _loadMoreCommunities();
                   }
                   return false;
@@ -485,24 +488,31 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                 child: displayList.isEmpty
                     ? Center(
                   child: Text(
-                      _searchQuery.isNotEmpty
-                          ? 'No communities found matching "$_searchQuery"'
-                          : 'No communities found'
+                    _searchQuery.isNotEmpty
+                        ? 'No communities found matching "$_searchQuery"'
+                        : 'No communities found',
                   ),
                 )
                     : ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16),
                   itemCount: displayList.length +
-                      (_isLoadingMore && _searchQuery.isEmpty ? 1 : 0),
+                      (_isLoadingMore &&
+                          _searchQuery.isEmpty
+                          ? 1
+                          : 0),
                   itemBuilder: (context, index) {
                     if (index == displayList.length &&
-                        _isLoadingMore && _searchQuery.isEmpty) {
+                        _isLoadingMore &&
+                        _searchQuery.isEmpty) {
                       return const Center(
-                        child: CircularProgressIndicator(),
+                        child:
+                        CircularProgressIndicator(),
                       );
                     }
-                    final community =
-                    displayList[index] as Map<String, dynamic>;
+
+                    final community = displayList[index]
+                    as Map<String, dynamic>;
 
                     return GestureDetector(
                       onTap: () {
@@ -512,44 +522,63 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                           MaterialPageRoute(
                             builder: (context) =>
                                 CommunityInfoScreen(
-                                  communityId:
-                                  community['_id'] as String,
+                                  communityId: community[
+                                  '_id'] as String,
                                 ),
                           ),
                         );
                       },
                       child: Container(
-                        margin: const EdgeInsets.only(bottom: 16),
+                        margin: const EdgeInsets.only(
+                            bottom: 16),
                         decoration: BoxDecoration(
                           color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius:
+                          BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Colors.black
+                                  .withOpacity(0.05),
                               blurRadius: 8,
-                              offset: const Offset(0, 2),
+                              offset:
+                              const Offset(0, 2),
                             ),
                           ],
                         ),
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding:
+                          const EdgeInsets.all(16),
                           child: Row(
                             children: [
-                              community['profileImage']?.isNotEmpty ?? false
+                              community['profileImage']
+                                  ?.isNotEmpty ??
+                                  false
                                   ? _buildImageWidget(
-                                community['profileImage'],
-                                isProfileImage: true,
+                                community[
+                                'profileImage'],
+                                isProfileImage:
+                                true,
                               )
                                   : CircleAvatar(
                                 radius: 30,
-                                backgroundColor: Primary,
+                                backgroundColor:
+                                Primary,
                                 child: Text(
-                                  community['name']?.isNotEmpty ?? false
-                                      ? community['name'][0].toUpperCase()
+                                  community['name']
+                                      ?.isNotEmpty ??
+                                      false
+                                      ? community[
+                                  'name']
+                                  [0]
+                                      .toUpperCase()
                                       : 'C',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
+                                  style:
+                                  const TextStyle(
+                                    color: Colors
+                                        .white,
+                                    fontWeight:
+                                    FontWeight
+                                        .bold,
                                     fontSize: 22,
                                   ),
                                 ),
@@ -557,77 +586,126 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
                               const SizedBox(width: 16),
                               Expanded(
                                 child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  crossAxisAlignment:
+                                  CrossAxisAlignment
+                                      .start,
                                   children: [
                                     Row(
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            community['name'] ?? 'Unnamed Community',
-                                            style: const TextStyle(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.black87,
+                                            community[
+                                            'name'] ??
+                                                'Unnamed Community',
+                                            style:
+                                            const TextStyle(
+                                              fontSize:
+                                              16,
+                                              fontWeight:
+                                              FontWeight
+                                                  .w600,
+                                              color: Colors
+                                                  .black87,
                                             ),
-                                            overflow: TextOverflow.ellipsis,
+                                            overflow:
+                                            TextOverflow
+                                                .ellipsis,
                                           ),
                                         ),
                                         GestureDetector(
-                                          onTap: () => _handleCommunityAction(community),
+                                          onTap: () =>
+                                              _handleCommunityAction(
+                                                  community),
                                           child: Text(
-                                            _getActionText(community),
-                                            style: TextStyle(
-                                              color: _isActionEnabled(community)
-                                                  ? _getActionTextColor(community)
-                                                  : Colors.grey,
-                                              fontSize: 14,
-                                              fontWeight: FontWeight.w600,
+                                            _getActionText(
+                                                community),
+                                            style:
+                                            TextStyle(
+                                              color: _isActionEnabled(
+                                                  community)
+                                                  ? _getActionTextColor(
+                                                  community)
+                                                  : Colors
+                                                  .grey,
+                                              fontSize:
+                                              14,
+                                              fontWeight:
+                                              FontWeight
+                                                  .w600,
                                             ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                    const SizedBox(height: 4),
-                                    if (community['description']?.isNotEmpty ?? false)
+                                    const SizedBox(
+                                        height: 4),
+                                    if (community['description']
+                                        ?.isNotEmpty ??
+                                        false)
                                       Text(
-                                        community['description'],
-                                        style: const TextStyle(
-                                          color: Colors.grey,
+                                        community[
+                                        'description'],
+                                        style:
+                                        const TextStyle(
+                                          color:
+                                          Colors.grey,
                                           fontSize: 13,
                                         ),
                                         maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
+                                        overflow:
+                                        TextOverflow
+                                            .ellipsis,
                                       ),
-                                    const SizedBox(height: 8),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(
+                                        height: 8),
                                     Row(
                                       children: [
                                         Container(
-                                          padding: const EdgeInsets.symmetric(
+                                          padding: const EdgeInsets
+                                              .symmetric(
                                             horizontal: 8,
                                             vertical: 2,
                                           ),
-                                          decoration: BoxDecoration(
-                                            color: community['isPrivate'] == true
-                                                ? Colors.orange.withOpacity(0.1)
-                                                : Colors.green.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(8),
+                                          decoration:
+                                          BoxDecoration(
+                                            color: community[
+                                            'isPrivate'] ==
+                                                true
+                                                ? Colors
+                                                .orange
+                                                .withOpacity(
+                                                0.1)
+                                                : Colors
+                                                .green
+                                                .withOpacity(
+                                                0.1),
+                                            borderRadius:
+                                            BorderRadius
+                                                .circular(
+                                                8),
                                           ),
                                           child: Text(
-                                            community['isPrivate'] == true
+                                            community['isPrivate'] ==
+                                                true
                                                 ? 'Private'
                                                 : 'Public',
-                                            style: TextStyle(
-                                              color: community['isPrivate'] == true
-                                                  ? Colors.orange[700]
-                                                  : Colors.green[700],
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w500,
+                                            style:
+                                            TextStyle(
+                                              color: community[
+                                              'isPrivate'] ==
+                                                  true
+                                                  ? Colors
+                                                  .orange[700]
+                                                  : Colors
+                                                  .green[700],
+                                              fontSize:
+                                              11,
+                                              fontWeight:
+                                              FontWeight
+                                                  .w500,
                                             ),
                                           ),
                                         ),
-                                        SizedBox(width: 25,),
-
                                       ],
                                     ),
                                   ],

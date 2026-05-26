@@ -230,7 +230,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   }
 
   void _onDrawerChanged(bool isOpened) {
-    if (!isOpened) {
+    if (isOpened) {
+      // ✅ Refresh my communities every time drawer opens
+      context.read<CommunityProvider>().fetchMyCommunities();
+    } else {
       _searchController.clear();
       _searchFocusNode.unfocus();
     }

@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:ixes.app/constants/constants.dart';
+
 import 'package:provider/provider.dart';
 import '../../providers/announcement_provider.dart';
 import 'package:intl/intl.dart';
 import '../home/feedpage/sharepost_screen.dart';
 import 'create_announcement_screen.dart';
 
-// ── Design tokens ─────────────────────────────────────────────────────────────
+
 class _T {
   static const bg = Color(0xFFF7F8FC);
   static const surface = Colors.white;
@@ -489,27 +489,25 @@ class _AnnouncementCard extends StatelessWidget {
                       onSelected: (v) {
                         if (v == 'share') onShare();
                         if (v == 'edit') onEdit();
-                        if (v == 'delete') onDelete();
-                      },
+                        if (v == 'delete') onDelete();},
                       itemBuilder: (_) => [
-                        PopupMenuItem(
+                        const PopupMenuItem(
                           value: 'share',
                           height: 42,
                           child: Row(
-                            children: const [
+                            children: [
                               Icon(Icons.share_outlined,
                                   color: _T.accent, size: 18),
                               SizedBox(width: 10),
-                              Text('Share',
-                                  style: TextStyle(fontSize: 14)),
+                              Text('Share', style: TextStyle(fontSize: 14)),
                             ],
                           ),
                         ),
-                        PopupMenuItem(
+                        const PopupMenuItem(
                           value: 'edit',
                           height: 42,
                           child: Row(
-                            children: const [
+                            children: [
                               Icon(Icons.edit_outlined,
                                   color: _T.accent, size: 18),
                               SizedBox(width: 10),
@@ -518,11 +516,11 @@ class _AnnouncementCard extends StatelessWidget {
                             ],
                           ),
                         ),
-                        PopupMenuItem(
+                        const PopupMenuItem(
                           value: 'delete',
                           height: 42,
                           child: Row(
-                            children: const [
+                            children: [
                               Icon(Icons.delete_outline_rounded,
                                   color: _T.red, size: 18),
                               SizedBox(width: 10),

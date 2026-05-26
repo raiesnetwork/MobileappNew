@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -20,17 +21,34 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "startScreenShareService" -> {
-                        val serviceIntent = Intent(this, ScreenShareService::class.java)
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            startForegroundService(serviceIntent)
-                        } else {
-                            startService(serviceIntent)
+                        try {
+                            val serviceIntent = Intent(this, ScreenShareService::class.java)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                startForegroundService(serviceIntent)
+                            } else {
+                                startService(serviceIntent)
+                            }
+                            // Wait 800ms for Android to confirm the foreground
+                            // service is running before WebRTC touches MediaProjection
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                result.success(null)
+                            }, 800)
+                        } catch (e: SecurityException) {
+                            Log.e("MainActivity", "❌ SecurityException starting FGS: ${e.message}")
+                            result.error("PERMISSION_DENIED", e.message, null)
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "❌ Failed to start service: ${e.message}")
+                            result.error("SERVICE_ERROR", e.message, null)
                         }
-                        result.success(null)
                     }
                     "stopScreenShareService" -> {
-                        stopService(Intent(this, ScreenShareService::class.java))
-                        result.success(null)
+                        try {
+                            stopService(Intent(this, ScreenShareService::class.java))
+                            result.success(null)
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "❌ Failed to stop service: ${e.message}")
+                            result.error("SERVICE_ERROR", e.message, null)
+                        }
                     }
                     else -> result.notImplemented()
                 }

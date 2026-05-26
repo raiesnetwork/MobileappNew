@@ -17,6 +17,7 @@ class CommunityProvider with ChangeNotifier {
     'message': 'Not loaded',
     'data': []
   };
+  List<dynamic> _myCommunitiesForSearch = [];
   bool _isLoadingHierarchyStats = false;
   String? _hierarchyStatsError;
   Map<String, dynamic> _communityHierarchyStats = {};
@@ -219,47 +220,64 @@ class CommunityProvider with ChangeNotifier {
 
       final result = await _communityService.joinCommunity(communityId);
 
-      // ✅ Check for onboarding message FIRST — before touching any state
       final message = result['message']?.toString().toLowerCase() ?? '';
       final needsOnboarding = message.contains('onboarding') ||
           message.contains('finish') ||
           message.contains('complete');
 
       if (needsOnboarding) {
-        // ❌ Don't update any state — just return the result as-is
         _isLoadingAll = false;
         notifyListeners();
         return result;
       }
 
-      if (!(result['error'] as bool)) {
-        final communityList = _allCommunities['data'] as List<dynamic>? ?? [];
+      final isSuccess = result['success'] == true;
+
+      if (isSuccess) {
+        // ✅ Create a brand new list — don't mutate the existing one
+        final communityList = List<dynamic>.from(
+            _allCommunities['data'] as List<dynamic>? ?? []);
         final index = communityList.indexWhere((c) => c['_id'] == communityId);
 
         if (index != -1) {
           final community = Map<String, dynamic>.from(
               communityList[index] as Map<String, dynamic>);
-          final isPrivate =
-              result['isPrivate'] as bool? ?? community['isPrivate'] ?? false;
+          final isPrivate = community['isPrivate'] == true;
 
-          communityList[index] = {
-            ...community,
-            'isJoined': !isPrivate,
-            'isMember': !isPrivate,
-            'requestStatus': isPrivate ? 'pending' : null,
-          };
-          _allCommunities = {..._allCommunities, 'data': communityList};
+          if (isPrivate) {
+            // Private: update status to pending, keep in list
+            communityList[index] = {
+              ...community,
+              'isJoined': false,
+              'isMember': false,
+              'requestStatus': 'pending',
+            };
+          } else {
+            // ✅ Public: remove immediately from new list
+            communityList.removeAt(index);
+          }
         }
 
-        await fetchMyCommunities();
+        // ✅ Assign new map with new list — forces rebuild
+        _allCommunities = {
+          'error': false,
+          'message': _allCommunities['message'],
+          'data': communityList,
+          'totalPages': _allCommunities['totalPages'],
+        };
+
         _allCommunitiesError = null;
+        _isLoadingAll = false;
+        _myCommunitiesForSearch = [];
+        notifyListeners(); // ✅ Notify BEFORE fetchMyCommunities
+
+        await fetchMyCommunities();
       } else {
-        _allCommunitiesError =
-            result['message'] as String? ?? 'Failed to join community';
+        _allCommunitiesError = null;
+        _isLoadingAll = false;
+        notifyListeners();
       }
 
-      _isLoadingAll = false;
-      notifyListeners();
       return result;
     } catch (e) {
       _isLoadingAll = false;
@@ -323,7 +341,7 @@ class CommunityProvider with ChangeNotifier {
 
 // Updated fetchMyCommunities method with better error handling and data transformation
   Future<void> fetchMyCommunities() async {
-    _isLoadingMy = true;
+    _isLoadingMy = true;   // ✅ only _isLoadingMy, not _isLoadingAll
     _myCommunitiesError = null;
     notifyListeners();
 
@@ -332,11 +350,13 @@ class CommunityProvider with ChangeNotifier {
 
       if (!response['error']) {
         final data = response['data'];
+        final list = data is List ? data : [];
         _myCommunities = {
           'error': false,
           'message': response['message'] ?? 'Communities fetched successfully',
-          'data': data is List ? data : [],
+          'data': list,
         };
+        _myCommunitiesForSearch = list;
         _myCommunitiesError = null;
       } else {
         _myCommunities = {

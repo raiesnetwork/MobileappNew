@@ -43,10 +43,13 @@ class _ServiceRequestDetailsScreenState
     'Closed',
   ];
 
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    debugPrint('🔍 [SR DETAILS] Opened requestId = ${widget.requestId}');
+    debugPrint('🔍 [SR DETAILS] initialData = ${widget.initialData?['requestId']}');
     if (widget.initialData == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Provider.of<ServiceRequestProvider>(context, listen: false)
@@ -947,6 +950,20 @@ class _ServiceRequestDetailsScreenState
         files: _pendingFiles,
         communityId: widget.communityId,
       );
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      debugPrint('📥 [UPLOAD] result error = ${result['error']}');
+      debugPrint('📥 [UPLOAD] result message = ${result['message']}');
+      debugPrint('📥 [UPLOAD] result data files count = ${(result['data']?['files'] as List?)?.length}');
+      debugPrint('📥 [UPLOAD] result data updatedAt = ${result['data']?['updatedAt']}');
+
+      final files = result['data']?['files'] as List?;
+      if (files != null) {
+        for (int i = 0; i < files.length; i++) {
+          debugPrint('📥 [UPLOAD] file[$i] uploadedAt = ${files[i]['uploadedAt']}');
+          debugPrint('📥 [UPLOAD] file[$i] fileName   = ${files[i]['fileName']}');
+        }
+      }
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // ── DEBUG PRINTS ──────────────────────────────
       debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -963,26 +980,8 @@ class _ServiceRequestDetailsScreenState
 
       if (mounted) {
         if (result['error'] == false) {
-          // ✅ Manually inject uploaded files into currentRequest immediately
-          final provider = Provider.of<ServiceRequestProvider>(context, listen: false);
-          final existingFiles = List<Map<String, dynamic>>.from(
-            provider.currentRequest?['files'] ?? [],
-          );
-          for (final file in _pendingFiles) {
-            existingFiles.add({
-              'fileName': file.path.split('/').last,
-              'fileUrl': '',       // no URL yet — show as pending
-              'uploadedBy': 'You',
-              'uploadedAt': DateTime.now().toIso8601String(),
-            });
-          }
-          provider.injectFiles(existingFiles);
-
           setState(() => _pendingFiles.clear());
           _showSnack('Files uploaded successfully', Colors.green);
-
-          // Also refresh from server to get real URLs
-          await provider.getServiceRequestById(widget.requestId);
         } else {
           _showSnack(result['message'] ?? 'Upload failed', Colors.red);
         }

@@ -8,6 +8,14 @@ import 'dart:convert';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
 
+import '../campaigns_page/campaigns_info screen.dart';
+import '../campaigns_page/getall_campaigns_screen.dart';
+import '../chats_page/chat_detail_screen.dart';
+import '../chats_page/group_chat/group_chat_detail.dart';
+import '../chats_page/group_chat/my_groups.dart';
+import '../services_page/service_details.dart';
+import '../services_page/services_screen.dart';
+
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
 
@@ -33,7 +41,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
   void _navigateFromNotification(Map<String, dynamic> notification) {
     final type = notification['type'] ?? '';
     print('🔔 Tapped notification → type: "$type"');
-    print('🔔 relatedData: ${notification['relatedData']}');
+    print('🔔 ALL relatedData: ${notification['relatedData']}');
+    print('🔔 ALL relatedData keys: ${(notification['relatedData'] as Map<String, dynamic>?)?.keys.toList()}');
+    print('🔔 full notification keys: ${notification.keys.toList()}');
     print('🔔 full notification: $notification');
 
     final provider = Provider.of<NotificationProvider>(context, listen: false);
@@ -46,17 +56,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
       'PostShare', 'Post', 'Announcement'
     ];
     const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation', 'GroupChat'
+      'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation',
     ];
     const communityTypes = ['community', 'GroupRequest'];
-    const dashTypes = [
-      'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct',
-    ];
     const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
+
+    // ✅ Single null guard for entire method
+    final navContext = mainScreenKey.currentContext;
+    if (navContext == null) return;
 
     Navigator.pop(context);
 
+    // ── POST TYPES ─────────────────────────────────────────────────────
     if (postTypes.contains(type)) {
       final postId = relatedData?['postId']?.toString() ??
           relatedData?['referenceId']?.toString() ??
@@ -67,57 +78,197 @@ class _NotificationScreenState extends State<NotificationScreen> {
         mainScreenKey.currentState?.navigateToTab(0);
         return;
       }
-
       mainScreenKey.currentState?.navigateToTab(0, postId: postId);
 
+      // ── PERSONAL CHAT ───────────────────────────────────────────────────────
     } else if (chatTypes.contains(type)) {
       final senderId = relatedData?['senderId']?.toString() ??
-          relatedData?['userId']?.toString() ??
-          notification['senderId']?.toString();
-
-      final senderName = relatedData?['senderName']?.toString() ??
-          relatedData?['name']?.toString() ??
-          notification['senderName']?.toString() ??
-          'Chat';
-
-      final senderProfile = relatedData?['senderProfile'] ??
-          relatedData?['userProfile'] ??
-          notification['senderProfile'];
-
-      mainScreenKey.currentState?.navigateToTab(
-        2,
-        chatUserId: senderId,
-        chatTitle: senderName,
-        chatUserProfile: senderProfile,
-      );
-
-    } else if (serviceReqTypes.contains(type)) {
-      // Extract service request ID
-      final serviceReqId = relatedData?['serviceReqId']?.toString() ??
-          relatedData?['assignedServiceReqId']?.toString() ??
+          relatedData?['privatChatId']?.toString() ??
           notification['referenceId']?.toString();
 
-      if (serviceReqId != null && serviceReqId.isNotEmpty) {
-        // Navigate directly to service request details
+      // ✅ Backend only sends chatId, no name — extract from message text
+      // message format: "Uday Suresh Send new message"
+      final messageText = notification['message']?.toString() ?? '';
+      final senderName = messageText.isNotEmpty
+          ? messageText
+          .replaceAll(RegExp(r'\s*(send|sent|says|shared|posted).*', caseSensitive: false), '')
+          .trim()
+          : 'Chat';
+
+      print('🔔 Chat → senderId: $senderId, senderName extracted: $senderName');
+
+      final senderProfile = <String, dynamic>{
+        '_id': senderId ?? '',
+        'profile': {
+          'profileImage': '',
+          'name': senderName,
+        }
+      };
+
+      if (senderId != null && senderId.isNotEmpty) {
+        mainScreenKey.currentState?.navigateToTab(2);
+        Future.delayed(const Duration(milliseconds: 300), () {
+          Navigator.push(
+            navContext,
+            MaterialPageRoute(
+              builder: (_) => ChatDetailScreen(
+                userId: senderId,
+                chatTitle: senderName,
+                userProfile: senderProfile,
+              ),
+            ),
+          );
+        });
+      } else {
+        mainScreenKey.currentState?.navigateToTab(2);
+      }
+
+      // ── GROUP CHAT ──────────────────────────────────────────────────────────
+    } else if (type == 'GroupChat') {
+      final groupId = relatedData?['groupId']?.toString() ??
+          notification['referenceId']?.toString();
+
+      // ✅ Backend only sends groupId, no name — extract from message
+      // message format: `Christin Raj A shared a new post in "St. Antony Volley Ball Coaching"`
+      final messageText = notification['message']?.toString() ?? '';
+      String groupName = 'Group Chat';
+
+      // Try extract name inside quotes first
+      final quoteMatch = RegExp(r'"([^"]+)"').firstMatch(messageText);
+      if (quoteMatch != null) {
+        groupName = quoteMatch.group(1) ?? 'Group Chat';
+      }
+
+      print('🔔 GroupChat → groupId: $groupId, groupName extracted: $groupName');
+
+      if (groupId != null && groupId.isNotEmpty) {
         Navigator.push(
-          mainScreenKey.currentContext!,
+          navContext,
+          MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
+        );
+        Future.delayed(const Duration(milliseconds: 300), () {
+          Navigator.push(
+            navContext,
+            MaterialPageRoute(
+              builder: (_) => GroupChatDetailPage(
+                groupId: groupId,
+                groupName: groupName,
+                isAdmin: false,
+              ),
+            ),
+          );
+        });
+      } else {
+        Navigator.push(
+          navContext,
+          MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
+        );
+      }
+
+      // ── SERVICE REQUEST ─────────────────────────────────────────────────
+    } else if (serviceReqTypes.contains(type)) {
+      final serviceReqId = relatedData?['assignedServiceReqId']?.toString() ??
+          relatedData?['serviceReqId']?.toString() ??
+          notification['referenceId']?.toString();
+
+      print('🔔 ServiceReq → serviceReqId: $serviceReqId');
+
+      if (serviceReqId != null && serviceReqId.isNotEmpty) {
+        Navigator.push(
+          navContext,
           MaterialPageRoute(
-            builder: (context) => ServiceRequestDetailsScreen(
+            builder: (_) => ServiceRequestDetailsScreen(
               requestId: serviceReqId,
             ),
           ),
         );
       } else {
-        // No ID — go to dashboard tab (service requests are there)
         mainScreenKey.currentState?.navigateToTab(4);
       }
 
+      // ── SERVICE ─────────────────────────────────────────────────────────
+    } else if (type == 'Service') {
+      final serviceId = relatedData?['serviceId']?.toString() ??
+          notification['referenceId']?.toString();
+
+      print('🔔 Service → serviceId: $serviceId');
+
+      // ✅ Push ServicesScreen first so back arrow goes there
+      Navigator.push(
+        navContext,
+        MaterialPageRoute(builder: (_) => const ServicesScreen()),
+      );
+
+      if (serviceId != null && serviceId.isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          Navigator.push(
+            navContext,
+            MaterialPageRoute(
+              builder: (_) => ServiceDetailsScreen(serviceId: serviceId),
+            ),
+          );
+        });
+      }
+
+      // ── CAMPAIGN ────────────────────────────────────────────────────────
+    } else if (type == 'campaign') {
+      final campaignId = relatedData?['campaignId']?.toString() ??
+          notification['referenceId']?.toString();
+
+      final communityId = relatedData?['communityId']?.toString() ??
+          notification['communityId']?.toString() ??
+          '';
+
+      final communityName = relatedData?['communityName']?.toString() ??
+          notification['communityName']?.toString() ??
+          '';
+
+      print('🔔 Campaign → campaignId: $campaignId, communityId: $communityId');
+
+      // ✅ Push CampaignsScreen first so back arrow goes there
+      Navigator.push(
+        navContext,
+        MaterialPageRoute(
+          builder: (_) => CampaignsScreen(
+            communityId: communityId,
+            buildImageWidget: (url, {bool isProfileImage = false}) =>
+            url != null && url.isNotEmpty
+                ? Image.network(url, fit: BoxFit.cover)
+                : const SizedBox.shrink(),
+          ),
+        ),
+      );
+
+      if (campaignId != null && campaignId.isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          Navigator.push(
+            navContext,
+            MaterialPageRoute(
+              builder: (_) => CampaignDetailsScreen(
+                campaignId: campaignId,
+                buildImageWidget: (url, {bool isProfileImage = false}) =>
+                url != null && url.isNotEmpty
+                    ? Image.network(url, fit: BoxFit.cover)
+                    : const SizedBox.shrink(),
+                communityName: communityName,
+              ),
+            ),
+          );
+        });
+      }
+
+      // ── COMMUNITY ───────────────────────────────────────────────────────
     } else if (communityTypes.contains(type)) {
       mainScreenKey.currentState?.navigateToTab(3);
 
-    } else if (dashTypes.contains(type)) {
+      // ── DASHBOARD TYPES ─────────────────────────────────────────────────
+    } else if (type == 'Invoice' ||
+        type == 'StoreSubscription' ||
+        type == 'SubDomain' ||
+        type == 'AddProduct') {
       mainScreenKey.currentState?.navigateToTab(4);
 
+      // ── DEFAULT ─────────────────────────────────────────────────────────
     } else {
       mainScreenKey.currentState?.navigateToTab(0);
     }

@@ -109,7 +109,9 @@ class CommunityService {
         final decoded = jsonDecode(response.body);
         return {
           'error': false,
+          'success': decoded['success'] ?? true,  // ✅ ADD THIS
           'message': decoded['message'] ?? 'Success',
+          'role': decoded['role'],                 // ✅ pass through role too
           'data': decoded['data'] ?? true,
           'isPrivate': decoded['isPrivate'] ?? false,
           'requestStatus': decoded['requestStatus'],
@@ -118,6 +120,7 @@ class CommunityService {
         final decoded = jsonDecode(response.body);
         return {
           'error': true,
+          'success': false,                        // ✅ explicit false on failure
           'message': decoded['message'] ?? 'Failed to join community',
           'data': null
         };
@@ -126,11 +129,13 @@ class CommunityService {
       print('Error in joinCommunity: $e');
       return {
         'error': true,
+        'success': false,
         'message': 'Error joining community: ${e.toString()}',
         'data': null
       };
     }
   }
+
 
   Future<Map<String, dynamic>> exitCommunity(String communityId) async {
     try {

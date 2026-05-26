@@ -46,12 +46,14 @@ class ScreenShareService : Service() {
         } catch (e: SecurityException) {
             Log.e(TAG, "❌ SecurityException: ${e.message}")
             stopSelf()
+            return START_NOT_STICKY  // ← was START_STICKY, caused restart loop
         } catch (e: Exception) {
             Log.e(TAG, "❌ Failed to start: ${e.message}")
             stopSelf()
+            return START_NOT_STICKY
         }
 
-        return START_STICKY
+        return START_NOT_STICKY  // ← was START_STICKY
     }
 
     private fun createNotificationChannel() {
