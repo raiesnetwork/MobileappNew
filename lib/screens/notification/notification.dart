@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
 
+import '../../api_service/user_api_service.dart';
 import '../campaigns_page/campaigns_info screen.dart';
 import '../campaigns_page/getall_campaigns_screen.dart';
 import '../chats_page/chat_detail_screen.dart';
@@ -38,7 +39,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         .loadNotifications();
   }
 
-  void _navigateFromNotification(Map<String, dynamic> notification) {
+  void _navigateFromNotification(Map<String, dynamic> notification) async {
     final type = notification['type'] ?? '';
     print('🔔 Tapped notification → type: "$type"');
     print('🔔 ALL relatedData: ${notification['relatedData']}');
@@ -68,6 +69,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     Navigator.pop(context);
 
     // ── POST TYPES ─────────────────────────────────────────────────────
+    // AFTER
     if (postTypes.contains(type)) {
       final postId = relatedData?['postId']?.toString() ??
           relatedData?['referenceId']?.toString() ??
@@ -78,7 +80,31 @@ class _NotificationScreenState extends State<NotificationScreen> {
         mainScreenKey.currentState?.navigateToTab(0);
         return;
       }
-      mainScreenKey.currentState?.navigateToTab(0, postId: postId);
+
+      final response = await UserAPI().getPostById(postId);
+      final postExists = response != null &&
+          response['success'] == true &&
+          response['data'] != null;
+
+      if (!mounted) return;
+
+      if (postExists) {
+        mainScreenKey.currentState?.navigateToTab(0, postId: postId);
+      } else {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Post Not Found'),
+            content: const Text('This post no longer exists or may have been removed.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
 
       // ── PERSONAL CHAT ───────────────────────────────────────────────────────
     } else if (chatTypes.contains(type)) {
@@ -111,6 +137,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
           Navigator.push(
             navContext,
             MaterialPageRoute(
+
+              
               builder: (_) => ChatDetailScreen(
                 userId: senderId,
                 chatTitle: senderName,
@@ -133,10 +161,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
       final messageText = notification['message']?.toString() ?? '';
       String groupName = 'Group Chat';
 
-      // Try extract name inside quotes first
+      // Try quotes first, then "in GroupName" pattern
       final quoteMatch = RegExp(r'"([^"]+)"').firstMatch(messageText);
       if (quoteMatch != null) {
         groupName = quoteMatch.group(1) ?? 'Group Chat';
+      } else {
+        final inMatch = RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(messageText);
+        if (inMatch != null) {
+          groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
+        }
       }
 
       print('🔔 GroupChat → groupId: $groupId, groupName extracted: $groupName');
@@ -229,13 +262,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       Navigator.push(
         navContext,
         MaterialPageRoute(
-          builder: (_) => CampaignsScreen(
-            communityId: communityId,
-            buildImageWidget: (url, {bool isProfileImage = false}) =>
-            url != null && url.isNotEmpty
-                ? Image.network(url, fit: BoxFit.cover)
-                : const SizedBox.shrink(),
-          ),
+          builder: (_) => const CampaignsScreen(),
         ),
       );
 
@@ -246,10 +273,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
             MaterialPageRoute(
               builder: (_) => CampaignDetailsScreen(
                 campaignId: campaignId,
-                buildImageWidget: (url, {bool isProfileImage = false}) =>
-                url != null && url.isNotEmpty
-                    ? Image.network(url, fit: BoxFit.cover)
-                    : const SizedBox.shrink(),
                 communityName: communityName,
               ),
             ),

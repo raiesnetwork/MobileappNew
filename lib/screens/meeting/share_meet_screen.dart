@@ -198,8 +198,6 @@ ${widget.description}
       members: _memberList,
       mail: null,
       recurrenceSettings: recurrenceSettings,
-
-      // ✅ This is the most important line
       message: richMessage,
     );
 

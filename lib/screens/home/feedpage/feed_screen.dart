@@ -255,6 +255,25 @@ class _FeedScreenState extends State<FeedScreen> {
         _hasMorePosts = false;
         isLoading = false;
       });
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Post Not Found'),
+            content: const Text(
+                'This post no longer exists or may have been removed.'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
+                },
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
     } catch (e) {
       print('_loadSinglePost error: $e');
       setState(() {

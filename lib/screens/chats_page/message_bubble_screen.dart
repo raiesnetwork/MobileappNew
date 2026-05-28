@@ -116,6 +116,150 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     }
   }
+  bool get _isMeetingMessage =>
+      (widget.content ?? '').trimLeft().startsWith('📅');
+
+  Widget _buildMeetingCard() {
+    final lines = (widget.content ?? '').split('\n');
+    final title = lines.isNotEmpty ? lines[0] : 'Meeting Scheduled';
+    final time = lines.length > 1 ? lines[1] : '';
+    final note = lines.length > 2 ? lines[2] : '';
+// In _buildMeetingCard(), improve URL extraction
+    String meetingUrl = widget.linkMeta?['url']?.toString() ?? '';
+
+// Also check linkMeta for meetLink key
+    if (meetingUrl.isEmpty) {
+      meetingUrl = widget.linkMeta?['meetLink']?.toString() ?? '';
+    }
+
+// Fallback: regex on content
+    if (meetingUrl.isEmpty) {
+      final urlMatch = RegExp(
+        r'https?://[^\s\n]+',
+        caseSensitive: false,
+      ).firstMatch(widget.content ?? '');
+      if (urlMatch != null) {
+        meetingUrl = urlMatch.group(0)?.trim() ?? '';
+        // Clean trailing punctuation
+        meetingUrl = meetingUrl.replaceAll(RegExp(r'[.,;:!?]+$'), '');
+      }
+    }
+
+    return GestureDetector(
+      onTap: meetingUrl.isNotEmpty
+          ? () => launchUrl(Uri.parse(meetingUrl),
+          mode: LaunchMode.externalApplication)
+          : null,
+      child: Container(
+        decoration: BoxDecoration(
+          color: widget.isMe
+              ? Colors.white.withOpacity(0.15)
+              : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: widget.isMe
+                ? Colors.white.withOpacity(0.3)
+                : Colors.grey[300]!,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: widget.isMe
+                    ? Colors.white.withOpacity(0.1)
+                    : Colors.grey[50],
+                borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12)),
+              ),
+              child: Row(children: [
+                Icon(Icons.video_call_rounded,
+                    size: 16,
+                    color: widget.isMe
+                        ? Colors.white70
+                        : Colors.grey[600]),
+                const SizedBox(width: 6),
+                Text('Meeting',
+                    style: TextStyle(
+                        color: widget.isMe
+                            ? Colors.white70
+                            : Colors.grey[600],
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500)),
+              ]),
+            ),
+            // Content
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: widget.isMe
+                              ? Colors.white
+                              : Colors.black87,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  if (time.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(time,
+                        style: TextStyle(
+                            color: widget.isMe
+                                ? Colors.white70
+                                : Colors.grey[700],
+                            fontSize: 13)),
+                  ],
+                  if (note.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(note,
+                        style: TextStyle(
+                            color: widget.isMe
+                                ? Colors.white60
+                                : Colors.grey[600],
+                            fontSize: 12)),
+                  ],
+                  if (meetingUrl.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.link_rounded, size: 13, color: Colors.grey[500]),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            meetingUrl,
+                            style: TextStyle(
+                              color: const Color(0xFF2563EB),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              decoration: TextDecoration.underline,
+                              decorationColor: const Color(0xFF2563EB),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ]),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   ScaffoldMessengerState get _scaffoldMessenger => ScaffoldMessenger.of(context);
 
@@ -128,6 +272,7 @@ class _MessageBubbleState extends State<MessageBubble> {
       });
     } catch (e) {
       print('Error initializing audio player: $e');
+
     }
   }
   Future<void> _shareMessage() async {
@@ -1278,14 +1423,16 @@ class _MessageBubbleState extends State<MessageBubble> {
                     )
 
                   else if (widget.content != null) ...[
-                      ClickableMessageText(
-                        text: widget.content!,
-                        isMe: widget.isMe,
-                      ),
-
-                      // 🔥 ADD THIS
-                      if (widget.isLink && widget.linkMeta != null)
-                        _buildLinkPreview(),
+                      if (_isMeetingMessage)
+                        _buildMeetingCard()
+                      else ...[
+                        ClickableMessageText(
+                          text: widget.content!,
+                          isMe: widget.isMe,
+                        ),
+                        if (widget.isLink && widget.linkMeta != null)
+                          _buildLinkPreview(),
+                      ],
                     ],
 
 
@@ -1362,20 +1509,31 @@ class _MessageBubbleState extends State<MessageBubble> {
       title: const Text('Forward'),
       onTap: () {
         Navigator.pop(context);
-        final msgMap = {
-          '_id'          : widget.messageId,
-          'text'         : widget.content ?? '',
-          'isFile'       : widget.isFile,
-          'fileName'     : widget.fileName ?? '',
-          'fileUrl'      : widget.fileUrl ?? '',
-          'isAudio'      : widget.isAudio,
-          'audioUrl'     : widget.audioUrl ?? '',
+        // In the Forward ListTile's onTap:
+        String? meetingUrl;
+        if ((widget.content ?? '').trimLeft().startsWith('📅')) {
+          meetingUrl = widget.linkMeta?['url']?.toString();
+          if (meetingUrl == null) {
+            final match = RegExp(r'https?://[^\s\n]+').firstMatch(widget.content ?? '');
+            meetingUrl = match?.group(0)?.replaceAll(RegExp(r'[.,;:!?]+$'), '');
+          }
+        }
 
-          // ✅ Only include if it's actually a shared post
-          'isSharedPost' : widget.isSharedPost,
-          if (widget.isSharedPost)
-            'sharedPost' : widget.sharedPostData,
+        final msgMap = {
+          '_id'      : widget.messageId,
+          'text'     : widget.content ?? '',
+          'isFile'   : widget.isFile,
+          'fileName' : widget.fileName ?? '',
+          'fileUrl'  : widget.fileUrl ?? '',
+          'isAudio'  : widget.isAudio,
+          'audioUrl' : widget.audioUrl ?? '',
+          'isSharedPost': widget.isSharedPost,
+          if (widget.isSharedPost) 'sharedPost': widget.sharedPostData,
+          'link'    : widget.isLink || meetingUrl != null,
+          'linkMeta': widget.linkMeta ?? (meetingUrl != null ? {'url': meetingUrl} : null),
         };
+
+
         Navigator.push(
           context,
           MaterialPageRoute(

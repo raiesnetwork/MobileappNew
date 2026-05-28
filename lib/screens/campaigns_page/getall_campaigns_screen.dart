@@ -12,14 +12,7 @@ import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart';
 
 class CampaignsScreen extends StatefulWidget {
-  final Widget Function(String?, {bool isProfileImage}) buildImageWidget;
-  final String communityId;
-
-  const CampaignsScreen({
-    super.key,
-    required this.buildImageWidget,
-    required this.communityId,
-  });
+  const CampaignsScreen({super.key});
 
   @override
   State<CampaignsScreen> createState() => _CampaignsScreenState();
@@ -32,7 +25,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
-  // ── Design tokens (mirrors AnnouncementScreen _T) ──────────────────────────
   static const _accent = Color(0xFF6366F1);
   static const _accentLight = Color(0xFFEEF0FD);
   static const _textPrimary = Color(0xFF1A1A2E);
@@ -114,7 +106,7 @@ class _CampaignsScreenState extends State<CampaignsScreen>
       MaterialPageRoute(
         builder: (context) => CreateCampaignScreen(
           campaign: campaign,
-          communityId: widget.communityId,
+          communityId: '',
         ),
       ),
     );
@@ -189,7 +181,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
       String imageUrl = raw.toString().trim();
       if (imageUrl.isEmpty) continue;
 
-      // Filter out junk values
       if (imageUrl == 'null' ||
           imageUrl == 'undefined' ||
           imageUrl == '[object Object]' ||
@@ -197,28 +188,16 @@ class _CampaignsScreenState extends State<CampaignsScreen>
         continue;
       }
 
-      // 1. Base64 data URL
-      if (imageUrl.startsWith('data:')) {
-        return imageUrl;
-      }
-
-      // 2. Full HTTPS URL
-      if (imageUrl.startsWith('https://')) {
-        return imageUrl;
-      }
-
-      // 3. HTTP → upgrade to HTTPS
+      if (imageUrl.startsWith('data:')) return imageUrl;
+      if (imageUrl.startsWith('https://')) return imageUrl;
       if (imageUrl.startsWith('http://')) {
         return imageUrl.replaceFirst('http://', 'https://');
       }
-
-      // 4. S3 hostname without scheme
       if (imageUrl.contains('amazonaws.com') ||
           imageUrl.contains('cloudfront.net')) {
         return 'https://$imageUrl';
       }
 
-// 5. Bare filename — likely stale seed data, skip to show placeholder
       print('⚠️ Skipping bare filename for ${campaign['_id']}: "$imageUrl"');
     }
 
@@ -226,14 +205,12 @@ class _CampaignsScreenState extends State<CampaignsScreen>
   }
 
   Widget _buildCampaignImage(String rawCoverImage) {
-    // Wrap the raw string in a map so getCampaignImageUrl can process it
     final imageUrl = getCampaignImageUrl({'coverImage': rawCoverImage});
 
     if (imageUrl == null) {
       return _buildImagePlaceholder(isError: false);
     }
 
-    // Handle base64 inline
     if (imageUrl.startsWith('data:')) {
       try {
         final base64Data = imageUrl.split(',').last;
@@ -243,24 +220,20 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           errorBuilder: (_, __, ___) => _buildImagePlaceholder(isError: true),
         );
       } catch (e) {
-        print('❌ Base64 decode failed: $e');
         return _buildImagePlaceholder(isError: true);
       }
     }
 
-    // Network image
     return CachedNetworkImage(
       imageUrl: imageUrl,
       fit: BoxFit.cover,
       placeholder: (_, __) => _buildImagePlaceholder(isLoading: true),
-      errorWidget: (_, url, error) {
-        print('❌ Image load failed: $url → $error');
-        return _buildImagePlaceholder(isError: true);
-      },
+      errorWidget: (_, url, error) => _buildImagePlaceholder(isError: true),
     );
   }
 
-  Widget _buildImagePlaceholder({bool isError = false, bool isLoading = false}) {
+  Widget _buildImagePlaceholder(
+      {bool isError = false, bool isLoading = false}) {
     return Container(
       decoration: const BoxDecoration(color: _accentLight),
       child: Center(
@@ -281,8 +254,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
       ),
     );
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -328,8 +299,7 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           if (provider.isLoading && provider.campaigns.isEmpty) {
             return _buildLoadingState();
           }
-          if (provider.campaigns.isEmpty &&
-              provider.errorMessage != null) {
+          if (provider.campaigns.isEmpty && provider.errorMessage != null) {
             return _buildErrorState(provider);
           }
           if (provider.campaigns.isEmpty) {
@@ -345,16 +315,15 @@ class _CampaignsScreenState extends State<CampaignsScreen>
               child: ListView.builder(
                 controller: _scrollController,
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding:
-                const EdgeInsets.fromLTRB(16, 14, 16, 100),
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
                 itemCount: provider.campaigns.length +
                     (provider.hasMoreCampaigns ? 1 : 0),
                 itemBuilder: (context, index) {
                   if (index < provider.campaigns.length) {
                     return TweenAnimationBuilder<double>(
                       tween: Tween(begin: 0, end: 1),
-                      duration: Duration(
-                          milliseconds: 350 + index * 60),
+                      duration:
+                      Duration(milliseconds: 350 + index * 60),
                       curve: Curves.easeOutCubic,
                       builder: (_, v, child) => Opacity(
                         opacity: v,
@@ -384,7 +353,7 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           Container(
             width: 64,
             height: 64,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: _accentLight,
               shape: BoxShape.circle,
             ),
@@ -418,8 +387,8 @@ class _CampaignsScreenState extends State<CampaignsScreen>
               height: 64,
               decoration: const BoxDecoration(
                   color: _redLight, shape: BoxShape.circle),
-              child: const Icon(Icons.wifi_off_rounded,
-                  color: _red, size: 28),
+              child:
+              const Icon(Icons.wifi_off_rounded, color: _red, size: 28),
             ),
             const SizedBox(height: 16),
             const Text('Couldn\'t load',
@@ -473,12 +442,12 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                   color: _textPrimary)),
           const SizedBox(height: 6),
           const Text('Check back later or create one',
-              style:
-              TextStyle(fontSize: 13, color: _textSecondary)),
+              style: TextStyle(fontSize: 13, color: _textSecondary)),
         ],
       ),
     );
   }
+
   void _showCreateCampaignDialog() {
     showModalBottomSheet(
       context: context,
@@ -541,7 +510,8 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                     const url = 'https://.ixes.ai/api/campaigns/create';
                     final uri = Uri.parse(url);
                     if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -603,7 +573,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
     (campaign['schedule'] ?? 'one_time').toString().toLowerCase();
     final String communityName =
         campaign['community']?['name'] ?? 'Unknown';
-    // ── Fix: handle both bool true and string "true" ──────────────
     final bool isAdmin = campaign['isUserAdmin'] == true ||
         campaign['isUserAdmin'].toString() == 'true';
     final String type =
@@ -632,7 +601,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
             MaterialPageRoute(
               builder: (_) => CampaignDetailsScreen(
                 campaignId: campaign['_id'],
-                buildImageWidget: widget.buildImageWidget,
                 communityName: communityName,
               ),
             ),
@@ -641,7 +609,7 @@ class _CampaignsScreenState extends State<CampaignsScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Cover image ──────────────────────────────────────
+              // Cover image
               if (coverImage.isNotEmpty)
                 ClipRRect(
                   borderRadius: const BorderRadius.vertical(
@@ -671,17 +639,14 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ── Title row + ⋮ menu ───────────────────────
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Icon badge
                         Container(
                           width: 40,
                           height: 40,
                           decoration: BoxDecoration(
-                            color: _getTypeColor(type)
-                                .withOpacity(0.1),
+                            color: _getTypeColor(type).withOpacity(0.1),
                             borderRadius: BorderRadius.circular(11),
                           ),
                           child: Icon(
@@ -693,12 +658,10 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                         const SizedBox(width: 10),
                         Expanded(
                           child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                campaign['title'] ??
-                                    'Untitled Campaign',
+                                campaign['title'] ?? 'Untitled Campaign',
                                 style: const TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
@@ -728,8 +691,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                             ],
                           ),
                         ),
-
-                        // ── ⋮ PopupMenuButton ────────────────────
                         PopupMenuButton<String>(
                           icon: const Icon(Icons.more_vert_rounded,
                               color: _textTertiary, size: 20),
@@ -739,7 +700,8 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                           elevation: 4,
                           onSelected: (v) {
                             if (v == 'share')
-                              _shareCampaign(campaign['_id'], campaign['title'] ?? 'Campaign');
+                              _shareCampaign(campaign['_id'],
+                                  campaign['title'] ?? 'Campaign');
                             if (v == 'edit') _editCampaign(campaign);
                             if (v == 'delete')
                               _confirmDelete(campaign['_id']);
@@ -770,15 +732,13 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                                 value: 'members',
                                 height: 42,
                                 child: Row(children: [
-                                  const Icon(
-                                      Icons.people_alt_outlined,
-                                      color: _accent,
-                                      size: 18),
+                                  const Icon(Icons.people_alt_outlined,
+                                      color: _accent, size: 18),
                                   const SizedBox(width: 10),
                                   Text(
                                     'Members${campaign['totalMembers'] != null ? ' · ${campaign['totalMembers']}' : ''}',
-                                    style: const TextStyle(
-                                        fontSize: 14),
+                                    style:
+                                    const TextStyle(fontSize: 14),
                                   ),
                                 ]),
                               ),
@@ -797,15 +757,12 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                                 value: 'delete',
                                 height: 42,
                                 child: Row(children: const [
-                                  Icon(
-                                      Icons.delete_outline_rounded,
-                                      color: _red,
-                                      size: 18),
+                                  Icon(Icons.delete_outline_rounded,
+                                      color: _red, size: 18),
                                   SizedBox(width: 10),
                                   Text('Delete',
                                       style: TextStyle(
-                                          fontSize: 14,
-                                          color: _red)),
+                                          fontSize: 14, color: _red)),
                                 ]),
                               ),
                             ],
@@ -814,7 +771,6 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                       ],
                     ),
 
-                    // ── Description ──────────────────────────────
                     if ((campaign['description'] ?? '').isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text(
@@ -829,13 +785,11 @@ class _CampaignsScreenState extends State<CampaignsScreen>
                       ),
                     ],
 
-                    // ── Progress bar ─────────────────────────────
                     if ((campaign['totalAmountNeeded'] ?? 0) > 0) ...[
                       const SizedBox(height: 12),
                       _buildProgressBar(campaign),
                     ],
 
-                    // ── Status chips (non-action, info only) ─────
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -896,8 +850,8 @@ class _CampaignsScreenState extends State<CampaignsScreen>
             ),
             Text(
               'of $currency${needed.toInt()}',
-              style: const TextStyle(
-                  fontSize: 12, color: _textTertiary),
+              style:
+              const TextStyle(fontSize: 12, color: _textTertiary),
             ),
           ],
         ),

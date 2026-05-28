@@ -38,13 +38,17 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
 
   double _latitude  = 0.0;
   double _longitude = 0.0;
-  String _address   = 'Unknown';
+  String _address   = 'Fetching location…';
+  bool   _locationFetched = false;
+  bool   _locationLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchLocationSilently();
     _loadTodayAttendance();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showLocationPermissionDialog();
+    });
   }
 
   @override
@@ -53,28 +57,332 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
     super.dispose();
   }
 
-  Future<void> _fetchLocationSilently() async {
+  // ── Location Permission Dialog ────────────────────────────────────────────
+  Future<void> _showLocationPermissionDialog() async {
+    final perm = await Geolocator.checkPermission();
+    // If already granted, just fetch silently
+    if (perm == LocationPermission.always ||
+        perm == LocationPermission.whileInUse) {
+      _fetchLocation();
+      return;
+    }
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: _surface,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [_accent, Color(0xFF8E7CF8)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                        color: _accent.withOpacity(0.30),
+                        blurRadius: 20,
+                        offset: const Offset(0, 6)),
+                  ],
+                ),
+                child: const Icon(Icons.location_on_rounded,
+                    color: Colors.white, size: 36),
+              ),
+              const SizedBox(height: 20),
+
+              // Title
+              const Text(
+                'Allow Location Access',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: _dark,
+                    letterSpacing: -0.4),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+
+              // Body
+              Text(
+                'Your location is recorded with attendance to verify you were present at the right place.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: _muted,
+                    height: 1.55),
+              ),
+              const SizedBox(height: 28),
+
+              // Allow button
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    await _fetchLocation();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _accent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Allow Location',
+                      style: TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Deny button
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    setState(() {
+                      _address = 'Location not provided';
+                      _locationLoading = false;
+                    });
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: _muted,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Not Now',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w500)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Location ─────────────────────────────────────────────────────────────
+  Future<void> _fetchLocation() async {
+    if (!mounted) return;
+    setState(() {
+      _locationLoading = true;
+      _address = 'Fetching location…';
+    });
+
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) return;
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-        if (perm == LocationPermission.denied) return;
+      // ── Step 1: Check if GPS/Location service is ON ──────────────────────
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        setState(() { _address = 'Turn on device location'; _locationLoading = false; });
+        // Ask user to enable location service
+        _showEnableLocationServiceDialog();
+        return;
       }
-      if (perm == LocationPermission.deniedForever) return;
+
+      // ── Step 2: Check / request permission ──────────────────────────────
+      var perm = await Geolocator.checkPermission();
+
+      if (perm == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        setState(() { _address = 'Location permission blocked'; _locationLoading = false; });
+        _showOpenSettingsDialog();
+        return;
+      }
+
+      if (perm == LocationPermission.denied) {
+        // This triggers the real OS permission popup
+        perm = await Geolocator.requestPermission();
+      }
+
+      if (perm == LocationPermission.denied) {
+        if (!mounted) return;
+        setState(() { _address = 'Location permission denied'; _locationLoading = false; });
+        return;
+      }
+
+      if (perm == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        setState(() { _address = 'Location permission blocked'; _locationLoading = false; });
+        _showOpenSettingsDialog();
+        return;
+      }
+
+      // ── Step 3: Get coordinates ──────────────────────────────────────────
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.low);
+          desiredAccuracy: LocationAccuracy.high);
+
+      // ── Step 4: Reverse geocode ──────────────────────────────────────────
+      String addr = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
       try {
         final marks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
         final p = marks.first;
-        final addr = '${p.locality ?? ''}, ${p.administrativeArea ?? ''}'
-            .trim()
-            .replaceAll(RegExp(r'^,\s*|,\s*$'), '');
-        _address = addr.isEmpty ? 'Unknown' : addr;
+        final parts = [
+          p.subLocality ?? '',
+          p.locality ?? '',
+          p.administrativeArea ?? '',
+        ].where((s) => s.isNotEmpty).toList();
+        if (parts.isNotEmpty) addr = parts.join(', ');
       } catch (_) {}
-      _latitude  = pos.latitude;
-      _longitude = pos.longitude;
-    } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _latitude        = pos.latitude;
+          _longitude       = pos.longitude;
+          _address         = addr;
+          _locationFetched = true;
+          _locationLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() { _address = 'Could not get location'; _locationLoading = false; });
+    }
+  }
+
+  /// Shown when device GPS is toggled OFF
+  void _showEnableLocationServiceDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: _surface,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 68, height: 68,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _orange.withOpacity(0.12),
+              ),
+              child: const Icon(Icons.location_off_rounded, color: _orange, size: 34),
+            ),
+            const SizedBox(height: 18),
+            const Text('Location is Off',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _dark),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            Text(
+              'Please turn on your device location (GPS) to record attendance with your location.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: _muted, height: 1.55),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity, height: 50,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await Geolocator.openLocationSettings();
+                  // Try again after user comes back
+                  await Future.delayed(const Duration(seconds: 1));
+                  _fetchLocation();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _orange,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text('Open Location Settings',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                setState(() { _address = 'Location not provided'; _locationLoading = false; });
+              },
+              child: const Text('Skip', style: TextStyle(color: _muted, fontSize: 14)),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Shown when permission is permanently denied — must open app settings
+  void _showOpenSettingsDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        backgroundColor: _surface,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 32, 28, 24),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 68, height: 68,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _red.withOpacity(0.10),
+              ),
+              child: const Icon(Icons.lock_outline_rounded, color: _red, size: 34),
+            ),
+            const SizedBox(height: 18),
+            const Text('Permission Blocked',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: _dark),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            Text(
+              'Location access was blocked. Please open App Settings and allow location permission manually.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: _muted, height: 1.55),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity, height: 50,
+              child: ElevatedButton(
+                onPressed: () async {
+                  Navigator.of(ctx).pop();
+                  await Geolocator.openAppSettings();
+                  await Future.delayed(const Duration(seconds: 1));
+                  _fetchLocation();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _accent,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                ),
+                child: const Text('Open App Settings',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                setState(() { _address = 'Location not provided'; _locationLoading = false; });
+              },
+              child: const Text('Skip', style: TextStyle(color: _muted, fontSize: 14)),
+            ),
+          ]),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadTodayAttendance() async {
@@ -84,7 +392,16 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
     );
   }
 
+  // ── Mark Attendance ───────────────────────────────────────────────────────
   Future<void> _markAttendance() async {
+    // Guard: if already marked this session, do not submit again
+    if (context.read<AttendanceProvider>().hasMarkedToday) return;
+
+    // If location not yet fetched, try once more before submitting
+    if (!_locationFetched && !_locationLoading) {
+      await _fetchLocation();
+    }
+
     final result = await context.read<AttendanceProvider>().markAttendance(
       studentId: widget.studentId,
       tenantId:  widget.communityId,
@@ -138,16 +455,26 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
             const SizedBox(height: 20),
             const Text('Attendance Marked',
                 style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: _dark,
-                    letterSpacing: -0.5)),
+                    fontSize: 22, fontWeight: FontWeight.w800,
+                    color: _dark, letterSpacing: -0.5)),
             const SizedBox(height: 8),
             Text(
               'Your attendance is recorded for today.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: _muted, height: 1.4),
             ),
+            if (_locationFetched) ...[
+              const SizedBox(height: 14),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.location_on_rounded, size: 14, color: _muted),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(_address,
+                      style: const TextStyle(fontSize: 12, color: _muted),
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ]),
+            ],
             const SizedBox(height: 28),
             SizedBox(
               width: double.infinity,
@@ -165,8 +492,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
                       borderRadius: BorderRadius.circular(14)),
                 ),
                 child: const Text('View History',
-                    style: TextStyle(
-                        fontSize: 15, fontWeight: FontWeight.w700)),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
               ),
             ),
           ]),
@@ -221,10 +547,8 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Mark Attendance',
               style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: _dark,
-                  letterSpacing: -0.3)),
+                  fontSize: 17, fontWeight: FontWeight.w800,
+                  color: _dark, letterSpacing: -0.3)),
           Text(widget.communityName,
               style: const TextStyle(fontSize: 11, color: _muted)),
         ]),
@@ -244,9 +568,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
               const SizedBox(width: 5),
               const Text('History',
                   style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: _accent)),
+                      fontSize: 12, fontWeight: FontWeight.w600, color: _accent)),
             ]),
           ),
         ),
@@ -265,10 +587,8 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         // ── Status label
         const Text('Status',
             style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _muted,
-                letterSpacing: 0.3)),
+                fontSize: 13, fontWeight: FontWeight.w600,
+                color: _muted, letterSpacing: 0.3)),
         const SizedBox(height: 12),
 
         // ── Status cards
@@ -297,15 +617,21 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
             onTap: () => setState(() => _selectedStatus = 'late'),
           ),
         ]),
+        const SizedBox(height: 16),
+
+        // ── Location row ─────────────────────────────────────────────────
+        _LocationRow(
+          address:  _address,
+          isLoading: _locationLoading,
+          onRefresh: _locationFetched ? _fetchLocation : _showLocationPermissionDialog,
+        ),
         const SizedBox(height: 28),
 
         // ── Remark label
         const Text('Remark',
             style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: _muted,
-                letterSpacing: 0.3)),
+                fontSize: 13, fontWeight: FontWeight.w600,
+                color: _muted, letterSpacing: 0.3)),
         const SizedBox(height: 12),
 
         // ── Remark field
@@ -323,10 +649,9 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
           child: TextField(
             controller: _remarkController,
             maxLines: 3,
-            style: const TextStyle(
-                fontSize: 14, color: _dark, height: 1.5),
+            style: const TextStyle(fontSize: 14, color: _dark, height: 1.5),
             decoration: InputDecoration(
-              hintText: 'Optional note...',
+              hintText: 'Optional note…',
               hintStyle: TextStyle(color: _muted.withOpacity(0.7), fontSize: 14),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
@@ -345,7 +670,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: provider.isMarking ? null : _markAttendance,
+            onPressed: (provider.isMarking || _locationLoading) ? null : _markAttendance,
             style: ElevatedButton.styleFrom(
               backgroundColor: _accent,
               disabledBackgroundColor: _muted.withOpacity(0.15),
@@ -354,10 +679,9 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16)),
             ),
-            child: provider.isMarking
+            child: (provider.isMarking || _locationLoading)
                 ? const SizedBox(
-                width: 22,
-                height: 22,
+                width: 22, height: 22,
                 child: CircularProgressIndicator(
                     strokeWidth: 2.5, color: Colors.white))
                 : Text(
@@ -381,10 +705,78 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
                   borderRadius: BorderRadius.circular(16)),
             ),
             child: const Text('View Attendance History',
-                style: TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w600)),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
           ),
         ),
+      ]),
+    );
+  }
+}
+
+// ── Location Row ──────────────────────────────────────────────────────────────
+class _LocationRow extends StatelessWidget {
+  final String address;
+  final bool isLoading;
+  final VoidCallback onRefresh;
+
+  const _LocationRow({
+    required this.address,
+    required this.isLoading,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: _accent.withOpacity(0.10),
+            shape: BoxShape.circle,
+          ),
+          child: isLoading
+              ? const Padding(
+              padding: EdgeInsets.all(7),
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: _accent))
+              : const Icon(Icons.location_on_rounded, size: 18, color: _accent),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Location',
+                style: TextStyle(
+                    fontSize: 11, fontWeight: FontWeight.w600,
+                    color: _muted, letterSpacing: 0.3)),
+            const SizedBox(height: 2),
+            Text(address,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600, color: _dark),
+                overflow: TextOverflow.ellipsis),
+          ]),
+        ),
+        if (!isLoading)
+          GestureDetector(
+            onTap: onRefresh,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(Icons.refresh_rounded, size: 18,
+                  color: _muted.withOpacity(0.7)),
+            ),
+          ),
       ]),
     );
   }
@@ -419,28 +811,21 @@ class _StatusCard extends StatelessWidget {
             color: isSelected ? color : _surface,
             borderRadius: BorderRadius.circular(16),
             boxShadow: isSelected
-                ? [
-              BoxShadow(
-                  color: color.withOpacity(0.35),
-                  blurRadius: 16,
-                  offset: const Offset(0, 6))
-            ]
-                : [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 12,
-                  offset: const Offset(0, 2))
-            ],
+                ? [BoxShadow(
+                color: color.withOpacity(0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 6))]
+                : [BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 2))],
           ),
           child: Column(children: [
-            Icon(icon,
-                size: 28,
-                color: isSelected ? Colors.white : color),
+            Icon(icon, size: 28, color: isSelected ? Colors.white : color),
             const SizedBox(height: 8),
             Text(label,
                 style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+                    fontSize: 12, fontWeight: FontWeight.w700,
                     color: isSelected ? Colors.white : const Color(0xFF8E8EA0),
                     letterSpacing: 0.2)),
           ]),
@@ -462,8 +847,9 @@ class _AlreadyMarkedView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = (record['status'] ?? 'present').toString().toLowerCase();
-    final remark = (record['remark'] ?? '').toString().trim();
+    final status  = (record['status'] ?? 'present').toString().toLowerCase();
+    final remark  = (record['remark'] ?? '').toString().trim();
+    final address = (record['location']?['address'] ?? '').toString().trim();
 
     final Color color;
     final IconData icon;
@@ -494,7 +880,6 @@ class _AlreadyMarkedView extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 28),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          // Big gradient icon
           Container(
             width: 100,
             height: 100,
@@ -518,12 +903,9 @@ class _AlreadyMarkedView extends StatelessWidget {
 
           const Text('Already Marked',
               style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                  color: _dark,
-                  letterSpacing: -0.5)),
+                  fontSize: 22, fontWeight: FontWeight.w800,
+                  color: _dark, letterSpacing: -0.5)),
           const SizedBox(height: 8),
-
           Text(
             "You've already marked attendance for today.",
             textAlign: TextAlign.center,
@@ -531,11 +913,9 @@ class _AlreadyMarkedView extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-
           // Status pill
           Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             decoration: BoxDecoration(
               color: color.withOpacity(0.10),
               borderRadius: BorderRadius.circular(30),
@@ -545,17 +925,29 @@ class _AlreadyMarkedView extends StatelessWidget {
               const SizedBox(width: 7),
               Text(label,
                   style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: color)),
+                      fontSize: 14, fontWeight: FontWeight.w700, color: color)),
             ]),
           ),
+
+          // ── Location under status pill
+          if (address.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              const Icon(Icons.location_on_rounded, size: 13, color: _muted),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(address,
+                    style: const TextStyle(fontSize: 12, color: _muted),
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center),
+              ),
+            ]),
+          ],
 
           if (remark.isNotEmpty) ...[
             const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: _surface,
                 borderRadius: BorderRadius.circular(14),
@@ -574,9 +966,7 @@ class _AlreadyMarkedView extends StatelessWidget {
                   Expanded(
                     child: Text(remark,
                         style: const TextStyle(
-                            fontSize: 13,
-                            color: _dark,
-                            height: 1.4)),
+                            fontSize: 13, color: _dark, height: 1.4)),
                   ),
                 ],
               ),
@@ -598,8 +988,7 @@ class _AlreadyMarkedView extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16)),
               ),
               child: const Text('View Attendance History',
-                  style: TextStyle(
-                      fontSize: 15, fontWeight: FontWeight.w700)),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
             ),
           ),
         ]),

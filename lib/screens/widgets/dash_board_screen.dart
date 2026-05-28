@@ -178,10 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (context) => CampaignsScreen(
-                                    buildImageWidget: _buildImageWidget,
-                                    communityId: '',
-                                  ),
+                                  builder: (context) => const CampaignsScreen(),
                                 ),
                               );
                             },

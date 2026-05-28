@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
@@ -9,12 +8,10 @@ import '../../providers/campaign_provider.dart';
 class CampaignDetailsScreen extends StatefulWidget {
   final String campaignId;
   final String communityName;
-  final Widget Function(String?, {bool isProfileImage}) buildImageWidget;
 
   const CampaignDetailsScreen({
     super.key,
     required this.campaignId,
-    required this.buildImageWidget,
     required this.communityName,
   });
 
@@ -56,8 +53,6 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
     final response = await provider.getCampaignDetails(widget.campaignId);
     if (mounted) {
       setState(() {
-        // FIX BUG 5: backend wraps in { data: {...} }, provider should unwrap.
-        // Support both shapes: response['campaign'] or response['data']
         campaign = response['campaign'] ?? response['data'];
         errorMessage =
         (response['error'] == true) ? response['message'] : null;
@@ -132,7 +127,8 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
               ),
               icon: const Icon(Icons.refresh_rounded, size: 18),
               label: const Text('Retry',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                  style:
+                  TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
             ),
           ],
         ),
@@ -228,7 +224,6 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
         background: Stack(
           fit: StackFit.expand,
           children: [
-            // Image or gradient
             coverImage.isNotEmpty
                 ? _buildDetailImage(coverImage)
                 : Container(
@@ -243,10 +238,10 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
                 ),
               ),
               child: const Center(
-                child: Icon(Icons.campaign, size: 80, color: Colors.white),
+                child: Icon(Icons.campaign,
+                    size: 80, color: Colors.white),
               ),
             ),
-            // Gradient overlay
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -262,7 +257,6 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
                 ),
               ),
             ),
-            // Type badge
             Positioned(
               bottom: 20,
               left: 16,
@@ -382,8 +376,8 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
           ),
           if (isLong)
             GestureDetector(
-              onTap: () =>
-                  setState(() => isDescriptionExpanded = !isDescriptionExpanded),
+              onTap: () => setState(
+                      () => isDescriptionExpanded = !isDescriptionExpanded),
               child: Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
@@ -519,7 +513,6 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
   }
 
   Widget _buildDetailsGrid() {
-    // FIX BUG 4: use amountPayablePerUser not amountPerUser
     final items = [
       _GridItem(
           icon: Icons.schedule_rounded,
@@ -614,7 +607,6 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
   }
 
   Widget _buildStatsRow() {
-    // FIX BUG 5: paidUsers is returned inside campaign.toObject() from backend
     final paidUsers = campaign!['paidUsers'] as List? ?? [];
     final stats = [
       _StatItem(
@@ -720,22 +712,41 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  /// Handles base64, http/https, and relative paths — no buildImageWidget needed
   Widget _buildDetailImage(String imageUrl) {
     if (imageUrl.startsWith('data:image')) {
       try {
         final bytes = base64Decode(imageUrl.split(',').last);
         return Image.memory(bytes, fit: BoxFit.cover);
-      } catch (_) {}
+      } catch (_) {
+        return _imageFallback();
+      }
     }
-    if (imageUrl.startsWith('http')) {
-      return Image.network(imageUrl, fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(color: const Color(0xFFF0F4FF)));
+
+    String url = imageUrl;
+    if (imageUrl.startsWith('http://')) {
+      url = imageUrl.replaceFirst('http://', 'https://');
+    } else if (!imageUrl.startsWith('https://')) {
+      // relative path
+      url = 'https://api.ixes.ai${imageUrl.startsWith('/') ? '' : '/'}$imageUrl';
     }
-    final processed = imageUrl.startsWith('/')
-        ? 'https://api.ixes.ai$imageUrl'
-        : imageUrl;
-    return widget.buildImageWidget(processed, isProfileImage: false);
+
+    return Image.network(
+      url,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _imageFallback(),
+    );
+  }
+
+  Widget _imageFallback() {
+    return Container(
+      color: const Color(0xFFF0F4FF),
+      child: const Center(
+        child: Icon(Icons.campaign, size: 80, color: Primary),
+      ),
+    );
   }
 
   Color _getTypeColor(String type) {

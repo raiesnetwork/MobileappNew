@@ -217,16 +217,16 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
   Future<void> _startScreenShare() async {
     if (Platform.isAndroid) {
       try {
-        // Start service
         await _screenShareChannel.invokeMethod('startScreenShareService');
-        // Increase delay to 1200ms — Android 14 needs more time to confirm FGS
-        await Future.delayed(const Duration(milliseconds: 1200));
+        debugPrint('✅ FGS confirmed running');
       } on PlatformException catch (e) {
-        _showScreenShareError('Could not start screen share service: ${e.message}');
-        return;
-      } catch (e) {
-        _showScreenShareError('Could not start screen share service: $e');
-        return;
+        debugPrint('❌ FGS failed: ${e.code} - ${e.message}');
+        _showScreenShareError(
+          e.code == 'PERMISSION_DENIED'
+              ? 'Permission denied. Go to Settings → Apps → Ixes → Permissions and allow all permissions.'
+              : 'Could not start screen share: ${e.message}',
+        );
+        return; // Hard stop — never call setScreenShareEnabled
       }
     }
 
@@ -241,21 +241,19 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
       );
       if (mounted) setState(() => _isScreenSharing = true);
     } on PlatformException catch (e) {
-      // Catch the SecurityException from native side gracefully
-      debugPrint('❌ PlatformException during screen share: ${e.code} - ${e.message}');
+      debugPrint('❌ setScreenShareEnabled failed: ${e.code} - ${e.message}');
       if (Platform.isAndroid) {
         _screenShareChannel.invokeMethod('stopScreenShareService').catchError((_) {});
       }
-      // Don't crash — show snackbar instead
       if (mounted) setState(() => _isScreenSharing = false);
       _showScreenShareError('Screen sharing failed. Please try again.');
     } catch (e) {
-      debugPrint('❌ Screen share error: $e');
+      debugPrint('❌ Screen share cancelled: $e');
       if (Platform.isAndroid) {
         _screenShareChannel.invokeMethod('stopScreenShareService').catchError((_) {});
       }
       if (mounted) setState(() => _isScreenSharing = false);
-      _showScreenShareError('Screen sharing was cancelled or failed.');
+      _showScreenShareError('Screen sharing was cancelled.');
     }
   }
 

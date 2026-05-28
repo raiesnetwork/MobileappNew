@@ -56,8 +56,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   List<Map<String, dynamic>> _filtered(List<Map<String, dynamic>> records) {
     if (_filter == 'all') return records;
     return records
-        .where((r) =>
-    (r['status'] ?? '').toString().toLowerCase() == _filter)
+        .where((r) => (r['status'] ?? '').toString().toLowerCase() == _filter)
         .toList();
   }
 
@@ -83,10 +82,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                 children: [
                   const Text('History',
                       style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: _dark,
-                          letterSpacing: -0.3)),
+                          fontSize: 17, fontWeight: FontWeight.w800,
+                          color: _dark, letterSpacing: -0.3)),
                   Text(widget.communityName,
                       style: const TextStyle(fontSize: 11, color: _muted)),
                 ],
@@ -94,8 +91,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
             ),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
-              child:
-              Container(height: 1, color: const Color(0xFFF0F0F5)),
+              child: Container(height: 1, color: const Color(0xFFF0F0F5)),
             ),
           ),
           body: provider.isLoading
@@ -168,23 +164,17 @@ class _StatsRow extends StatelessWidget {
         ],
       ),
       child: Column(children: [
-        // Top: rate + label
         Row(children: [
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(rateStr,
                 style: const TextStyle(
-                    fontSize: 36,
-                    fontWeight: FontWeight.w800,
-                    color: _dark,
-                    letterSpacing: -1)),
+                    fontSize: 36, fontWeight: FontWeight.w800,
+                    color: _dark, letterSpacing: -1)),
             const Text('Attendance Rate',
                 style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: _muted)),
+                    fontSize: 12, fontWeight: FontWeight.w500, color: _muted)),
           ]),
           const Spacer(),
-          // Mini stat pills
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             _MiniPill(label: 'Present', count: present, color: _green),
             const SizedBox(height: 5),
@@ -194,8 +184,6 @@ class _StatsRow extends StatelessWidget {
           ]),
         ]),
         const SizedBox(height: 16),
-
-        // Progress bar
         ClipRRect(
           borderRadius: BorderRadius.circular(6),
           child: LinearProgressIndicator(
@@ -212,13 +200,10 @@ class _StatsRow extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('$total total days',
-                style:
-                const TextStyle(fontSize: 11, color: _muted)),
+                style: const TextStyle(fontSize: 11, color: _muted)),
             Text('$present present',
                 style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: _green)),
+                    fontSize: 11, fontWeight: FontWeight.w600, color: _green)),
           ],
         ),
       ]),
@@ -230,8 +215,7 @@ class _MiniPill extends StatelessWidget {
   final String label;
   final int    count;
   final Color  color;
-  const _MiniPill(
-      {required this.label, required this.count, required this.color});
+  const _MiniPill({required this.label, required this.count, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -244,14 +228,11 @@ class _MiniPill extends StatelessWidget {
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text('$count',
             style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: color)),
+                fontSize: 12, fontWeight: FontWeight.w700, color: color)),
         const SizedBox(width: 5),
         Text(label,
             style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
+                fontSize: 11, fontWeight: FontWeight.w500,
                 color: color.withOpacity(0.8))),
       ]),
     );
@@ -282,29 +263,23 @@ class _FilterChips extends StatelessWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 180),
               margin: const EdgeInsets.only(right: 8),
-              padding:
-              const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
               decoration: BoxDecoration(
                 color: isSelected ? _accent : _surface,
                 borderRadius: BorderRadius.circular(30),
                 boxShadow: isSelected
-                    ? [
-                  BoxShadow(
-                      color: _accent.withOpacity(0.30),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4))
-                ]
-                    : [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2))
-                ],
+                    ? [BoxShadow(
+                    color: _accent.withOpacity(0.30),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4))]
+                    : [BoxShadow(
+                    color: Colors.black.withOpacity(0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2))],
               ),
               child: Text(f.$2,
                   style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 13, fontWeight: FontWeight.w600,
                       color: isSelected ? Colors.white : _muted)),
             ),
           );
@@ -319,43 +294,111 @@ class _RecordList extends StatelessWidget {
   final List<Map<String, dynamic>> records;
   const _RecordList({required this.records});
 
-  static String _date(dynamic v) {
-    try {
-      final dt = DateTime.parse(v.toString()).toLocal();
-      const m = ['Jan','Feb','Mar','Apr','May','Jun',
-        'Jul','Aug','Sep','Oct','Nov','Dec'];
-      final now   = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final d     = DateTime(dt.year, dt.month, dt.day);
-      if (d == today) return 'Today';
-      if (d == today.subtract(const Duration(days: 1))) return 'Yesterday';
-      return '${m[dt.month - 1]} ${dt.day}, ${dt.year}';
-    } catch (_) {
-      return v?.toString() ?? '';
+  /// Resolves the timestamp from the record — tries multiple field names.
+  static String? _resolveTimestamp(Map<String, dynamic> r) {
+    for (final key in ['markedAt', 'date', 'createdAt', 'updatedAt']) {
+      final v = r[key];
+      if (v != null && v.toString().isNotEmpty) return v.toString();
     }
+    return null;
   }
 
-  static String _time(dynamic v) {
+  /// Parses ANY timestamp the API returns into a UTC DateTime.
+  ///
+  /// Handles:
+  ///   • ISO 8601  → "2026-05-27T08:22:37.876Z"
+  ///   • JS Date   → "Wed May 27 2026 08:22:37 GMT+0000 (Coordinated Universal Time)"
+  static DateTime? _parseToUtc(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+
+    // 1. Try standard ISO parse first (covers createdAt / updatedAt)
     try {
-      final dt     = DateTime.parse(v.toString()).toLocal();
-      final h      = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-      final min    = dt.minute.toString().padLeft(2, '0');
-      final period = dt.hour < 12 ? 'AM' : 'PM';
-      return '$h:$min $period';
-    } catch (_) {
-      return '';
-    }
+      return DateTime.parse(raw).toUtc();
+    } catch (_) {}
+
+    // 2. Handle JS Date string: "Wed May 27 2026 08:22:37 GMT+0000 (...)"
+    //    Extract just the part before the parenthesis, e.g. "Wed May 27 2026 08:22:37 GMT+0000"
+    try {
+      final cleaned = raw.replaceAll(RegExp(r'\(.*\)'), '').trim();
+      // Replace "GMT+0000" / "GMT+0530" with a proper offset for parsing
+      final normalized = cleaned.replaceFirstMapped(
+        RegExp(r'GMT([+-]\d{4})'),
+            (m) => m.group(1)!, // turns "GMT+0000" → "+0000"
+      );
+      // Now looks like: "Wed May 27 2026 08:22:37 +0000"
+      // Dart can't parse this directly, so do it manually:
+      const months = {
+        'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4,
+        'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8,
+        'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,
+      };
+      // Regex: weekday  month   day   year    HH  MM  SS   ±HHMM
+      final re = RegExp(
+          r'\w+\s+(\w+)\s+(\d+)\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-])(\d{2})(\d{2})');
+      final match = re.firstMatch(normalized);
+      if (match != null) {
+        final month  = months[match.group(1)] ?? 1;
+        final day    = int.parse(match.group(2)!);
+        final year   = int.parse(match.group(3)!);
+        final hour   = int.parse(match.group(4)!);
+        final minute = int.parse(match.group(5)!);
+        final second = int.parse(match.group(6)!);
+        final sign   = match.group(7) == '+' ? 1 : -1;
+        final offH   = int.parse(match.group(8)!);
+        final offM   = int.parse(match.group(9)!);
+        final offsetMinutes = sign * (offH * 60 + offM);
+        final utc = DateTime.utc(year, month, day, hour, minute, second)
+            .subtract(Duration(minutes: offsetMinutes));
+        return utc;
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  /// Converts UTC DateTime → IST (UTC+5:30)
+  static DateTime _toIST(DateTime utc) =>
+      utc.add(const Duration(hours: 5, minutes: 30));
+
+  static String _formatDate(String? raw) {
+    final utc = _parseToUtc(raw);
+    if (utc == null) return 'Unknown';
+
+    final dt = _toIST(utc);
+    const m  = ['Jan','Feb','Mar','Apr','May','Jun',
+      'Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    // Compare date in IST
+    final nowIST   = _toIST(DateTime.now().toUtc());
+    final todayIST = DateTime(nowIST.year, nowIST.month, nowIST.day);
+    final dIST     = DateTime(dt.year, dt.month, dt.day);
+
+    if (dIST == todayIST) return 'Today';
+    if (dIST == todayIST.subtract(const Duration(days: 1))) return 'Yesterday';
+    return '${m[dt.month - 1]} ${dt.day}, ${dt.year}';
+  }
+
+  static String _formatTime(String? raw) {
+    final utc = _parseToUtc(raw);
+    if (utc == null) return '';
+
+    final dt     = _toIST(utc);
+    final h      = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    final min    = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour < 12 ? 'AM' : 'PM';
+    return '$h:$min $period';
   }
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      children: records.asMap().entries.map((entry) {
-        final r      = entry.value;
-        final status = (r['status'] ?? 'present').toString().toLowerCase();
-        final remark = (r['remark'] ?? '').toString().trim();
-        final dateStr = _date(r['date'] ?? r['createdAt']);
-        final timeStr = _time(r['date'] ?? r['createdAt']);
+      children: records.map((r) {
+        final status   = (r['status'] ?? 'present').toString().toLowerCase();
+        final remark   = (r['remark'] ?? '').toString().trim();
+        final address  = (r['location']?['address'] ?? '').toString().trim();
+        final ts       = _resolveTimestamp(r);
+        final dateStr  = _formatDate(ts);
+        final timeStr  = _formatTime(ts);
 
         final Color color;
         final IconData icon;
@@ -383,7 +426,7 @@ class _RecordList extends StatelessWidget {
             ],
           ),
           child: Row(children: [
-            // Color dot / icon
+            // Status icon
             Container(
               width: 44,
               height: 44,
@@ -395,56 +438,67 @@ class _RecordList extends StatelessWidget {
             ),
             const SizedBox(width: 14),
 
-            // Date & time
+            // Info column
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Date
                   Text(dateStr,
                       style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: _dark)),
+                          fontSize: 14, fontWeight: FontWeight.w700, color: _dark)),
                   const SizedBox(height: 3),
-                  Row(children: [
-                    if (timeStr.isNotEmpty) ...[
-                      Icon(Icons.access_time_rounded,
-                          size: 11, color: _muted),
+
+                  // Time row
+                  if (timeStr.isNotEmpty)
+                    Row(children: [
+                      const Icon(Icons.access_time_rounded, size: 11, color: _muted),
                       const SizedBox(width: 3),
                       Text(timeStr,
-                          style: const TextStyle(
-                              fontSize: 12, color: _muted)),
-                    ],
-                    if (remark.isNotEmpty) ...[
-                      const SizedBox(width: 8),
-                      const Text('·',
-                          style: TextStyle(color: _muted)),
-                      const SizedBox(width: 6),
+                          style: const TextStyle(fontSize: 12, color: _muted)),
+                    ]),
+
+                  // Location row
+                  if (address.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      const Icon(Icons.location_on_rounded, size: 11, color: _muted),
+                      const SizedBox(width: 3),
                       Flexible(
-                        child: Text(remark,
-                            style: const TextStyle(
-                                fontSize: 12, color: _muted),
+                        child: Text(address,
+                            style: const TextStyle(fontSize: 12, color: _muted),
                             overflow: TextOverflow.ellipsis),
                       ),
-                    ],
-                  ]),
+                    ]),
+                  ],
+
+                  // Remark row
+                  if (remark.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      const Icon(Icons.notes_rounded, size: 11, color: _muted),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(remark,
+                            style: const TextStyle(fontSize: 12, color: _muted),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ]),
+                  ],
                 ],
               ),
             ),
 
             // Status chip — right
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               decoration: BoxDecoration(
                 color: color.withOpacity(0.10),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(label,
                   style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: color)),
+                      fontSize: 12, fontWeight: FontWeight.w700, color: color)),
             ),
           ]),
         );
@@ -476,13 +530,9 @@ class _EmptyState extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-              filter == 'all'
-                  ? 'No records yet'
-                  : 'No $filter records',
+              filter == 'all' ? 'No records yet' : 'No $filter records',
               style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: _dark)),
+                  fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
           const SizedBox(height: 6),
           Text(
               filter == 'all'
@@ -515,15 +565,12 @@ class _ErrorView extends StatelessWidget {
               color: _red.withOpacity(0.08),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.error_outline_rounded,
-                size: 32, color: _red),
+            child: const Icon(Icons.error_outline_rounded, size: 32, color: _red),
           ),
           const SizedBox(height: 16),
           const Text('Something went wrong',
               style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: _dark)),
+                  fontSize: 15, fontWeight: FontWeight.w700, color: _dark)),
           const SizedBox(height: 6),
           Text(message,
               textAlign: TextAlign.center,
@@ -537,8 +584,7 @@ class _ErrorView extends StatelessWidget {
               backgroundColor: _accent,
               foregroundColor: Colors.white,
               elevation: 0,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 24, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),
             ),
