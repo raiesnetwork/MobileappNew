@@ -42,15 +42,24 @@ class _NotificationScreenState extends State<NotificationScreen> {
   void _navigateFromNotification(Map<String, dynamic> notification) async {
     final type = notification['type'] ?? '';
     print('🔔 Tapped notification → type: "$type"');
-    print('🔔 ALL relatedData: ${notification['relatedData']}');
-    print('🔔 ALL relatedData keys: ${(notification['relatedData'] as Map<String, dynamic>?)?.keys.toList()}');
-    print('🔔 full notification keys: ${notification.keys.toList()}');
-    print('🔔 full notification: $notification');
 
     final provider = Provider.of<NotificationProvider>(context, listen: false);
     provider.markTypesAsRead([type]);
 
     final relatedData = notification['relatedData'] as Map<String, dynamic>?;
+
+    // ✅ Pop notification screen first
+    Navigator.pop(context);
+
+    // ✅ Wait for pop animation to complete before navigating
+    await Future.delayed(const Duration(milliseconds: 400));
+
+    // ✅ Now safely grab context after animation settles
+    final navContext = mainScreenKey.currentContext;
+    if (navContext == null) {
+      debugPrint('❌ navContext is null — MainScreen not mounted');
+      return;
+    }
 
     const postTypes = [
       'post', 'like', 'comment', 'PostLike', 'PostComment',
@@ -62,11 +71,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
-    // ✅ Single null guard for entire method
-    final navContext = mainScreenKey.currentContext;
-    if (navContext == null) return;
 
-    Navigator.pop(context);
 
     // ── POST TYPES ─────────────────────────────────────────────────────
     // AFTER
@@ -152,16 +157,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
       }
 
       // ── GROUP CHAT ──────────────────────────────────────────────────────────
+      // ── GROUP CHAT ──────────────────────────────────────────────────────────
     } else if (type == 'GroupChat') {
       final groupId = relatedData?['groupId']?.toString() ??
           notification['referenceId']?.toString();
 
-      // ✅ Backend only sends groupId, no name — extract from message
-      // message format: `Christin Raj A shared a new post in "St. Antony Volley Ball Coaching"`
       final messageText = notification['message']?.toString() ?? '';
       String groupName = 'Group Chat';
 
-      // Try quotes first, then "in GroupName" pattern
       final quoteMatch = RegExp(r'"([^"]+)"').firstMatch(messageText);
       if (quoteMatch != null) {
         groupName = quoteMatch.group(1) ?? 'Group Chat';
@@ -179,9 +182,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
           navContext,
           MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
         );
-        Future.delayed(const Duration(milliseconds: 300), () {
+        // ✅ Use addPostFrameCallback for second push — more reliable than Future.delayed
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = mainScreenKey.currentContext;
+          if (ctx == null) return;
           Navigator.push(
-            navContext,
+            ctx,
             MaterialPageRoute(
               builder: (_) => GroupChatDetailPage(
                 groupId: groupId,

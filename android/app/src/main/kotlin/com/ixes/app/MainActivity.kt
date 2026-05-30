@@ -19,7 +19,6 @@ class MainActivity : FlutterActivity() {
     private val FGS_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     private val PERMISSION_REQUEST_CODE = 1001
 
-    // Hold result while waiting for permission grant
     private var pendingScreenShareResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -47,18 +46,86 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_CHANNEL)
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
-        createCallNotificationChannel()
+        createNotificationChannels()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleCallIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleCallIntent(intent)
+    }
+
+    private fun handleCallIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("isCallIntent", false) != true) return
+
+        val type       = intent.getStringExtra("type")       ?: return
+        val roomName   = intent.getStringExtra("roomName")   ?: return
+        val callerId   = intent.getStringExtra("callerId")   ?: return
+        val callerName = intent.getStringExtra("callerName") ?: "Incoming Call"
+
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                MethodChannel(messenger, CALL_CHANNEL).invokeMethod(
+                    "incomingCall",
+                    mapOf(
+                        "type"       to type,
+                        "roomName"   to roomName,
+                        "callerId"   to callerId,
+                        "callerName" to callerName
+                    )
+                )
+            }
+        }, 2000)
+    }
+
+    // ✅ Single method — creates both channels
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notifManager = getSystemService(NotificationManager::class.java)
+
+            // ✅ Call channel — with ringtone
+            val callChannel = NotificationChannel(
+                "call_channel",
+                "Incoming Calls",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Incoming voice and video calls"
+                enableVibration(true)
+                setSound(
+                    android.provider.Settings.System.DEFAULT_RINGTONE_URI,
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+            }
+            notifManager.createNotificationChannel(callChannel)
+
+            // ✅ Chat channel — NO sound, NO vibration
+            val chatChannel = NotificationChannel(
+                "chat_notifications",
+                "Chat Messages",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "Chat message notifications"
+                setSound(null, null)
+                enableVibration(false)
+            }
+            notifManager.createNotificationChannel(chatChannel)
+        }
     }
 
     private fun handleStartScreenShare(result: MethodChannel.Result) {
-        // On Android 14+ (API 34+), check if permission is granted
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val granted = ContextCompat.checkSelfPermission(this, FGS_PERMISSION) ==
                     PackageManager.PERMISSION_GRANTED
             Log.d("MainActivity", "🔍 FGS_MEDIA_PROJECTION permission granted: $granted")
 
             if (!granted) {
-                // Store result, request permission, then start service in callback
                 pendingScreenShareResult = result
                 ActivityCompat.requestPermissions(
                     this,
@@ -68,7 +135,6 @@ class MainActivity : FlutterActivity() {
                 return
             }
         }
-        // Permission already granted (or Android < 14) — start directly
         startScreenShareServiceAndNotify(result)
     }
 
@@ -103,7 +169,6 @@ class MainActivity : FlutterActivity() {
             }
             Log.d("MainActivity", "✅ startForegroundService called")
 
-            // Poll until service is actually running — max 3 seconds
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             var elapsed = 0
             val interval = 150
@@ -122,7 +187,6 @@ class MainActivity : FlutterActivity() {
                         }
                         elapsed >= maxWait -> {
                             Log.e("MainActivity", "❌ FGS never confirmed after ${maxWait}ms")
-                            // Still try — better than refusing
                             result.success(null)
                         }
                         else -> handler.postDelayed(this, interval.toLong())
@@ -148,61 +212,6 @@ class MainActivity : FlutterActivity() {
                 .any { it.service.className == ScreenShareService::class.java.name }
         } catch (e: Exception) {
             false
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        handleCallIntent(intent)
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        handleCallIntent(intent)
-    }
-
-    private fun handleCallIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra("isCallIntent", false) != true) return
-
-        val type       = intent.getStringExtra("type")       ?: return
-        val roomName   = intent.getStringExtra("roomName")   ?: return
-        val callerId   = intent.getStringExtra("callerId")   ?: return
-        val callerName = intent.getStringExtra("callerName") ?: "Incoming Call"
-
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-                MethodChannel(messenger, CALL_CHANNEL).invokeMethod(
-                    "incomingCall",
-                    mapOf(
-                        "type"       to type,
-                        "roomName"   to roomName,
-                        "callerId"   to callerId,
-                        "callerName" to callerName
-                    )
-                )
-            }
-        }, 2000)
-    }
-
-    private fun createCallNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "call_channel",
-                "Incoming Calls",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Incoming voice and video calls"
-                enableVibration(true)
-                setSound(
-                    android.provider.Settings.System.DEFAULT_RINGTONE_URI,
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-            }
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
         }
     }
 }

@@ -138,7 +138,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
   }
 
-  // ✅ ADDED: Public method called from NotificationScreen via mainScreenKey
   void navigateToTab(
       int index, {
         String? postId,
@@ -146,6 +145,14 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         String? chatTitle,
         Map<String, dynamic>? chatUserProfile,
       }) {
+    // ✅ Guard: if not initialized yet, retry after next frame
+    if (!_isInitialized || !mounted) {
+      debugPrint('⚠️ navigateToTab called before initialized — retrying');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) navigateToTab(index, postId: postId, chatUserId: chatUserId, chatTitle: chatTitle, chatUserProfile: chatUserProfile);
+      });
+      return;
+    }
     // ✅ For post: set postId BEFORE switching tab so no flash
     if (index == 0 && postId != null) {
       setState(() {

@@ -424,6 +424,10 @@ Future<void> _initFCM() async {
 
     // ── App foregrounded from BACKGROUND via notification tap ───────────────
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) async {
+      // ✅ ADD THESE DEBUG LINES
+      debugPrint('📦 [FCM OPENED] Full data: ${msg.data}');
+      debugPrint('📦 [FCM OPENED] Notification title: ${msg.notification?.title}');
+      debugPrint('📦 [FCM OPENED] Notification body: ${msg.notification?.body}');
       final d    = msg.data;
       final type = d['type'] ?? '';
 
@@ -502,6 +506,12 @@ Future<void> _initFCM() async {
     FirebaseMessaging.onMessage.listen((RemoteMessage msg) async {
       final d    = msg.data;
       final type = d['type'] ?? '';
+
+      // ✅ ADD THESE DEBUG LINES
+      debugPrint('📦 [FCM FOREGROUND] Full data: ${msg.data}');
+      debugPrint('📦 [FCM FOREGROUND] Notification title: ${msg.notification?.title}');
+      debugPrint('📦 [FCM FOREGROUND] Notification body: ${msg.notification?.body}');
+      debugPrint('📦 [FCM FOREGROUND] type=$type');
 
       if (type == 'voice_call' || type == 'video_call') {
         await Future.delayed(const Duration(milliseconds: 800));
