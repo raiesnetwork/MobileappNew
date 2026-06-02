@@ -55,23 +55,56 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // ── CHAT notifications: show silent notification with sender name ──
-        if (type == "chat" || type == "GroupChat") {
-            val title   = data["senderName"]  ?: data["groupName"] ?: "New Message"
-            val body    = data["message"]     ?: "You have a new message"
+        // ── CHAT notifications ─────────────────────────────────────────────
+        if (type == "chat") {
+            // Backend sends: data[senderName], data[title], data[body]
+            // ✅ Use senderName as notification title (the person's name)
+            // ✅ Use body as notification body (the message text)
+            val title          = data["senderName"]     ?: data["title"] ?: "New Message"
+            val body           = data["body"]           ?: "You have a new message"
             val senderId       = data["senderId"]       ?: ""
+            val senderName     = data["senderName"]     ?: ""
             val conversationId = data["conversationId"] ?: ""
-            val groupId        = data["groupId"]        ?: ""
 
             android.util.Log.d("IXES_FCM", "💬 Chat notification | title=$title | body=$body")
+            android.util.Log.d("IXES_FCM", "   senderId=$senderId | senderName=$senderName | conversationId=$conversationId")
 
             showChatNotification(
                 title          = title,
                 body           = body,
                 type           = type,
                 senderId       = senderId,
-                senderName     = title,
+                senderName     = senderName,
                 conversationId = conversationId,
+                groupId        = "",
+            )
+            return
+        }
+
+        // ── GROUP CHAT notifications ───────────────────────────────────────
+        if (type == "GroupChat") {
+            // Backend sends: data[groupName], data[senderName], data[body]
+            // ✅ Show group name as title, message as body
+            val groupName  = data["groupName"]     ?: "Group"
+            val senderName = data["senderName"]    ?: ""
+            val body       = data["body"]          ?: data["message"] ?: "New group message"
+            val groupId    = data["groupId"]       ?: ""
+
+            // Show as "GroupName: SenderName" or just groupName if no sender
+            val title = if (senderName.isNotEmpty()) "$groupName" else groupName
+            // Show as "SenderName: message" in body
+            val displayBody = if (senderName.isNotEmpty()) "$senderName: $body" else body
+
+            android.util.Log.d("IXES_FCM", "💬 GroupChat notification | title=$title | body=$displayBody")
+            android.util.Log.d("IXES_FCM", "   groupId=$groupId | groupName=$groupName | senderName=$senderName")
+
+            showChatNotification(
+                title          = title,
+                body           = displayBody,
+                type           = type,
+                senderId       = "",
+                senderName     = senderName,
+                conversationId = "",
                 groupId        = groupId,
             )
             return
@@ -90,27 +123,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         conversationId: String,
         groupId:        String,
     ) {
-        val channelId = "chat_notifications"
+        val channelId    = "chat_notifications"
         val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-        // Create silent notification channel (no sound, no vibration)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Chat Messages",
-                // ✅ IMPORTANCE_DEFAULT shows notification but plays NO ringtone
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description       = "Chat message notifications"
-                setSound(null, null)   // ✅ No sound
-                enableVibration(false) // ✅ No vibration
-            }
-            notifManager.createNotificationChannel(channel)
-        }
-
-        // Tap intent — opens app and Flutter handles navigation
+        // ── Tap intent — opens app, Flutter handles deep navigation ─────────
+        // We pass all chat data so MainActivity → Flutter can navigate
+        // to the right screen when user taps the notification
         val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("isChatIntent",   true)
             putExtra("type",           type)
             putExtra("senderId",       senderId)
             putExtra("senderName",     senderName)
@@ -120,23 +143,31 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val pendingIntent = PendingIntent.getActivity(
             this,
-            System.currentTimeMillis().toInt(),
+            // Use conversationId/groupId as request code so
+            // same conversation updates the same notification
+            if (conversationId.isNotEmpty()) conversationId.hashCode()
+            else groupId.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(body)
+            .setContentTitle(title)   // ✅ senderName or groupName
+            .setContentText(body)     // ✅ actual message text from data[body]
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setSound(null)        // ✅ No sound
-            .setVibrate(null)      // ✅ No vibration
+            .setSound(null)
+            .setVibrate(null)
             .build()
 
-        val notifId = System.currentTimeMillis().toInt()
+        // Use conversationId/groupId as notification ID so messages from
+        // the same conversation stack/update instead of creating new ones
+        val notifId = if (conversationId.isNotEmpty()) conversationId.hashCode()
+        else if (groupId.isNotEmpty())   groupId.hashCode()
+        else System.currentTimeMillis().toInt()
+
         notifManager.notify(notifId, notification)
 
         android.util.Log.d("IXES_FCM", "✅ Chat notification shown | title=$title")

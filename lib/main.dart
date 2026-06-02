@@ -70,14 +70,13 @@ void _storePendingCall(Map<String, dynamic> data) {
   _pendingCallData         = data;
   _pendingCallDispatchedAt = DateTime.now();
   _dispatchedRoomName      = data['roomName'] ?? '';
-  debugPrint('💾 [PENDING] Stored | type=${data['callType']} | room=${data['roomName']}');
+  debugPrint('💾 [CALL] Pending stored | type=${data['callType']} | room=${data['roomName']}');
 }
 
 void _clearCallState() {
   _pendingCallData         = null;
   _dispatchedRoomName      = null;
   _pendingCallDispatchedAt = null;
-  debugPrint('🧹 [CALL STATE] Cleared');
 }
 
 bool _isCallExpired() {
@@ -97,12 +96,11 @@ Map<String, dynamic>? _pendingChatData;
 
 void _storePendingChat(Map<String, dynamic> data) {
   _pendingChatData = data;
-  debugPrint('💾 [PENDING CHAT] Stored | senderId=${data['senderId']} | senderName=${data['senderName']}');
+  debugPrint('💾 [CHAT] Pending stored | sender=${data['senderName']}');
 }
 
 void _clearChatState() {
   _pendingChatData = null;
-  debugPrint('🧹 [CHAT STATE] Cleared');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,12 +111,11 @@ Map<String, dynamic>? _pendingGroupData;
 
 void _storePendingGroup(Map<String, dynamic> data) {
   _pendingGroupData = data;
-  debugPrint('💾 [PENDING GROUP] Stored | groupId=${data['groupId']} | groupName=${data['groupName']}');
+  debugPrint('💾 [GROUP] Pending stored | group=${data['groupName']}');
 }
 
 void _clearGroupState() {
   _pendingGroupData = null;
-  debugPrint('🧹 [GROUP STATE] Cleared');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -182,20 +179,21 @@ Future<void> _showCallkitIncoming({
       ringtonePath:       'system_ringtone_default',
     ),
   ));
-  debugPrint('✅ [CALLKIT UI] Shown | room=$roomName | uuid=$callUUID');
+  debugPrint('✅ [CALLKIT] UI shown | caller=$callerName | room=$roomName');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FCM background handler
+// FCM background handler (app is KILLED — runs in separate isolate)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
+
   final data = message.data;
   final type = data['type'] ?? '';
 
-  debugPrint('🔔 [BG FCM] type=$type | roomName=${data['roomName']}');
+  debugPrint('🔔 [FCM KILLED] type=$type | sender=${data['senderName']} | group=${data['groupName']} | caller=${data['callerName']}');
 
   if (type == 'voice_call' || type == 'video_call') {
     final roomName   = data['roomName']   ?? '';
@@ -203,11 +201,11 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     final callerName = data['callerName'] ?? 'Incoming Call';
 
     if (roomName.isEmpty || callerId.isEmpty) {
-      debugPrint('⚠️ [BG FCM] Missing roomName or callerId — skipping');
+      debugPrint('⚠️ [FCM KILLED] Missing roomName or callerId — skipping');
       return;
     }
 
-    debugPrint('📲 [BG FCM] Showing CallKit | caller=$callerName | room=$roomName');
+    debugPrint('📲 [FCM KILLED] Showing CallKit | caller=$callerName | room=$roomName');
     await _showCallkitIncoming(
       roomName:   roomName,
       callerId:   callerId,
@@ -215,8 +213,6 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       callType:   type,
     );
   }
-  // Chat and GroupChat notifications: system notification shown automatically
-  // by FCM — no manual handling needed in background handler.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -234,20 +230,19 @@ Future<void> _saveFcmToken() async {
     if (fcmToken == null) return;
     final prefs  = await SharedPreferences.getInstance();
     final userId = prefs.getString('user_id');
-    debugPrint('📱 [FCM] Saving token for userId=$userId');
     await ApiService.post(
       '/api/mobile/user/save-fcm',
       {'fcmToken': fcmToken, 'platform': Platform.isAndroid ? 'android' : 'ios'},
       requireAuth: true,
     );
-    debugPrint('✅ [FCM TOKEN] Saved for userId=$userId');
+    debugPrint('✅ [FCM] Token saved | userId=$userId');
   } catch (e) {
-    debugPrint('❌ [FCM TOKEN] $e');
+    debugPrint('❌ [FCM] Token save failed: $e');
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Navigate to ChatDetailScreen from FCM tap
+// Navigate to ChatDetailScreen
 // ─────────────────────────────────────────────────────────────────────────────
 
 void _navigateToChat({
@@ -259,7 +254,7 @@ void _navigateToChat({
   final ctx = navigatorKey.currentContext;
 
   if (nav == null || ctx == null) {
-    debugPrint('⚠️ [CHAT NAV] Navigator not ready — storing pending');
+    debugPrint('⚠️ [CHAT NAV] Navigator not ready — storing pending | sender=$senderName');
     _storePendingChat({
       'senderId':       senderId,
       'senderName':     senderName,
@@ -268,8 +263,7 @@ void _navigateToChat({
     return;
   }
 
-  debugPrint('💬 [CHAT NAV] Navigating to ChatDetailScreen | sender=$senderName');
-
+  debugPrint('💬 [CHAT NAV] → ChatDetailScreen | sender=$senderName');
   nav.pushNamedAndRemoveUntil('/main', (route) => false);
 
   Future.delayed(const Duration(milliseconds: 400), () {
@@ -293,7 +287,7 @@ void _navigateToChat({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Navigate to GroupChatDetailPage from FCM tap
+// Navigate to GroupChatDetailPage
 // ─────────────────────────────────────────────────────────────────────────────
 
 void _navigateToGroup({
@@ -304,7 +298,7 @@ void _navigateToGroup({
   final ctx = navigatorKey.currentContext;
 
   if (nav == null || ctx == null) {
-    debugPrint('⚠️ [GROUP NAV] Navigator not ready — storing pending');
+    debugPrint('⚠️ [GROUP NAV] Navigator not ready — storing pending | group=$groupName');
     _storePendingGroup({
       'groupId':   groupId,
       'groupName': groupName,
@@ -312,8 +306,7 @@ void _navigateToGroup({
     return;
   }
 
-  debugPrint('💬 [GROUP NAV] Navigating to GroupChatDetailPage | group=$groupName');
-
+  debugPrint('💬 [GROUP NAV] → GroupChatDetailPage | group=$groupName');
   nav.pushNamedAndRemoveUntil('/main', (route) => false);
 
   Future.delayed(const Duration(milliseconds: 400), () {
@@ -331,7 +324,7 @@ void _navigateToGroup({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FCM init — handles all 3 app states for calls, personal chat, group chat
+// FCM init — handles all 3 app states
 // ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _initFCM() async {
@@ -371,19 +364,49 @@ Future<void> _initFCM() async {
       }
     });
 
+    // ── Listen for chat notification taps from native Android ───────────────
+    // Fires for ALL app states: killed, background, foreground
+    const _chatChannel = MethodChannel('com.ixes.app/chat');
+    _chatChannel.setMethodCallHandler((call) async {
+      if (call.method == 'chatTapped') {
+        final args           = Map<String, dynamic>.from(call.arguments as Map);
+        final type           = args['type']?.toString()           ?? '';
+        final senderId       = args['senderId']?.toString()       ?? '';
+        final senderName     = args['senderName']?.toString()     ?? 'Chat';
+        final conversationId = args['conversationId']?.toString() ?? '';
+        final groupId        = args['groupId']?.toString()        ?? '';
+        final groupName      = args['groupName']?.toString()      ?? 'Group';
+
+        debugPrint('💬 [CHAT TAPPED] type=$type | sender=$senderName | group=$groupName');
+
+        if (type == 'chat' && senderId.isNotEmpty) {
+          _navigateToChat(
+            senderId:       senderId,
+            senderName:     senderName,
+            conversationId: conversationId,
+          );
+        } else if (type == 'GroupChat' && groupId.isNotEmpty) {
+          _navigateToGroup(
+            groupId:   groupId,
+            groupName: groupName,
+          );
+        }
+      }
+    });
+
     // ── App opened from KILLED state via notification tap ───────────────────
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
       final d    = initialMessage.data;
       final type = d['type'] ?? '';
 
-      // Call
+      debugPrint('📲 [FCM INITIAL] Killed tap | type=$type | sender=${d['senderName']} | group=${d['groupName']}');
+
       if (type == 'voice_call' || type == 'video_call') {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
         if (roomName.isNotEmpty && callerId.isNotEmpty) {
-          debugPrint('📲 [FCM INITIAL] Killed state call tap | type=$type');
           await _showCallkitIncoming(
             roomName:   roomName,
             callerId:   callerId,
@@ -393,13 +416,11 @@ Future<void> _initFCM() async {
         }
       }
 
-      // Personal chat — killed state
       if (type == 'chat') {
         final senderId       = d['senderId']       ?? '';
         final senderName     = d['senderName']     ?? 'Chat';
         final conversationId = d['conversationId'] ?? '';
         if (senderId.isNotEmpty) {
-          debugPrint('💬 [FCM INITIAL] Personal chat tap from killed state | sender=$senderName');
           _storePendingChat({
             'senderId':       senderId,
             'senderName':     senderName,
@@ -408,12 +429,10 @@ Future<void> _initFCM() async {
         }
       }
 
-      // Group chat — killed state
       if (type == 'GroupChat') {
         final groupId   = d['groupId']   ?? '';
         final groupName = d['groupName'] ?? 'Group';
         if (groupId.isNotEmpty) {
-          debugPrint('💬 [FCM INITIAL] Group chat tap from killed state | group=$groupName');
           _storePendingGroup({
             'groupId':   groupId,
             'groupName': groupName,
@@ -424,20 +443,16 @@ Future<void> _initFCM() async {
 
     // ── App foregrounded from BACKGROUND via notification tap ───────────────
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage msg) async {
-      // ✅ ADD THESE DEBUG LINES
-      debugPrint('📦 [FCM OPENED] Full data: ${msg.data}');
-      debugPrint('📦 [FCM OPENED] Notification title: ${msg.notification?.title}');
-      debugPrint('📦 [FCM OPENED] Notification body: ${msg.notification?.body}');
       final d    = msg.data;
       final type = d['type'] ?? '';
 
-      // Call
+      debugPrint('📂 [FCM OPENED] BG tap | type=$type | sender=${d['senderName']} | group=${d['groupName']}');
+
       if (type == 'voice_call' || type == 'video_call') {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
         if (roomName.isNotEmpty && callerId.isNotEmpty) {
-          debugPrint('📲 [FCM OPENED] Background call tap | type=$type');
           await Future.delayed(const Duration(milliseconds: 500));
           final ctx = navigatorKey.currentContext;
           bool socketHandled = false;
@@ -460,13 +475,11 @@ Future<void> _initFCM() async {
         }
       }
 
-      // Personal chat — background state
       if (type == 'chat') {
         final senderId       = d['senderId']       ?? '';
         final senderName     = d['senderName']     ?? 'Chat';
         final conversationId = d['conversationId'] ?? '';
         if (senderId.isNotEmpty) {
-          debugPrint('💬 [FCM OPENED] Personal chat tap from background | sender=$senderName');
           await Future.delayed(const Duration(milliseconds: 500));
           _navigateToChat(
             senderId:       senderId,
@@ -476,12 +489,10 @@ Future<void> _initFCM() async {
         }
       }
 
-      // Group chat — background state
       if (type == 'GroupChat') {
         final groupId   = d['groupId']   ?? '';
         final groupName = d['groupName'] ?? 'Group';
         if (groupId.isNotEmpty) {
-          debugPrint('💬 [FCM OPENED] Group chat tap from background | group=$groupName');
           await Future.delayed(const Duration(milliseconds: 500));
           _navigateToGroup(
             groupId:   groupId,
@@ -491,10 +502,9 @@ Future<void> _initFCM() async {
       }
     });
 
-    // ── App FOREGROUND — onMessage ──────────────────────────────────────────
+    // ── Foreground messages ─────────────────────────────────────────────────
     final messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
-
     await messaging.setForegroundNotificationPresentationOptions(
       alert: false,
       badge: false,
@@ -507,11 +517,7 @@ Future<void> _initFCM() async {
       final d    = msg.data;
       final type = d['type'] ?? '';
 
-      // ✅ ADD THESE DEBUG LINES
-      debugPrint('📦 [FCM FOREGROUND] Full data: ${msg.data}');
-      debugPrint('📦 [FCM FOREGROUND] Notification title: ${msg.notification?.title}');
-      debugPrint('📦 [FCM FOREGROUND] Notification body: ${msg.notification?.body}');
-      debugPrint('📦 [FCM FOREGROUND] type=$type');
+      debugPrint('🌟 [FCM FG] type=$type | sender=${d['senderName']} | group=${d['groupName']} | caller=${d['callerName']}');
 
       if (type == 'voice_call' || type == 'video_call') {
         await Future.delayed(const Duration(milliseconds: 800));
@@ -528,11 +534,11 @@ Future<void> _initFCM() async {
         }
 
         if (socketHandled) {
-          debugPrint('✅ [FG FCM] Socket handled — skipping CallKit');
+          debugPrint('✅ [FCM FG] Socket already handling call — skipping CallKit');
           return;
         }
 
-        debugPrint('⚠️ [FG FCM] Socket missed after 800ms — showing CallKit');
+        debugPrint('⚠️ [FCM FG] Socket missed — showing CallKit');
         await _showCallkitIncoming(
           roomName:   d['roomName']   ?? '',
           callerId:   d['callerId']   ?? '',
@@ -540,14 +546,16 @@ Future<void> _initFCM() async {
           callType:   type,
         );
       }
-
-      // chat and GroupChat foreground messages handled by socket — no action needed
+      // chat & GroupChat foreground: handled by socket — no action needed
     });
   } catch (e) {
     debugPrint('❌ [FCM INIT] $e');
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Check active calls on startup
+// ─────────────────────────────────────────────────────────────────────────────
 
 Future<void> _checkActiveCallsOnStartup() async {
   try {
@@ -576,35 +584,31 @@ Future<void> _checkActiveCallsOnStartup() async {
       'callerName': callerName,
       'autoAccept': true,
     });
-    debugPrint('✅ [STARTUP] Stored pending call from activeCalls()');
+    debugPrint('✅ [STARTUP] Pending call stored from activeCalls()');
   } catch (e) {
     debugPrint('❌ [STARTUP] activeCalls() error: $e');
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// main
+// ─────────────────────────────────────────────────────────────────────────────
 
 void main() async {
-  // Catch all uncaught async errors (including SocketException)
   runZonedGuarded(() async {
     WidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp();
 
-    // Silence specific noisy exceptions
     FlutterError.onError = (FlutterErrorDetails details) {
       final ex = details.exception.toString();
       if (ex.contains('Reading from a closed socket') ||
           ex.contains('SocketException')) {
-        // swallow — known noise from socket.io polling reconnects
         return;
       }
       FlutterError.presentError(details);
     };
 
-    print('\n');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🚀 APP STARTED');
-    print('📱 Platform: ${Platform.operatingSystem}');
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint('🚀 APP STARTED | platform=${Platform.operatingSystem}');
 
     FirebaseMessaging.onBackgroundMessage(_firebaseBackgroundHandler);
 
@@ -616,8 +620,7 @@ void main() async {
     final userId   = prefs.getString('user_id');
     final language = prefs.getString('app_language');
 
-    print('🔐 authToken exists = ${token != null}');
-    print('👤 userId = $userId');
+    debugPrint('🔐 authToken=${token != null} | userId=$userId');
 
     runApp(IxesApp(
       initialToken:  token,
@@ -625,14 +628,12 @@ void main() async {
       showLanguage:  language == null,
     ));
   }, (error, stack) {
-    // Catches errors that escape the Flutter error handler
     final msg = error.toString();
     if (msg.contains('Reading from a closed socket') ||
         msg.contains('SocketException')) {
-      // swallow silently
       return;
     }
-    print('💥 Uncaught zone error: $error');
+    debugPrint('💥 Uncaught zone error: $error');
   });
 }
 
@@ -834,7 +835,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
     FlutterCallkitIncoming.onEvent.listen((CallEvent? event) {
       if (event == null) return;
-      debugPrint('📲 [CALLKIT EVENT] ${event.event}');
       _handleCallKitEvent(event);
     });
   }
@@ -859,9 +859,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     final callerName = extra['callerName']?.toString() ?? '';
     final callType   = extra['callType']?.toString()   ?? 'voice_call';
 
-    debugPrint(
-      '🎯 [CALLKIT] ${event.event} | room=$roomName | type=$callType | ready=$_providersReady',
-    );
+    debugPrint('🎯 [CALLKIT] ${event.event} | room=$roomName | type=$callType');
 
     switch (event.event) {
 
@@ -898,11 +896,10 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
       case Event.actionCallAccept:
         if (roomName.isEmpty) {
-          debugPrint('❌ [ACCEPT] Empty roomName');
+          debugPrint('❌ [CALLKIT] Accept — empty roomName');
           return;
         }
         _handledRoomNames.add(roomName);
-
         final callData = {
           'callType':   callType,
           'roomName':   roomName,
@@ -926,10 +923,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         _retryTimer?.cancel();
         if (roomName.isNotEmpty) _handledRoomNames.add(roomName);
         _endAllCallKitCalls();
-
         final ctx = navigatorKey.currentContext;
         if (ctx == null) return;
-
         _rejectCallWithReconnect(
           ctx:        ctx,
           callType:   callType,
@@ -945,7 +940,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         _retryTimer?.cancel();
         _endAllCallKitCalls();
         _handledRoomNames.remove(roomName);
-
         final ctx2 = navigatorKey.currentContext;
         if (ctx2 != null) {
           if (callType == 'video_call') {
@@ -982,7 +976,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return;
       }
 
-      debugPrint('🚀 [RETRY #$attempts] Providers ready → navigating!');
+      debugPrint('🚀 [RETRY #$attempts] Providers ready → navigating');
       _pendingCallData = null;
       timer.cancel();
       _navigate(data);
@@ -998,9 +992,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     final callerName = data['callerName'] ?? '';
     final autoAccept = data['autoAccept'] == true;
 
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    debugPrint('🎯 [NAVIGATE] type=$callType | room=$roomName | auto=$autoAccept');
-    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint('🎯 [NAVIGATE] type=$callType | room=$roomName | autoAccept=$autoAccept');
 
     if (roomName.isEmpty || callType.isEmpty) return;
 
@@ -1054,11 +1046,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     _navigate(data);
   }
 
-  // Consume pending personal chat navigation after providers are ready
   void _consumePendingChat() {
     final data = _pendingChatData;
     if (data == null) return;
     _pendingChatData = null;
+    debugPrint('📬 [CONSUME] Pending chat | sender=${data['senderName']}');
     _navigateToChat(
       senderId:       data['senderId']       ?? '',
       senderName:     data['senderName']     ?? 'Chat',
@@ -1066,11 +1058,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     );
   }
 
-  // Consume pending group chat navigation after providers are ready
   void _consumePendingGroup() {
     final data = _pendingGroupData;
     if (data == null) return;
     _pendingGroupData = null;
+    debugPrint('📬 [CONSUME] Pending group | group=${data['groupName']}');
     _navigateToGroup(
       groupId:   data['groupId']   ?? '',
       groupName: data['groupName'] ?? 'Group',
@@ -1116,10 +1108,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       if (!mounted) return;
 
       final calls = await FlutterCallkitIncoming.activeCalls();
-      if (calls == null || calls.isEmpty) {
-        debugPrint('📵 [RESUME] No active CallKit calls');
-        return;
-      }
+      if (calls == null || calls.isEmpty) return;
 
       final call  = calls.last;
       final extra = call['extra'] as Map<dynamic, dynamic>? ??
@@ -1132,18 +1121,15 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       final callType   = extra['callType']?.toString()   ?? call['callType']?.toString()   ?? 'voice_call';
 
       if (roomName.isEmpty || callerId.isEmpty) {
-        debugPrint('⚠️ [RESUME] Active call missing roomName/callerId — ending stale CallKit entry');
+        debugPrint('⚠️ [RESUME] Stale CallKit entry — ending');
         await _endAllCallKitCalls();
         return;
       }
 
-      if (_handledRoomNames.contains(roomName)) {
-        debugPrint('⏭️ [RESUME] Room $roomName already handled — skipping');
-        return;
-      }
+      if (_handledRoomNames.contains(roomName)) return;
 
       if (_isCallExpired()) {
-        debugPrint('⏰ [RESUME] Call expired (TTL) — ending stale CallKit | room=$roomName');
+        debugPrint('⏰ [RESUME] Call expired — ending stale CallKit | room=$roomName');
         await _endAllCallKitCalls();
         return;
       }
@@ -1160,13 +1146,12 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       } catch (_) {}
 
       if (alreadyRinging) {
-        debugPrint('✅ [RESUME] Already ringing in-app — skipping | room=$roomName');
         _handledRoomNames.add(roomName);
         return;
       }
 
       _handledRoomNames.add(roomName);
-      debugPrint('📲 [RESUME] Surfacing call in-app | room=$roomName | caller=$callerName | type=$callType');
+      debugPrint('📲 [RESUME] Surfacing call | room=$roomName | caller=$callerName');
 
       if (callType == 'video_call') {
         ctx.read<VideoCallProvider>().setIncomingCallFromFCM(
@@ -1184,7 +1169,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         );
       }
     } catch (e) {
-      debugPrint('❌ [RESUME] _checkActiveCallsOnResume error: $e');
+      debugPrint('❌ [RESUME] $e');
     }
   }
 
@@ -1217,12 +1202,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       final isConnected = SocketService().socket?.connected == true;
 
       if (isConnected) {
-        debugPrint('✅ [REJECT] Socket connected — emitting reject | room=$roomName');
         _emitReject(ctx, callType);
         return;
       }
 
-      debugPrint('🔄 [REJECT] Socket disconnected — reconnecting | room=$roomName');
+      debugPrint('🔄 [REJECT] Socket disconnected — reconnecting');
       ctx.read<PersonalChatProvider>().reconnectSocket();
 
       bool reconnected = false;
@@ -1235,14 +1219,13 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       }
 
       if (reconnected) {
-        debugPrint('✅ [REJECT] Socket reconnected — emitting reject | room=$roomName');
         _emitReject(ctx, callType);
       } else {
-        debugPrint('⚠️ [REJECT] Reconnect timed out — REST fallback | room=$roomName');
+        debugPrint('⚠️ [REJECT] Reconnect timed out — REST fallback');
         await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
       }
     } catch (e) {
-      debugPrint('❌ [REJECT] Unexpected error ($e) — REST fallback | room=$roomName');
+      debugPrint('❌ [REJECT] $e — REST fallback');
       await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
     }
   }
@@ -1270,11 +1253,11 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         {'callerId': callerId, 'roomName': roomName, 'callType': callType},
         requireAuth: true,
       ).timeout(const Duration(seconds: 5));
-      debugPrint('✅ [REJECT REST] Sent via API | room=$roomName');
+      debugPrint('✅ [REJECT REST] Sent | room=$roomName');
     } on TimeoutException {
-      debugPrint('⏰ [REJECT REST] Timed out after 5s | room=$roomName');
+      debugPrint('⏰ [REJECT REST] Timed out | room=$roomName');
     } catch (e) {
-      debugPrint('❌ [REJECT REST] API call failed: $e');
+      debugPrint('❌ [REJECT REST] $e');
     }
   }
 
@@ -1335,9 +1318,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         'currentUserId': userId,
         'receiverName':  '',
       });
-      debugPrint('🧹 [CALL STATE] Cleared stale busy flags for userId=$userId');
     } catch (e) {
-      debugPrint('❌ [CALL STATE] Failed to clear busy flags: $e');
+      debugPrint('❌ [CALL STATE] Failed to clear stale flags: $e');
     }
   }
 
@@ -1364,10 +1346,10 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
           try {
             await _initProviders(ctx, user);
             _providersReady = true;
-            debugPrint('✅ [PROVIDER INIT / autoAccept] Done');
+            debugPrint('✅ [INIT] Providers ready (autoAccept path)');
             if (mounted) _consumePending();
           } catch (e) {
-            debugPrint('❌ [PROVIDER INIT / autoAccept] $e');
+            debugPrint('❌ [INIT] $e');
           }
         });
 
@@ -1387,8 +1369,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         return _buildApp(home: const SplashScreen());
       }
 
-      // ── Path B.5: auth loaded, NOT authenticated — keep SplashScreen mounted
-      //    so its 3-second timer can run and navigate to language/login
+      // ── Path B.5: not authenticated ─────────────────────────────────────
       if (!auth.isAuthenticated) {
         return _buildApp(home: const SplashScreen());
       }
@@ -1405,19 +1386,19 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
           try {
             await _initProviders(ctx, user);
             _providersReady = true;
-            debugPrint('✅ [PROVIDER INIT] Done | pendingCall=${_pendingCallData != null} | pendingChat=${_pendingChatData != null} | pendingGroup=${_pendingGroupData != null}');
+            debugPrint('✅ [INIT] Providers ready | pendingCall=${_pendingCallData != null} | pendingChat=${_pendingChatData != null} | pendingGroup=${_pendingGroupData != null}');
             if (mounted) {
-              _consumePending();       // calls
-              _consumePendingChat();   // personal chat FCM tap
-              _consumePendingGroup();  // group chat FCM tap
+              _consumePending();
+              _consumePendingChat();
+              _consumePendingGroup();
             }
           } catch (e) {
-            debugPrint('❌ [PROVIDER INIT] $e');
+            debugPrint('❌ [INIT] $e');
           }
         });
       }
 
-      // ── Path D: render home (authenticated only — unauthenticated handled at Path B.5)
+      // ── Path D: render home ─────────────────────────────────────────────
       return _buildApp(
         home: VoiceCallListener(
           child: IncomingCallListener(
@@ -1439,7 +1420,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         if (id != null) await FlutterCallkitIncoming.endCall(id);
       }
     } catch (e) {
-      debugPrint('❌ [CALLKIT CLEAR] $e');
+      debugPrint('❌ [CALLKIT] End all failed: $e');
     }
   }
 

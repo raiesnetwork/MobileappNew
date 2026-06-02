@@ -3,7 +3,6 @@ import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
 
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
@@ -48,22 +47,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     final relatedData = notification['relatedData'] as Map<String, dynamic>?;
 
-    // ✅ Pop notification screen first
-    Navigator.pop(context);
-
-    // ✅ Wait for pop animation to complete before navigating
-    await Future.delayed(const Duration(milliseconds: 400));
-
-    // ✅ Now safely grab context after animation settles
-    final navContext = mainScreenKey.currentContext;
-    if (navContext == null) {
-      debugPrint('❌ navContext is null — MainScreen not mounted');
-      return;
-    }
-
     const postTypes = [
       'post', 'like', 'comment', 'PostLike', 'PostComment',
-      'PostShare', 'Post', 'Announcement'
+      'PostShare', 'Post', 'Announcement',
     ];
     const chatTypes = [
       'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation',
@@ -71,10 +57,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
-
-
-    // ── POST TYPES ─────────────────────────────────────────────────────
-    // AFTER
+    // ── POST ──────────────────────────────────────────────────────────────
     if (postTypes.contains(type)) {
       final postId = relatedData?['postId']?.toString() ??
           relatedData?['referenceId']?.toString() ??
@@ -82,6 +65,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
           notification['postId']?.toString();
 
       if (postId == null || postId.isEmpty) {
+        Navigator.pop(context);
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!mounted) return;
         mainScreenKey.currentState?.navigateToTab(0);
         return;
       }
@@ -93,71 +79,72 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
       if (!mounted) return;
 
+      Navigator.pop(context);
+
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
+
       if (postExists) {
         mainScreenKey.currentState?.navigateToTab(0, postId: postId);
       } else {
+        mainScreenKey.currentState?.navigateToTab(0);
+        final navContext = mainScreenKey.currentContext;
+        if (navContext == null) return;
         showDialog(
-          context: context,
+          context: navContext,
           builder: (ctx) => AlertDialog(
             title: const Text('Post Not Found'),
-            content: const Text('This post no longer exists or may have been removed.'),
+            content: const Text(
+                'This post no longer exists or may have been removed.'),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK'),
-              ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK')),
             ],
           ),
         );
       }
 
-      // ── PERSONAL CHAT ───────────────────────────────────────────────────────
+      // ── PERSONAL CHAT ─────────────────────────────────────────────────────
     } else if (chatTypes.contains(type)) {
       final senderId = relatedData?['senderId']?.toString() ??
           relatedData?['privatChatId']?.toString() ??
           notification['referenceId']?.toString();
 
-      // ✅ Backend only sends chatId, no name — extract from message text
-      // message format: "Uday Suresh Send new message"
       final messageText = notification['message']?.toString() ?? '';
       final senderName = messageText.isNotEmpty
           ? messageText
-          .replaceAll(RegExp(r'\s*(send|sent|says|shared|posted).*', caseSensitive: false), '')
+          .replaceAll(
+          RegExp(r'\s*(send|sent|says|shared|posted).*',
+              caseSensitive: false),
+          '')
           .trim()
           : 'Chat';
 
-      print('🔔 Chat → senderId: $senderId, senderName extracted: $senderName');
-
       final senderProfile = <String, dynamic>{
         '_id': senderId ?? '',
-        'profile': {
-          'profileImage': '',
-          'name': senderName,
-        }
+        'profile': {'profileImage': '', 'name': senderName},
       };
 
       if (senderId != null && senderId.isNotEmpty) {
-        mainScreenKey.currentState?.navigateToTab(2);
-        Future.delayed(const Duration(milliseconds: 300), () {
-          Navigator.push(
-            navContext,
-            MaterialPageRoute(
-
-              
-              builder: (_) => ChatDetailScreen(
-                userId: senderId,
-                chatTitle: senderName,
-                userProfile: senderProfile,
-              ),
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ChatDetailScreen(
+              userId: senderId,
+              chatTitle: senderName,
+              userProfile: senderProfile,
             ),
-          );
-        });
+          ),
+        );
       } else {
+        Navigator.pop(context);
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!mounted) return;
         mainScreenKey.currentState?.navigateToTab(2);
       }
 
-      // ── GROUP CHAT ──────────────────────────────────────────────────────────
-      // ── GROUP CHAT ──────────────────────────────────────────────────────────
+      // ── GROUP CHAT ────────────────────────────────────────────────────────
     } else if (type == 'GroupChat') {
       final groupId = relatedData?['groupId']?.toString() ??
           notification['referenceId']?.toString();
@@ -169,146 +156,147 @@ class _NotificationScreenState extends State<NotificationScreen> {
       if (quoteMatch != null) {
         groupName = quoteMatch.group(1) ?? 'Group Chat';
       } else {
-        final inMatch = RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(messageText);
-        if (inMatch != null) {
-          groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
-        }
+        final inMatch =
+        RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(messageText);
+        if (inMatch != null) groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
       }
-
-      print('🔔 GroupChat → groupId: $groupId, groupName extracted: $groupName');
 
       if (groupId != null && groupId.isNotEmpty) {
-        Navigator.push(
-          navContext,
+        Navigator.pushReplacement(
+          context,
           MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
         );
-        // ✅ Use addPostFrameCallback for second push — more reliable than Future.delayed
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          final ctx = mainScreenKey.currentContext;
-          if (ctx == null) return;
-          Navigator.push(
-            ctx,
-            MaterialPageRoute(
-              builder: (_) => GroupChatDetailPage(
-                groupId: groupId,
-                groupName: groupName,
-                isAdmin: false,
-              ),
-            ),
-          );
-        });
-      } else {
+
+        await Future.delayed(const Duration(milliseconds: 350));
+        if (!mounted) return;
+
+        final ctx = mainScreenKey.currentContext;
+        if (ctx == null) return;
+
         Navigator.push(
-          navContext,
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => GroupChatDetailPage(
+              groupId: groupId,
+              groupName: groupName,
+              isAdmin: false,
+            ),
+          ),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
           MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
         );
       }
 
-      // ── SERVICE REQUEST ─────────────────────────────────────────────────
+      // ── SERVICE REQUEST ───────────────────────────────────────────────────
     } else if (serviceReqTypes.contains(type)) {
       final serviceReqId = relatedData?['assignedServiceReqId']?.toString() ??
           relatedData?['serviceReqId']?.toString() ??
           notification['referenceId']?.toString();
 
-      print('🔔 ServiceReq → serviceReqId: $serviceReqId');
-
       if (serviceReqId != null && serviceReqId.isNotEmpty) {
-        Navigator.push(
-          navContext,
+        Navigator.pushReplacement(
+          context,
           MaterialPageRoute(
-            builder: (_) => ServiceRequestDetailsScreen(
-              requestId: serviceReqId,
-            ),
+            builder: (_) =>
+                ServiceRequestDetailsScreen(requestId: serviceReqId),
           ),
         );
       } else {
+        Navigator.pop(context);
+        await Future.delayed(const Duration(milliseconds: 300));
+        if (!mounted) return;
         mainScreenKey.currentState?.navigateToTab(4);
       }
 
-      // ── SERVICE ─────────────────────────────────────────────────────────
+      // ── SERVICE ───────────────────────────────────────────────────────────
     } else if (type == 'Service') {
       final serviceId = relatedData?['serviceId']?.toString() ??
           notification['referenceId']?.toString();
 
-      print('🔔 Service → serviceId: $serviceId');
-
-      // ✅ Push ServicesScreen first so back arrow goes there
-      Navigator.push(
-        navContext,
+      Navigator.pushReplacement(
+        context,
         MaterialPageRoute(builder: (_) => const ServicesScreen()),
       );
 
       if (serviceId != null && serviceId.isNotEmpty) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          Navigator.push(
-            navContext,
-            MaterialPageRoute(
-              builder: (_) => ServiceDetailsScreen(serviceId: serviceId),
-            ),
-          );
-        });
+        await Future.delayed(const Duration(milliseconds: 350));
+        if (!mounted) return;
+        final ctx = mainScreenKey.currentContext;
+        if (ctx == null) return;
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => ServiceDetailsScreen(serviceId: serviceId),
+          ),
+        );
       }
 
-      // ── CAMPAIGN ────────────────────────────────────────────────────────
+      // ── CAMPAIGN ──────────────────────────────────────────────────────────
     } else if (type == 'campaign') {
       final campaignId = relatedData?['campaignId']?.toString() ??
           notification['referenceId']?.toString();
-
-      final communityId = relatedData?['communityId']?.toString() ??
-          notification['communityId']?.toString() ??
-          '';
-
       final communityName = relatedData?['communityName']?.toString() ??
           notification['communityName']?.toString() ??
           '';
 
-      print('🔔 Campaign → campaignId: $campaignId, communityId: $communityId');
-
-      // ✅ Push CampaignsScreen first so back arrow goes there
-      Navigator.push(
-        navContext,
-        MaterialPageRoute(
-          builder: (_) => const CampaignsScreen(),
-        ),
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const CampaignsScreen()),
       );
 
       if (campaignId != null && campaignId.isNotEmpty) {
-        Future.delayed(const Duration(milliseconds: 300), () {
-          Navigator.push(
-            navContext,
-            MaterialPageRoute(
-              builder: (_) => CampaignDetailsScreen(
-                campaignId: campaignId,
-                communityName: communityName,
-              ),
+        await Future.delayed(const Duration(milliseconds: 350));
+        if (!mounted) return;
+        final ctx = mainScreenKey.currentContext;
+        if (ctx == null) return;
+        Navigator.push(
+          ctx,
+          MaterialPageRoute(
+            builder: (_) => CampaignDetailsScreen(
+              campaignId: campaignId,
+              communityName: communityName,
             ),
-          );
-        });
+          ),
+        );
       }
 
-      // ── COMMUNITY ───────────────────────────────────────────────────────
+      // ── COMMUNITY ─────────────────────────────────────────────────────────
     } else if (communityTypes.contains(type)) {
+      Navigator.pop(context);
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
       mainScreenKey.currentState?.navigateToTab(3);
 
-      // ── DASHBOARD TYPES ─────────────────────────────────────────────────
+      // ── DASHBOARD ─────────────────────────────────────────────────────────
     } else if (type == 'Invoice' ||
         type == 'StoreSubscription' ||
         type == 'SubDomain' ||
         type == 'AddProduct') {
+      Navigator.pop(context);
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
       mainScreenKey.currentState?.navigateToTab(4);
 
-      // ── DEFAULT ─────────────────────────────────────────────────────────
+      // ── DEFAULT ───────────────────────────────────────────────────────────
     } else {
+      Navigator.pop(context);
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (!mounted) return;
       mainScreenKey.currentState?.navigateToTab(0);
     }
   }
 
   IconData _getNotificationIcon(String type) {
     const postTypes = [
-      'post', 'like', 'comment', 'PostLike', 'PostComment', 'PostShare', 'Post', 'Announcement'
+      'post', 'like', 'comment', 'PostLike', 'PostComment',
+      'PostShare', 'Post', 'Announcement',
     ];
     const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation', 'GroupChat'
+      'chat', 'message', 'directMessage', 'ChatMessage',
+      'Conversation', 'GroupChat',
     ];
     const communityTypes = ['community', 'GroupRequest'];
     const dashTypes = [
@@ -329,10 +317,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
     if (!isUnread) return Colors.grey.shade400;
 
     const postTypes = [
-      'post', 'like', 'comment', 'PostLike', 'PostComment', 'PostShare', 'Post', 'Announcement'
+      'post', 'like', 'comment', 'PostLike', 'PostComment',
+      'PostShare', 'Post', 'Announcement',
     ];
     const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation', 'GroupChat'
+      'chat', 'message', 'directMessage', 'ChatMessage',
+      'Conversation', 'GroupChat',
     ];
     const communityTypes = ['community', 'GroupRequest'];
     const dashTypes = [
@@ -350,7 +340,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   Future<void> _clearAllNotifications() async {
-    final provider = Provider.of<NotificationProvider>(context, listen: false);
+    final provider =
+    Provider.of<NotificationProvider>(context, listen: false);
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -358,7 +349,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
         title: const Text('Clear All Notifications'),
         content: const Text(
             'Are you sure you want to clear all notifications? This action cannot be undone.'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape:
+        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -377,10 +369,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
       try {
         SharedPreferences prefs = await SharedPreferences.getInstance();
         String? userId = prefs.getString('user_id');
-
         if (userId != null) {
           provider.clearAll(userId);
-
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
@@ -452,7 +442,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   onPressed: _clearAllNotifications,
                   icon: const Icon(Icons.clear_all, size: 18),
                   label: const Text('Clear All'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  style:
+                  TextButton.styleFrom(foregroundColor: Colors.red),
                 );
               }
               return const SizedBox.shrink();
@@ -480,7 +471,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   const SizedBox(height: 16),
                   Text(
                     'No notifications found.',
-                    style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                    style: TextStyle(
+                        fontSize: 16, color: Colors.grey.shade600),
                   ),
                 ],
               ),
@@ -509,10 +501,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: isUnread ? Colors.blue.shade50 : Colors.white,
+                      color: isUnread
+                          ? Colors.blue.shade50
+                          : Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       border: isUnread
-                          ? Border.all(color: Colors.blue.shade200, width: 1)
+                          ? Border.all(
+                          color: Colors.blue.shade200, width: 1)
                           : null,
                       boxShadow: [
                         BoxShadow(
@@ -533,13 +528,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
                               : Colors.grey.shade100,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(iconData, color: iconColor, size: 24),
+                        child:
+                        Icon(iconData, color: iconColor, size: 24),
                       ),
                       title: Text(
                         message,
                         style: TextStyle(
-                          fontWeight:
-                          isUnread ? FontWeight.w600 : FontWeight.w500,
+                          fontWeight: isUnread
+                              ? FontWeight.w600
+                              : FontWeight.w500,
                           fontSize: 14,
                         ),
                       ),
@@ -554,7 +551,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                     horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: iconColor.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
+                                  borderRadius:
+                                  BorderRadius.circular(12),
                                 ),
                                 child: Text(
                                   type,

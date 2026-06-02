@@ -95,52 +95,38 @@ class ChatService {
   }
 
   // PERSONAL
+// In chat_service.dart
   Future<Map<String, dynamic>> sendPersonalChat(
       String question, String filePath) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      print("🔐 Token: $token");
-
-      if (token == null || token.isEmpty) {
-        return {
-          "success": false,
-          "message": "Authentication token is missing",
-          "reply": "❌ Authentication token is missing"
-        };
-      }
-
-      final Uri url = Uri.parse("${apiBaseUrl}api/ask-newa/personal");
-
-      print("📤 Personal Chat URL: $url");
-      print("📤 Sending question: $question");
-      print("📤 File path: $filePath");
-
-      final request = http.MultipartRequest('POST', url)
-        ..headers['Authorization'] = 'Bearer $token'
-        ..fields['question'] = question;
-
+      // File validation (keep as-is)
       if (filePath.isNotEmpty) {
         final file = File(filePath);
         if (!await file.exists()) {
-          print("❌ File does not exist: $filePath");
           return {
             "success": false,
-            "message": "File does not exist or is inaccessible",
             "reply": "❌ File does not exist or is inaccessible"
           };
         }
-
         final extension = filePath.split('.').last.toLowerCase();
         if (!['pdf', 'xls', 'xlsx'].contains(extension)) {
-          print("❌ Invalid file extension: $extension");
           return {
             "success": false,
-            "message": "Unsupported file format. Only PDF and Excel files are allowed",
             "reply": "❌ Unsupported file format. Only PDF and Excel files are allowed"
           };
         }
+        if (await file.length() > 10 * 1024 * 1024) {
+          return {
+            "success": false,
+            "reply": "❌ File too large. Maximum size is 10MB."
+          };
+        }
+      }
 
+      // Build multipart files list
+      final List<http.MultipartFile> files = [];
+      if (filePath.isNotEmpty) {
+        final extension = filePath.split('.').last.toLowerCase();
         String mimeType;
         if (extension == 'pdf') {
           mimeType = 'application/pdf';
@@ -150,32 +136,33 @@ class ChatService {
           mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
         }
 
-        print("📎 Adding file to request: $filePath (MIME: $mimeType)");
-        request.files.add(
-          http.MultipartFile(
-            'file',
-            file.readAsBytes().asStream(),
-            await file.length(),
-            filename: filePath.split('/').last,
-            contentType: MediaType.parse(mimeType),
-          ),
-        );
+        final file = File(filePath);
+        files.add(http.MultipartFile(
+          'file',
+          file.readAsBytes().asStream(),
+          await file.length(),
+          filename: filePath.split('/').last,
+          contentType: MediaType.parse(mimeType),
+        ));
       }
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      ApiService.checkResponse(response); // ✅ 401 check
+      // ✅ Use ApiService.multipart() — handles token refresh + 401 properly
+      final response = await ApiService.multipart(
+        endpoint: '/api/ask-newa/personal',
+        method: 'POST',
+        fields: {'question': question},
+        files: files,
+        requireAuth: true,
+      );
 
       print("📥 Personal Chat STATUS: ${response.statusCode}");
       print("📥 Personal Chat RESPONSE: ${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final decoded = jsonDecode(response.body);
-        print("✅ Personal Chat Success: $decoded");
         if (decoded['reply'] == 'Unsupported file format.') {
           return {
             "success": false,
-            "message": "Unsupported file format",
             "reply": "❌ Unsupported file format. Please ensure the file is a valid PDF or Excel file."
           };
         }
@@ -185,7 +172,6 @@ class ChatService {
           "message": decoded['message'] ?? "Personal chat sent successfully"
         };
       } else {
-        print("⚠️ Personal Chat Failed: ${response.statusCode} - ${response.body}");
         final decoded = jsonDecode(response.body);
         return {
           "success": false,
@@ -197,7 +183,6 @@ class ChatService {
       print("❌ Personal Chat Error: $e");
       return {
         "success": false,
-        "message": "Error sending personal chat: ${e.toString()}",
         "reply": "❌ Error sending personal chat: ${e.toString()}"
       };
     }
@@ -265,35 +250,26 @@ class ChatService {
   }
 
   Future<Map<String, dynamic>> saveUserSettings(
-      Map<String, String> fields, List<String> filePaths, {required List<String> deletedFiles}) async {
+      Map<String, String> fields, List<String> filePaths,
+      {required List<String> deletedFiles}) async {
     try {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      final uri = Uri.parse("${apiBaseUrl}api/ask-newa/setting");
-      final request = http.MultipartRequest('POST', uri);
-      request.headers['Authorization'] = 'Bearer $token';
-
-      fields.forEach((key, value) {
-        request.fields[key] = value;
-      });
-
-      for (final path in filePaths) {
-        print("📎 Attaching file: $path");
-        request.files.add(await http.MultipartFile.fromPath('files', path));
+      if (deletedFiles.isNotEmpty) {
+        fields['deletedFiles'] = jsonEncode(deletedFiles);
       }
 
-      print("📤 Saving settings to: $uri");
-      print("🔐 Authorization: Bearer $token");
-      print("📝 Fields: ${request.fields}");
-      print("📁 File count: ${request.files.length}");
+      final List<http.MultipartFile> files = [];
+      for (final path in filePaths) {
+        files.add(await http.MultipartFile.fromPath('files', path));
+      }
 
-      final streamedResponse = await request.send();
-      final response = await http.Response.fromStream(streamedResponse);
-      ApiService.checkResponse(response); // ✅ 401 check
-
-      print("📥 Status Code: ${response.statusCode}");
-      print("📥 Response Body: ${response.body}");
+      // ✅ Use ApiService.multipart()
+      final response = await ApiService.multipart(
+        endpoint: '/api/ask-newa/setting',
+        method: 'POST',
+        fields: fields,
+        files: files,
+        requireAuth: true,
+      );
 
       final decoded = jsonDecode(response.body);
       return {
@@ -302,7 +278,6 @@ class ChatService {
         "message": decoded["message"] ?? "",
       };
     } catch (e) {
-      print("❌ Error saving settings: $e");
       return {
         "success": false,
         "message": "Error saving settings: ${e.toString()}",

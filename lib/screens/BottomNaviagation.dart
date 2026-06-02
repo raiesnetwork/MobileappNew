@@ -15,18 +15,17 @@ import 'package:ixes.app/providers/notification_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth/launguage_selection_page.dart';
-import 'chats_page/chat_detail_screen.dart'; // ✅ ADDED for chat navigation
+import 'chats_page/chat_detail_screen.dart';
 import 'chats_page/personal_chat_screen.dart';
 import 'communities_page/my_community_screen.dart';
 import 'coupon_page/coupon_screens.dart';
 import 'my_products/my_products_screen.dart';
 
-// ✅ ADDED: GlobalKey to access MainScreen state from NotificationScreen
-final GlobalKey<_MainScreenState> mainScreenKey = GlobalKey<_MainScreenState>();
+final GlobalKey<_MainScreenState> mainScreenKey =
+GlobalKey<_MainScreenState>();
 
 class MainScreen extends StatefulWidget {
   final int initialIndex;
-
   const MainScreen({super.key, this.initialIndex = 0});
 
   @override
@@ -36,26 +35,20 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   late int _currentIndex;
   bool _snackbarShown = false;
-  late PageController _pageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   bool _isInitialized = false;
-
-  // ✅ ADDED: for post navigation from notification
   String? _pendingPostId;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: _currentIndex);
-
     WidgetsBinding.instance.addObserver(this);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final notifProvider = context.read<NotificationProvider>();
-      notifProvider.initializeNotifications().then((_) {
+      context.read<NotificationProvider>().initializeNotifications().then((_) {
         _isInitialized = true;
         _clearTabNotifications(_currentIndex);
       });
@@ -65,7 +58,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
     if (state == AppLifecycleState.resumed && _isInitialized) {
       context.read<NotificationProvider>().loadNotifications().then((_) {
         _clearTabNotifications(_currentIndex);
@@ -115,29 +107,22 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pageController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
   }
 
+  // ✅ Only fires when user taps bottom nav bar manually
   void _onTabTapped(int index) {
-    setState(() {
-      _currentIndex = index;
-    });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (mounted) {
-        _clearTabNotifications(index);
-      }
+    setState(() => _currentIndex = index);
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) _clearTabNotifications(index);
     });
   }
 
+  // ✅ Only for TRUE tab landings from notification:
+  // post → tab 0, community → tab 3, dashboard → tab 4
+  // NEVER call this for chat/groupchat/serviceReq/service/campaign
   void navigateToTab(
       int index, {
         String? postId,
@@ -145,32 +130,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         String? chatTitle,
         Map<String, dynamic>? chatUserProfile,
       }) {
-    // ✅ Guard: if not initialized yet, retry after next frame
     if (!_isInitialized || !mounted) {
-      debugPrint('⚠️ navigateToTab called before initialized — retrying');
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) navigateToTab(index, postId: postId, chatUserId: chatUserId, chatTitle: chatTitle, chatUserProfile: chatUserProfile);
+        if (mounted) navigateToTab(index, postId: postId);
       });
       return;
     }
-    // ✅ For post: set postId BEFORE switching tab so no flash
-    if (index == 0 && postId != null) {
-      setState(() {
-        _pendingPostId = postId;
-        _currentIndex = index;
-      });
-      _pageController.jumpToPage(index); // ✅ jumpToPage instead of animate — no flash
-    } else {
-      // ✅ For other tabs: jump instantly, no animation = no flash
-      setState(() {
-        _currentIndex = index;
-      });
-      _pageController.jumpToPage(index); // ✅ KEY FIX — eliminates the flash
-    }
 
-    // For chat → open ChatDetailScreen on top of PersonalChatScreen
+    setState(() {
+      if (index == 0 && postId != null) _pendingPostId = postId;
+      _currentIndex = index;
+    });
+
+    // Legacy support: if called with chatUserId
     if (index == 2 && chatUserId != null) {
-      Future.delayed(const Duration(milliseconds: 150), () { // ✅ shorter delay since no animation
+      Future.delayed(const Duration(milliseconds: 150), () {
         if (!mounted) return;
         Navigator.push(
           context,
@@ -186,7 +160,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       });
     }
 
-    Future.delayed(const Duration(milliseconds: 300), () {
+    // ✅ Clear notifications for this tab
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (mounted) _clearTabNotifications(index);
     });
   }
@@ -196,7 +171,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
     try {
       final notifProvider = context.read<NotificationProvider>();
-
       List<String> types = [];
 
       switch (tabIndex) {
@@ -224,12 +198,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           return;
       }
 
-      if (types.isEmpty) return;
-
       print('🧹 Clearing notifications for tab $tabIndex with types: $types');
-
       await notifProvider.markTypesAsRead(types);
-
       print('✅ Successfully cleared all notifications for tab $tabIndex');
     } catch (e) {
       print('💥 Error clearing tab notifications: $e');
@@ -238,7 +208,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   void _onDrawerChanged(bool isOpened) {
     if (isOpened) {
-      // ✅ Refresh my communities every time drawer opens
       context.read<CommunityProvider>().fetchMyCommunities();
     } else {
       _searchController.clear();
@@ -246,64 +215,46 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     }
   }
 
-  void _onCommunityTapped() {
-    Navigator.pop(context);
-  }
+  void _onCommunityTapped() => Navigator.pop(context);
 
-  // Updated badge for AppBar notification icon
   Widget _buildBadge(int count) {
     if (count == 0) return const SizedBox.shrink();
-
     return Positioned(
       right: 0,
       top: 0,
       child: Container(
         padding: const EdgeInsets.all(4),
-        decoration: const BoxDecoration(
-          color: Colors.red,
-          shape: BoxShape.circle,
-        ),
-        constraints: const BoxConstraints(
-          minWidth: 18,
-          minHeight: 18,
-        ),
+        decoration:
+        const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+        constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
         child: Text(
           count > 99 ? '99+' : count.toString(),
           style: const TextStyle(
-            color: Colors.white,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-          ),
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.bold),
           textAlign: TextAlign.center,
         ),
       ),
     );
   }
 
-  // New badge specifically for bottom navigation bar icons
   Widget _buildBottomNavBadge(int count) {
     if (count == 0) return const SizedBox.shrink();
-
     return Positioned(
       right: -6,
       top: -6,
       child: Container(
         padding: const EdgeInsets.all(3),
-        decoration: const BoxDecoration(
-          color: Colors.red,
-          shape: BoxShape.circle,
-        ),
-        constraints: const BoxConstraints(
-          minWidth: 16,
-          minHeight: 16,
-        ),
+        decoration:
+        const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+        constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
         child: Text(
           count > 99 ? '99+' : count.toString(),
           style: const TextStyle(
-            color: Colors.white,
-            fontSize: 9,
-            fontWeight: FontWeight.bold,
-          ),
+              color: Colors.white,
+              fontSize: 9,
+              fontWeight: FontWeight.bold),
           textAlign: TextAlign.center,
         ),
       ),
@@ -323,21 +274,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           children: [
             IconButton(
               icon: const Icon(Icons.menu, color: Primary),
-              onPressed: () {
-                _scaffoldKey.currentState?.openDrawer();
-              },
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
-            // Container(
-            //   height: 30,
-            //   width: 30,
-            //   decoration: BoxDecoration(
-            //     borderRadius: BorderRadius.circular(8),
-            //     image: DecorationImage(
-            //       image: AssetImage(Images.Logo),
-            //       fit: BoxFit.cover,
-            //     ),
-            //   ),
-            // ),
           ],
         ),
         actions: [
@@ -347,16 +285,21 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               return Stack(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.notifications_outlined, color: Primary),
+                    icon: const Icon(Icons.notifications_outlined,
+                        color: Primary),
                     onPressed: () async {
                       await Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => const NotificationScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const NotificationScreen(),
+                        ),
                       );
+                      // ✅ ONLY reload badge — never clear any tab here
+                      // Tab clearing happens ONLY in _onTabTapped and navigateToTab
                       if (mounted) {
-                        await context.read<NotificationProvider>().loadNotifications();
-                        await Future.delayed(const Duration(milliseconds: 300));
-                        _clearTabNotifications(_currentIndex);
+                        context
+                            .read<NotificationProvider>()
+                            .loadNotifications();
                       }
                     },
                   ),
@@ -368,14 +311,18 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.local_offer_outlined, color: Primary),
             tooltip: 'My Coupons',
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CouponListScreen())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const CouponListScreen()),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.store, color: Primary),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ServicesScreen())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ServicesScreen()),
+            ),
           ),
-
-          // ✅ NEW: Language switcher
           IconButton(
             icon: const Icon(Icons.language, color: Primary),
             tooltip: 'Change Language',
@@ -383,18 +330,19 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               final result = await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => const LanguageSelectionScreen(isFromSettings: true),
+                  builder: (_) => const LanguageSelectionScreen(
+                      isFromSettings: true),
                 ),
               );
-              if (result != null && mounted) {
-                setState(() {});
-              }
+              if (result != null && mounted) setState(() {});
             },
           ),
-
           IconButton(
             icon: const Icon(Icons.person, color: Primary),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileScreen())),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            ),
           ),
           const SizedBox(width: 12),
         ],
@@ -411,65 +359,57 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.grey[900]!,
-                      Colors.black,
-                    ],
+                    colors: [Colors.grey[900]!, Colors.black],
                   ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.all(0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white24,
-                            width: 2,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border:
+                        Border.all(color: Colors.white24, width: 2),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black26,
+                            blurRadius: 10,
+                            offset: Offset(0, 4),
                           ),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Colors.black26,
-                              blurRadius: 10,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: CircleAvatar(
-                          radius: 45,
-                          backgroundColor: Colors.grey[800],
-                          child: ClipOval(
-                            child: Image.asset(
-                              Images.Logo,
-                              fit: BoxFit.cover,
-                              width: 90,
-                              height: 90,
-                            ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 45,
+                        backgroundColor: Colors.grey[800],
+                        child: ClipOval(
+                          child: Image.asset(
+                            Images.Logo,
+                            fit: BoxFit.cover,
+                            width: 90,
+                            height: 90,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 15),
-                      const Text(
-                        'IXES',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2,
-                        ),
+                    ),
+                    const SizedBox(height: 15),
+                    const Text(
+                      'IXES',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
                       ),
-                      const Text(
-                        'Connect • Share • Grow',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                          letterSpacing: 1,
-                        ),
+                    ),
+                    const Text(
+                      'Connect • Share • Grow',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        letterSpacing: 1,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               Expanded(
@@ -486,28 +426,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
+      // ✅ IndexedStack — zero page-change events, no physics, no callbacks
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
-          final communityList =
-              provider.myCommunities['data'] as List? ?? [];
-          final communityId = communityList.isNotEmpty
-              ? communityList.first['_id']?.toString() ?? ''
-              : '';
-
-          return PageView(
-            controller: _pageController,
-            onPageChanged: (index) {
-              setState(() {
-                _currentIndex = index;
-              });
-              Future.delayed(const Duration(milliseconds: 400), () {
-                if (mounted) {
-                  _clearTabNotifications(index);
-                }
-              });
-            },
+          return IndexedStack(
+            index: _currentIndex,
             children: [
-              FeedScreen(postId: _pendingPostId, showBackButton: false),// ✅ CHANGED: pass pendingPostId
+              FeedScreen(postId: _pendingPostId, showBackButton: false),
               const NewaScreen(),
               const PersonalChatScreen(),
               const CommunitiesScreen(),
@@ -524,7 +449,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               ['chat', 'GroupChat', 'Conversation']);
           final communityCount = notifProvider
               .getUnreadCountForTypes(['community', 'GroupRequest']);
-          final dashboardCount = notifProvider.getUnreadCountForTypes([
+          final dashboardCount =
+          notifProvider.getUnreadCountForTypes([
             'campaign',
             'Service',
             'Invoice',
@@ -542,13 +468,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
             unselectedItemColor: Colors.grey,
             items: [
               BottomNavigationBarItem(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.home),
-                    _buildBottomNavBadge(homeCount),
-                  ],
-                ),
+                icon: Stack(clipBehavior: Clip.none, children: [
+                  const Icon(Icons.home),
+                  _buildBottomNavBadge(homeCount),
+                ]),
                 label: 'Home',
               ),
               const BottomNavigationBarItem(
@@ -556,33 +479,24 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                 label: 'Ask Newa',
               ),
               BottomNavigationBarItem(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.chat),
-                    _buildBottomNavBadge(chatCount),
-                  ],
-                ),
+                icon: Stack(clipBehavior: Clip.none, children: [
+                  const Icon(Icons.chat),
+                  _buildBottomNavBadge(chatCount),
+                ]),
                 label: 'Chats',
               ),
               BottomNavigationBarItem(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.group),
-                    _buildBottomNavBadge(communityCount),
-                  ],
-                ),
+                icon: Stack(clipBehavior: Clip.none, children: [
+                  const Icon(Icons.group),
+                  _buildBottomNavBadge(communityCount),
+                ]),
                 label: 'Communities',
               ),
               BottomNavigationBarItem(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    const Icon(Icons.dashboard),
-                    _buildBottomNavBadge(dashboardCount),
-                  ],
-                ),
+                icon: Stack(clipBehavior: Clip.none, children: [
+                  const Icon(Icons.dashboard),
+                  _buildBottomNavBadge(dashboardCount),
+                ]),
                 label: 'Dashboard',
               ),
             ],

@@ -944,23 +944,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         // Detect meeting message and inject linkMeta
                         final msgContent = message['text']?.toString() ?? '';
                         final isMeetingMsg = msgContent.trimLeft().startsWith('📅');
-                        Map<String, dynamic>? resolvedLinkMeta = message['linkMeta'];
+
+                        final existingUrl = (message['linkMeta']?['url'] ?? '').toString().trim();
+                        Map<String, dynamic>? resolvedLinkMeta = existingUrl.isNotEmpty
+                            ? message['linkMeta']
+                            : null;
 
                         if (isMeetingMsg && resolvedLinkMeta == null) {
-                          final urlMatch = RegExp(r'https?://[^\s\n]+').firstMatch(msgContent);
+                          final urlMatch = RegExp(
+                            r'https?://[^\s\n\r]+',
+                            caseSensitive: false,
+                          ).firstMatch(msgContent);
                           if (urlMatch != null) {
-                            resolvedLinkMeta = {'url': urlMatch.group(0)?.replaceAll(RegExp(r'[.,;:!?]+$'), '')};
+                            final url = urlMatch.group(0)?.replaceAll(RegExp(r'[.,;:!?\s]+$'), '') ?? '';
+                            if (url.isNotEmpty) {
+                              resolvedLinkMeta = {'url': url, 'title': '', 'description': '', 'image': ''};
+                            }
                           }
                         }
 
 
                         // ── Regular message ──────────────────
                         // ✅ Detect forwarded campaign by forwerdMessage + image present
+                        final forwerdUrl = (message['forwerdUrl'] ?? '').toString();
                         final isCampaignForward =
                             (message['forwerdMessage'] ?? '').toString().isNotEmpty &&
                                 (message['image'] ?? '').toString().isNotEmpty &&
                                 message['isAudio'] != true &&
-                                message['isFile'] != true;
+                                message['isFile'] != true &&
+                                !forwerdUrl.contains('/feeds/') &&
+                                !forwerdUrl.contains('/feedpage/');
 
                         final isSharedCard = isCampaignForward ||
                             (message['forwerd'] == true &&
@@ -971,14 +984,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
                         Map<String, dynamic>? resolvedPost;
                         if (isCampaignForward) {
+                          // Detect shareType from URL
+                          String shareType = 'campaign';
+                          if (forwerdUrl.contains('/community/') && forwerdUrl.contains('/announcements')) {
+                            shareType = 'announcement';
+                          } else if (forwerdUrl.contains('/services/')) {
+                            shareType = 'service';
+                          }
+
                           resolvedPost = {
                             '_id': '',
-                            'shareType': 'campaign',
+                            'shareType': shareType,
                             'text': message['text'] ?? '',
                             'images': [(message['image'] ?? '')],
                             'authorName': message['forwerdMessage'] ?? 'Forwarded',
                             'authorProfile': '',
-                            'forwerdUrl': message['forwerdUrl'] ?? '',
+                            'forwerdUrl': forwerdUrl,
                             'likesCount': 0,
                             'commentsCount': 0,
                           };
@@ -1038,9 +1059,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 timestamp: DateTime.parse(
                                     message['createdAt']),
                                 status: message['status'],
-                                isLink:
-                                message['link'] ?? false,
                                 linkMeta: message['linkMeta'],
+
                                 isFile:
                                 message['isFile'] ?? false,
                                 fileUrl: message['fileUrl'],
@@ -1062,9 +1082,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 message['isAudio'] ?? false,
                                 audioUrl: message['audioUrl'],
                                 isSharedPost: isSharedCard,
-                                isForwarded:
-                                message['forwerd'] == true &&
-                                    !isSharedCard,
+                                isForwarded: message['forwerd'] == true,
                                 sharedPostData: resolvedPost,
 
                               ),
@@ -1147,10 +1165,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       String postId = '';
       if (shareType == 'feed' && forwerdUrl.isNotEmpty) {
-        final segment = forwerdUrl.split('/').last.trim();
-        if (segment.length == 24 &&
-            RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
-          postId = segment;
+        // Handle both /feeds/ID and /feedpage/ID and other formats
+        final segments = forwerdUrl.split('/');
+        for (final segment in segments.reversed) {
+          final s = segment.trim();
+          if (s.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(s)) {
+            postId = s;
+            break;
+          }
         }
       }
 

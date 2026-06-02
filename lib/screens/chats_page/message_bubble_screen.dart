@@ -543,15 +543,28 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
 
     return GestureDetector(
-      onTap: () {
-        if (shareType == 'feed') {
-          _navigateToPost(postData);
-        } else if (forwerdUrl.isNotEmpty) {
-          // open the URL in browser for non-feed types
-          launchUrl(Uri.parse(forwerdUrl), mode: LaunchMode.externalApplication);
-        }
-      },
-      child: Container(
+        onTap: () {
+          final postId = postData[
+            '_id']?.toString() ?? '';
+          final isValidPostId = postId.length == 24 &&
+              RegExp(r'^[a-f0-9]{24}$').hasMatch(postId);
+
+
+
+
+          if (isValidPostId) {
+            // Always try FeedScreen first regardless of shareTyp
+            // e
+            _navigateToPost(postData);
+          } else if (forwerdUrl.isNotEmpty) {
+            // Only fall back to browser when there's no valid post ID
+            launchUrl(Uri.parse(forwerdUrl), mode: LaunchMode.externalApplication);
+          }
+        },
+
+
+
+    child: Container(
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
         decoration: BoxDecoration(
           color: widget.isMe ? Colors.white.withOpacity(0.15) : Colors.white,
@@ -1621,20 +1634,27 @@ class _MessageBubbleState extends State<MessageBubble> {
         ),
       );
     }
-    // Copy Link — for link preview messages
-    if (widget.isLink &&
-        widget.linkMeta != null &&
-        (widget.linkMeta!['url'] ?? '').toString().isNotEmpty) {
+// Copy Link — for meeting messages and link preview messages
+    final String? copyableUrl = () {
+      final metaUrl = widget.linkMeta?['url']?.toString() ?? '';
+      if (metaUrl.isNotEmpty) return metaUrl;
+      if ((widget.content ?? '').trimLeft().startsWith('📅')) {
+        final match = RegExp(r'https?://[^\s\n\r]+', caseSensitive: false)
+            .firstMatch(widget.content ?? '');
+        if (match != null) {
+          return match.group(0)?.replaceAll(RegExp(r'[.,;:!?\s]+$'), '');
+        }
+      }
+      return null;
+    }();
+
+    if (copyableUrl != null && copyableUrl.isNotEmpty) {
       options.add(ListTile(
         leading: Icon(Icons.link, color: Theme.of(context).colorScheme.primary),
         title: const Text('Copy Link'),
         onTap: () {
           Navigator.pop(context);
-          Clipboard.setData(
-            ClipboardData(
-              text: widget.linkMeta!['url'].toString(),
-            ),
-          );
+          Clipboard.setData(ClipboardData(text: copyableUrl));
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Link copied to clipboard'),

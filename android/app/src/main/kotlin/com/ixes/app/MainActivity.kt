@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val SCREEN_CHANNEL = "com.ixes.app/screen_share"
     private val CALL_CHANNEL   = "com.ixes.app/calls"
+    private val CHAT_CHANNEL   = "com.ixes.app/chat"   // ✅ new channel for chat taps
     private val FGS_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     private val PERMISSION_REQUEST_CODE = 1001
 
@@ -46,18 +47,26 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_CHANNEL)
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
+        // ✅ Chat channel — Flutter listens on this for notification tap navigation
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHAT_CHANNEL)
+            .setMethodCallHandler { _, result -> result.notImplemented() }
+
         createNotificationChannels()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleCallIntent(intent)
+        handleChatIntent(intent)   // ✅ handle chat tap on cold launch
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleCallIntent(intent)
+        handleChatIntent(intent)   // ✅ handle chat tap when app resumes
     }
+
+    // ── Existing call intent handler (unchanged) ───────────────────────────
 
     private fun handleCallIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("isCallIntent", false) != true) return
@@ -82,12 +91,44 @@ class MainActivity : FlutterActivity() {
         }, 2000)
     }
 
-    // ✅ Single method — creates both channels
+    // ── NEW: chat notification tap handler ─────────────────────────────────
+
+    private fun handleChatIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("isChatIntent", false) != true) return
+
+        val type           = intent.getStringExtra("type")           ?: return
+        val senderId       = intent.getStringExtra("senderId")       ?: ""
+        val senderName     = intent.getStringExtra("senderName")     ?: ""
+        val conversationId = intent.getStringExtra("conversationId") ?: ""
+        val groupId        = intent.getStringExtra("groupId")        ?: ""
+
+        Log.d("MainActivity", "💬 handleChatIntent | type=$type | senderId=$senderId | senderName=$senderName | groupId=$groupId")
+
+        // Delay to give Flutter engine time to boot and register the channel listener
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                MethodChannel(messenger, CHAT_CHANNEL).invokeMethod(
+                    "chatTapped",
+                    mapOf(
+                        "type"           to type,
+                        "senderId"       to senderId,
+                        "senderName"     to senderName,
+                        "conversationId" to conversationId,
+                        "groupId"        to groupId,
+                    )
+                )
+                Log.d("MainActivity", "✅ chatTapped sent to Flutter | senderName=$senderName")
+            }
+        }, 1500)   // 1.5s — enough for Flutter to boot from killed state
+    }
+
+    // ── Notification channels ──────────────────────────────────────────────
+
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notifManager = getSystemService(NotificationManager::class.java)
 
-            // ✅ Call channel — with ringtone
+            // Call channel — with ringtone
             val callChannel = NotificationChannel(
                 "call_channel",
                 "Incoming Calls",
@@ -105,7 +146,7 @@ class MainActivity : FlutterActivity() {
             }
             notifManager.createNotificationChannel(callChannel)
 
-            // ✅ Chat channel — NO sound, NO vibration
+            // Chat channel — no sound, no vibration
             val chatChannel = NotificationChannel(
                 "chat_notifications",
                 "Chat Messages",
@@ -118,6 +159,8 @@ class MainActivity : FlutterActivity() {
             notifManager.createNotificationChannel(chatChannel)
         }
     }
+
+    // ── Screen share (unchanged) ───────────────────────────────────────────
 
     private fun handleStartScreenShare(result: MethodChannel.Result) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
