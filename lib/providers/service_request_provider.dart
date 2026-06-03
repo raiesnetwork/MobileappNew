@@ -128,7 +128,7 @@ class ServiceRequestProvider extends ChangeNotifier {
   Future<Map<String, dynamic>> getServiceRequestById(String requestId) async {
     _isLoading = true;
     _error = null;
-    _currentRequest = null;
+
     notifyListeners();
 
     try {
@@ -219,15 +219,14 @@ class ServiceRequestProvider extends ChangeNotifier {
 
       await fetchServiceRequests(communityId: communityId);
 
-// ✅ Always refresh from server to get real file URLs after upload
       if (files != null && files.isNotEmpty) {
         await getServiceRequestById(requestId);
+      }
 
-
+      if (response['error'] == false || response['data'] != null) {
         return {
           'error': false,
-          'message':
-          response['message'] ?? 'Service request updated successfully',
+          'message': response['message'] ?? 'Service request updated successfully',
           'data': response['data'],
         };
       } else {

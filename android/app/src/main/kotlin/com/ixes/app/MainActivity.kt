@@ -16,7 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val SCREEN_CHANNEL = "com.ixes.app/screen_share"
     private val CALL_CHANNEL   = "com.ixes.app/calls"
-    private val CHAT_CHANNEL   = "com.ixes.app/chat"   // ✅ new channel for chat taps
+    private val CHAT_CHANNEL   = "com.ixes.app/chat"
     private val FGS_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     private val PERMISSION_REQUEST_CODE = 1001
 
@@ -47,7 +47,6 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CALL_CHANNEL)
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
-        // ✅ Chat channel — Flutter listens on this for notification tap navigation
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHAT_CHANNEL)
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
@@ -57,17 +56,16 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         handleCallIntent(intent)
-        handleChatIntent(intent)   // ✅ handle chat tap on cold launch
+        handleChatIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleCallIntent(intent)
-        handleChatIntent(intent)   // ✅ handle chat tap when app resumes
+        handleChatIntent(intent)
     }
 
-    // ── Existing call intent handler (unchanged) ───────────────────────────
-
+    // ── Call handler ───────────────────────────────────────────────────────
     private fun handleCallIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("isCallIntent", false) != true) return
 
@@ -91,8 +89,7 @@ class MainActivity : FlutterActivity() {
         }, 2000)
     }
 
-    // ── NEW: chat notification tap handler ─────────────────────────────────
-
+    // ── Chat handler ───────────────────────────────────────────────────────
     private fun handleChatIntent(intent: Intent?) {
         if (intent?.getBooleanExtra("isChatIntent", false) != true) return
 
@@ -104,7 +101,6 @@ class MainActivity : FlutterActivity() {
 
         Log.d("MainActivity", "💬 handleChatIntent | type=$type | senderId=$senderId | senderName=$senderName | groupId=$groupId")
 
-        // Delay to give Flutter engine time to boot and register the channel listener
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
                 MethodChannel(messenger, CHAT_CHANNEL).invokeMethod(
@@ -119,49 +115,10 @@ class MainActivity : FlutterActivity() {
                 )
                 Log.d("MainActivity", "✅ chatTapped sent to Flutter | senderName=$senderName")
             }
-        }, 1500)   // 1.5s — enough for Flutter to boot from killed state
+        }, 1500)
     }
 
-    // ── Notification channels ──────────────────────────────────────────────
-
-    private fun createNotificationChannels() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val notifManager = getSystemService(NotificationManager::class.java)
-
-            // Call channel — with ringtone
-            val callChannel = NotificationChannel(
-                "call_channel",
-                "Incoming Calls",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Incoming voice and video calls"
-                enableVibration(true)
-                setSound(
-                    android.provider.Settings.System.DEFAULT_RINGTONE_URI,
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build()
-                )
-            }
-            notifManager.createNotificationChannel(callChannel)
-
-            // Chat channel — no sound, no vibration
-            val chatChannel = NotificationChannel(
-                "chat_notifications",
-                "Chat Messages",
-                NotificationManager.IMPORTANCE_DEFAULT
-            ).apply {
-                description = "Chat message notifications"
-                setSound(null, null)
-                enableVibration(false)
-            }
-            notifManager.createNotificationChannel(chatChannel)
-        }
-    }
-
-    // ── Screen share (unchanged) ───────────────────────────────────────────
-
+    // ── Screen share handler ───────────────────────────────────────────────
     private fun handleStartScreenShare(result: MethodChannel.Result) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val granted = ContextCompat.checkSelfPermission(this, FGS_PERMISSION) ==
@@ -179,6 +136,34 @@ class MainActivity : FlutterActivity() {
             }
         }
         startScreenShareServiceAndNotify(result)
+    }
+
+    private fun startScreenShareServiceAndNotify(result: MethodChannel.Result) {
+        try {
+            val serviceIntent = Intent(this, ScreenShareService::class.java)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+
+            Log.d("MainActivity", "✅ startForegroundService called")
+
+            // ✅ CRITICAL: Wait 1 second for service to fully initialize
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            handler.postDelayed({
+                Log.d("MainActivity", "✅ Service fully initialized, returning success to Flutter")
+                result.success(null)
+            }, 1000)
+
+        } catch (e: SecurityException) {
+            Log.e("MainActivity", "❌ SecurityException: ${e.message}")
+            result.error("PERMISSION_DENIED", e.message, null)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "❌ Exception: ${e.message}")
+            result.error("SERVICE_ERROR", e.message, null)
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -202,59 +187,34 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun startScreenShareServiceAndNotify(result: MethodChannel.Result) {
-        try {
-            val serviceIntent = Intent(this, ScreenShareService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+    // ── Notification channels ──────────────────────────────────────────────
+    private fun createNotificationChannels() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notifManager = getSystemService(NotificationManager::class.java)
+
+            // Chat channel
+            val chatChannel = NotificationChannel(
+                "chat_notifications",
+                "Chat Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Chat message notifications"
+                enableLights(true)
+                enableVibration(true)
+                setSound(null, null)
             }
-            Log.d("MainActivity", "✅ startForegroundService called")
+            notifManager.createNotificationChannel(chatChannel)
 
-            val handler = android.os.Handler(android.os.Looper.getMainLooper())
-            var elapsed = 0
-            val interval = 150
-            val maxWait = 3000
-
-            val checker = object : Runnable {
-                override fun run() {
-                    elapsed += interval
-                    val running = isScreenShareServiceRunning()
-                    Log.d("MainActivity", "⏳ FGS check at ${elapsed}ms — running=$running")
-
-                    when {
-                        running -> {
-                            Log.d("MainActivity", "✅ FGS confirmed running at ${elapsed}ms")
-                            result.success(null)
-                        }
-                        elapsed >= maxWait -> {
-                            Log.e("MainActivity", "❌ FGS never confirmed after ${maxWait}ms")
-                            result.success(null)
-                        }
-                        else -> handler.postDelayed(this, interval.toLong())
-                    }
-                }
+            // Call channel
+            val callChannel = NotificationChannel(
+                "call_notifications",
+                "Incoming Calls",
+                NotificationManager.IMPORTANCE_MAX
+            ).apply {
+                description = "Incoming voice and video calls"
+                enableVibration(true)
             }
-            handler.postDelayed(checker, interval.toLong())
-
-        } catch (e: SecurityException) {
-            Log.e("MainActivity", "❌ SecurityException: ${e.message}")
-            result.error("PERMISSION_DENIED", e.message, null)
-        } catch (e: Exception) {
-            Log.e("MainActivity", "❌ Exception: ${e.message}")
-            result.error("SERVICE_ERROR", e.message, null)
-        }
-    }
-
-    private fun isScreenShareServiceRunning(): Boolean {
-        return try {
-            val manager = getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager
-            @Suppress("DEPRECATION")
-            manager.getRunningServices(Int.MAX_VALUE)
-                .any { it.service.className == ScreenShareService::class.java.name }
-        } catch (e: Exception) {
-            false
+            notifManager.createNotificationChannel(callChannel)
         }
     }
 }

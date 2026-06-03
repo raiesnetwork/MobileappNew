@@ -115,7 +115,7 @@
     livekit_client: ^2.2.6
     flutter_webrtc: ^0.11.7
     permission_handler: ^11.0.0
-    app_links: ^6.0.0
+    app_links:
     mime: ^1.0.4
     geolocator: ^13.0.2
     geocoding: ^3.0.0
@@ -180,6 +180,8 @@
     # "family" key with the font family name, and a "fonts" key with a
     # list giving the asset and other descriptors for the font. For
     # example:
+
+
     # fonts:
     #   - family: Schyler
     #     fonts:
