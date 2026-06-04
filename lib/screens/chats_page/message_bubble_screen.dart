@@ -513,6 +513,7 @@ class _MessageBubbleState extends State<MessageBubble> {
 
     final postData = widget.sharedPostData!;
     final shareType = postData['shareType']?.toString() ?? 'feed';
+    final postId = postData['_id']?.toString() ?? '';
     final postContent = postData['text'] ?? '';
     final postImages = _resolvePostImages(postData);
     final authorName = postData['authorName'] ?? 'Unknown';
@@ -521,50 +522,97 @@ class _MessageBubbleState extends State<MessageBubble> {
     final commentsCount = postData['commentsCount'] ?? 0;
     final forwerdUrl = postData['forwerdUrl']?.toString() ?? '';
 
-    // ── icon and label per share type ─────────────────────────
+    // ✅ Check if ORIGINAL SHARED or FORWARDED
+    final isOriginalShared = postData['isOriginalShared'] ?? false;
+    final isForwarded = postData['isForwarded'] ?? false;
+
+    // ✅ Validate post ID
+    final isValidPostId = postId.length == 24 &&
+        RegExp(r'^[a-f0-9]{24}$').hasMatch(postId);
+
+    // ✅ Determine header icon & label
     IconData headerIcon;
     String headerLabel;
-    switch (shareType) {
-      case 'announcement':
-        headerIcon = Icons.campaign_rounded;
-        headerLabel = 'Shared Announcement';
-        break;
-      case 'campaign':
-        headerIcon = Icons.flag_rounded;
-        headerLabel = 'Shared Campaign';
-        break;
-      case 'service':
-        headerIcon = Icons.miscellaneous_services_rounded;
-        headerLabel = 'Shared Service';
-        break;
-      default:
-        headerIcon = Icons.share;
-        headerLabel = 'Shared Post';
+
+    if (isForwarded) {
+      // ✅ FORWARDED POST
+      headerIcon = Icons.reply_rounded;
+      headerLabel = 'Forwarded';
+    } else if (isOriginalShared) {
+
+      // ✅ ORIGINAL SHARED POST
+      switch (shareType) {
+        case 'announcement':
+          headerIcon = Icons.campaign_rounded;
+          headerLabel = 'Shared Announcement';
+          break;
+        case 'campaign':
+          headerIcon = Icons.flag_rounded;
+          headerLabel = 'Shared Campaign';
+          break;
+        case 'service':
+          headerIcon = Icons.miscellaneous_services_rounded;
+          headerLabel = 'Shared Service';
+          break;
+        default:
+          headerIcon = Icons.share;
+          headerLabel = 'Shared Post';
+      }
+    } else {
+      // Default
+      headerIcon = Icons.share;
+      headerLabel = 'Shared Post';
     }
 
     return GestureDetector(
-        onTap: () {
-          final postId = postData[
-            '_id']?.toString() ?? '';
-          final isValidPostId = postId.length == 24 &&
-              RegExp(r'^[a-f0-9]{24}$').hasMatch(postId);
-
-
-
-
-          if (isValidPostId) {
-            // Always try FeedScreen first regardless of shareTyp
-            // e
-            _navigateToPost(postData);
-          } else if (forwerdUrl.isNotEmpty) {
-            // Only fall back to browser when there's no valid post ID
-            launchUrl(Uri.parse(forwerdUrl), mode: LaunchMode.externalApplication);
+      onTap: () async {
+        // ✅ Navigation logic
+        if (shareType == 'feed' && isValidPostId) {
+          // Feed post: navigate to FeedScreen
+          _navigateToPost(postData);
+        } else if (shareType != 'feed' && forwerdUrl.isNotEmpty) {
+          // Non-feed post (announcement, campaign, service): open URL
+          final uri = Uri.parse(forwerdUrl);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Cannot open link'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
           }
-        },
-
-
-
-    child: Container(
+        } else if (forwerdUrl.isNotEmpty) {
+          // Fallback: try to open forwerdUrl
+          final uri = Uri.parse(forwerdUrl);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Post link not available'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
+          }
+        } else {
+          // No navigation possible
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Post link not available'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      },
+      child: Container(
         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
         decoration: BoxDecoration(
           color: widget.isMe ? Colors.white.withOpacity(0.15) : Colors.white,

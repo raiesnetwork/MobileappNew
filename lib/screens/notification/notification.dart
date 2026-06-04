@@ -10,9 +10,7 @@ import 'package:ixes.app/screens/service_request/service_request_deatils_page.da
 import '../../api_service/user_api_service.dart';
 import '../campaigns_page/campaigns_info screen.dart';
 import '../campaigns_page/getall_campaigns_screen.dart';
-import '../chats_page/chat_detail_screen.dart';
 import '../chats_page/group_chat/group_chat_detail.dart';
-import '../chats_page/group_chat/my_groups.dart';
 import '../services_page/service_details.dart';
 import '../services_page/services_screen.dart';
 
@@ -38,9 +36,40 @@ class _NotificationScreenState extends State<NotificationScreen> {
         .loadNotifications();
   }
 
+  // ── Close notification screen then switch tab ─────────────────────────────
+  void _goToTab(int tab, {String? postId}) {
+    Navigator.pop(context);
+    void doNavigate() {
+      final state = mainScreenKey.currentState;
+      if (state == null || !state.mounted) {
+        Future.delayed(const Duration(milliseconds: 200), doNavigate);
+        return;
+      }
+      state.navigateToTab(tab, postId: postId);
+    }
+    doNavigate();
+  }
+
+  // ── Close notification screen then push a screen on top of current tab ────
+  // ✅ Does NOT change _currentIndex — back button returns to correct tab
+  void _popAndPush(Widget screen) {
+    Navigator.pop(context);
+    void doPush() {
+      final ctx = mainScreenKey.currentContext;
+      if (ctx == null) {
+        Future.delayed(const Duration(milliseconds: 200), doPush);
+        return;
+      }
+      Navigator.push(
+        ctx,
+        MaterialPageRoute(builder: (_) => screen),
+      );
+    }
+    doPush();
+  }
+
   void _navigateFromNotification(Map<String, dynamic> notification) async {
     final type = notification['type'] ?? '';
-    print('🔔 Tapped notification → type: "$type"');
 
     final provider = Provider.of<NotificationProvider>(context, listen: false);
     provider.markTypesAsRead([type]);
@@ -57,20 +86,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
     const communityTypes = ['community', 'GroupRequest'];
     const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 
-    // ── POST ──────────────────────────────────────────────────────────────
+    // ── POST ──────────────────────────────────────────────────────────────────
     if (postTypes.contains(type)) {
       final postId = relatedData?['postId']?.toString() ??
           relatedData?['referenceId']?.toString() ??
           notification['referenceId']?.toString() ??
           notification['postId']?.toString();
 
-      if (postId == null || postId.isEmpty) {
-        Navigator.pop(context);
-        await Future.delayed(const Duration(milliseconds: 300));
-        if (!mounted) return;
-        mainScreenKey.currentState?.navigateToTab(0);
+      if (postId == null || postId.isEmpty || postId.length != 24) {
+        _goToTab(0);
         return;
       }
+
+      Navigator.pop(context);
 
       final response = await UserAPI().getPostById(postId);
       final postExists = response != null &&
@@ -79,213 +107,150 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
       if (!mounted) return;
 
-      Navigator.pop(context);
-
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-
-      if (postExists) {
-        mainScreenKey.currentState?.navigateToTab(0, postId: postId);
-      } else {
-        mainScreenKey.currentState?.navigateToTab(0);
-        final navContext = mainScreenKey.currentContext;
-        if (navContext == null) return;
-        showDialog(
-          context: navContext,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Post Not Found'),
-            content: const Text(
-                'This post no longer exists or may have been removed.'),
-            actions: [
-              TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('OK')),
-            ],
-          ),
-        );
+      void doNavigate() {
+        final state = mainScreenKey.currentState;
+        if (state == null || !state.mounted) {
+          Future.delayed(const Duration(milliseconds: 200), doNavigate);
+          return;
+        }
+        if (postExists) {
+          state.navigateToTab(0, postId: postId);
+        } else {
+          state.navigateToTab(0);
+          Future.delayed(const Duration(milliseconds: 400), () {
+            final ctx = mainScreenKey.currentContext;
+            if (ctx == null) return;
+            showDialog(
+              context: ctx,
+              barrierDismissible: false,
+              builder: (ctx) => AlertDialog(
+                title: const Text('Post Not Found'),
+                content: const Text(
+                    'This post no longer exists or may have been removed.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('OK'),
+                  ),
+                ],
+              ),
+            );
+          });
+        }
       }
 
-      // ── PERSONAL CHAT ─────────────────────────────────────────────────────
+      doNavigate();
+
+      // ── CHAT (personal) ───────────────────────────────────────────────────────
     } else if (chatTypes.contains(type)) {
-      final senderId = relatedData?['senderId']?.toString() ??
-          relatedData?['privatChatId']?.toString() ??
-          notification['referenceId']?.toString();
+      _goToTab(2);
 
-      final messageText = notification['message']?.toString() ?? '';
-      final senderName = messageText.isNotEmpty
-          ? messageText
-          .replaceAll(
-          RegExp(r'\s*(send|sent|says|shared|posted).*',
-              caseSensitive: false),
-          '')
-          .trim()
-          : 'Chat';
-
-      final senderProfile = <String, dynamic>{
-        '_id': senderId ?? '',
-        'profile': {'profileImage': '', 'name': senderName},
-      };
-
-      if (senderId != null && senderId.isNotEmpty) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatDetailScreen(
-              userId: senderId,
-              chatTitle: senderName,
-              userProfile: senderProfile,
-            ),
-          ),
-        );
-      } else {
-        Navigator.pop(context);
-        await Future.delayed(const Duration(milliseconds: 300));
-        if (!mounted) return;
-        mainScreenKey.currentState?.navigateToTab(2);
-      }
-
-      // ── GROUP CHAT ────────────────────────────────────────────────────────
+      // ── GROUP CHAT ────────────────────────────────────────────────────────────
     } else if (type == 'GroupChat') {
       final groupId = relatedData?['groupId']?.toString() ??
           notification['referenceId']?.toString();
 
       final messageText = notification['message']?.toString() ?? '';
       String groupName = 'Group Chat';
-
       final quoteMatch = RegExp(r'"([^"]+)"').firstMatch(messageText);
       if (quoteMatch != null) {
         groupName = quoteMatch.group(1) ?? 'Group Chat';
       } else {
-        final inMatch =
-        RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(messageText);
-        if (inMatch != null) groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
+        final inMatch = RegExp(r'\bin\s+(.+)$', caseSensitive: false)
+            .firstMatch(messageText);
+        if (inMatch != null) {
+          groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
+        }
       }
 
-      if (groupId != null && groupId.isNotEmpty) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
-        );
+      Navigator.pop(context);
 
-        await Future.delayed(const Duration(milliseconds: 350));
-        if (!mounted) return;
-
-        final ctx = mainScreenKey.currentContext;
-        if (ctx == null) return;
-
-        Navigator.push(
-          ctx,
-          MaterialPageRoute(
-            builder: (_) => GroupChatDetailPage(
-              groupId: groupId,
-              groupName: groupName,
-              isAdmin: false,
-            ),
-          ),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const MyGroupsScreen()),
-        );
+      void doGroupNavigate() {
+        final state = mainScreenKey.currentState;
+        if (state == null || !state.mounted) {
+          Future.delayed(const Duration(milliseconds: 200), doGroupNavigate);
+          return;
+        }
+        state.navigateToTab(2);
+        if (groupId != null && groupId.isNotEmpty) {
+          Future.delayed(const Duration(milliseconds: 300), () {
+            final ctx = mainScreenKey.currentContext;
+            if (ctx == null) return;
+            Navigator.push(
+              ctx,
+              MaterialPageRoute(
+                builder: (_) => GroupChatDetailPage(
+                  groupId: groupId,
+                  groupName: groupName,
+                  isAdmin: false,
+                ),
+              ),
+            );
+          });
+        }
       }
 
-      // ── SERVICE REQUEST ───────────────────────────────────────────────────
+      doGroupNavigate();
+
+      // ── SERVICE REQUEST ───────────────────────────────────────────────────────
+      // ✅ Does NOT change tab — pushes on top, back returns to same tab
     } else if (serviceReqTypes.contains(type)) {
-      final serviceReqId = relatedData?['assignedServiceReqId']?.toString() ??
-          relatedData?['serviceReqId']?.toString() ??
-          notification['referenceId']?.toString();
+      final serviceReqId =
+          relatedData?['assignedServiceReqId']?.toString() ??
+              relatedData?['serviceReqId']?.toString() ??
+              notification['referenceId']?.toString();
 
       if (serviceReqId != null && serviceReqId.isNotEmpty) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                ServiceRequestDetailsScreen(requestId: serviceReqId),
-          ),
-        );
+        _popAndPush(ServiceRequestDetailsScreen(requestId: serviceReqId));
       } else {
-        Navigator.pop(context);
-        await Future.delayed(const Duration(milliseconds: 300));
-        if (!mounted) return;
-        mainScreenKey.currentState?.navigateToTab(4);
+        _goToTab(4);
       }
 
-      // ── SERVICE ───────────────────────────────────────────────────────────
+      // ── SERVICE ───────────────────────────────────────────────────────────────
+      // ✅ Does NOT change tab — pushes on top, back returns to same tab
     } else if (type == 'Service') {
       final serviceId = relatedData?['serviceId']?.toString() ??
           notification['referenceId']?.toString();
 
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ServicesScreen()),
-      );
-
       if (serviceId != null && serviceId.isNotEmpty) {
-        await Future.delayed(const Duration(milliseconds: 350));
-        if (!mounted) return;
-        final ctx = mainScreenKey.currentContext;
-        if (ctx == null) return;
-        Navigator.push(
-          ctx,
-          MaterialPageRoute(
-            builder: (_) => ServiceDetailsScreen(serviceId: serviceId),
-          ),
-        );
+        _popAndPush(ServiceDetailsScreen(serviceId: serviceId));
+      } else {
+        _goToTab(4);
       }
 
-      // ── CAMPAIGN ──────────────────────────────────────────────────────────
+      // ── CAMPAIGN ──────────────────────────────────────────────────────────────
+      // ✅ Does NOT change tab — pushes on top, back returns to same tab
     } else if (type == 'campaign') {
       final campaignId = relatedData?['campaignId']?.toString() ??
           notification['referenceId']?.toString();
-      final communityName = relatedData?['communityName']?.toString() ??
-          notification['communityName']?.toString() ??
-          '';
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const CampaignsScreen()),
-      );
+      final communityName =
+          relatedData?['communityName']?.toString() ??
+              notification['communityName']?.toString() ??
+              '';
 
       if (campaignId != null && campaignId.isNotEmpty) {
-        await Future.delayed(const Duration(milliseconds: 350));
-        if (!mounted) return;
-        final ctx = mainScreenKey.currentContext;
-        if (ctx == null) return;
-        Navigator.push(
-          ctx,
-          MaterialPageRoute(
-            builder: (_) => CampaignDetailsScreen(
-              campaignId: campaignId,
-              communityName: communityName,
-            ),
-          ),
-        );
+        _popAndPush(CampaignDetailsScreen(
+          campaignId: campaignId,
+          communityName: communityName,
+        ));
+      } else {
+        _goToTab(4);
       }
 
-      // ── COMMUNITY ─────────────────────────────────────────────────────────
+      // ── COMMUNITY ─────────────────────────────────────────────────────────────
     } else if (communityTypes.contains(type)) {
-      Navigator.pop(context);
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      mainScreenKey.currentState?.navigateToTab(3);
+      _goToTab(3);
 
-      // ── DASHBOARD ─────────────────────────────────────────────────────────
+      // ── DASHBOARD fallbacks ───────────────────────────────────────────────────
     } else if (type == 'Invoice' ||
         type == 'StoreSubscription' ||
         type == 'SubDomain' ||
         type == 'AddProduct') {
-      Navigator.pop(context);
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      mainScreenKey.currentState?.navigateToTab(4);
+      _goToTab(4);
 
-      // ── DEFAULT ───────────────────────────────────────────────────────────
+      // ── DEFAULT ───────────────────────────────────────────────────────────────
     } else {
-      Navigator.pop(context);
-      await Future.delayed(const Duration(milliseconds: 300));
-      if (!mounted) return;
-      mainScreenKey.currentState?.navigateToTab(0);
+      _goToTab(0);
     }
   }
 
@@ -528,8 +493,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                               : Colors.grey.shade100,
                           shape: BoxShape.circle,
                         ),
-                        child:
-                        Icon(iconData, color: iconColor, size: 24),
+                        child: Icon(iconData, color: iconColor, size: 24),
                       ),
                       title: Text(
                         message,
@@ -551,8 +515,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                     horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: iconColor.withOpacity(0.1),
-                                  borderRadius:
-                                  BorderRadius.circular(12),
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
                                   type,

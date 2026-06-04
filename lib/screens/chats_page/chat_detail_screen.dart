@@ -1135,71 +1135,77 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   Map<String, dynamic>? _resolveSharedPostData(
       Map<String, dynamic> message) {
+    // ✅ Priority 1: Real sharedPost object (ORIGINAL SHARED POST)
     if (message['sharedPost'] is Map &&
         message['sharedPost']['_id'] != null) {
       final post = Map<String, dynamic>.from(message['sharedPost']);
       final id = post['_id']?.toString() ?? '';
-      if (id.length != 24 ||
-          !RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
-        post['_id'] = '';
+      if (id.length == 24 &&
+          RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
+        post['isOriginalShared'] = true;
+        post['isForwarded'] = false;
+        return post;
       }
-      return post;
     }
+
+    // ✅ Priority 2: Check if FORWARDED (has forwardedFrom field)
+    final hasForwardedFrom = message['forwardedFrom'] is Map &&
+        (message['forwardedFrom'] as Map).isNotEmpty;
 
     if (message['forwerd'] == true) {
       final forwerdUrl = message['forwerdUrl']?.toString() ?? '';
-      final forwerdMessage =
-          message['forwerdMessage']?.toString() ?? '';
+      final forwerdMessage = message['forwerdMessage']?.toString() ?? '';
       final image = message['image']?.toString() ?? '';
       final text = message['text']?.toString() ?? '';
 
-      String shareType = 'feed';
-      if (forwerdUrl.contains('/community/') &&
-          forwerdUrl.contains('/announcements')) {
-        shareType = 'announcement';
-      } else if (forwerdUrl.contains('/campaign/')) {
-        shareType = 'campaign';
-      } else if (forwerdUrl.contains('/services/')) {
-        shareType = 'service';
-      }
-
       String postId = '';
-      if (shareType == 'feed' && forwerdUrl.isNotEmpty) {
-        // Handle both /feeds/ID and /feedpage/ID and other formats
-        final segments = forwerdUrl.split('/');
-        for (final segment in segments.reversed) {
-          final s = segment.trim();
-          if (s.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(s)) {
-            postId = s;
-            break;
+      String shareType = 'feed';
+
+      if (forwerdUrl.isNotEmpty) {
+        // Check if FEED post
+        if (forwerdUrl.contains('/feeds/') ||
+            forwerdUrl.contains('/feedpage/')) {
+          shareType = 'feed';
+          final segments = forwerdUrl.split('/');
+          for (final segment in segments.reversed) {
+            final s = segment.trim();
+            if (s.length == 24 &&
+                RegExp(r'^[a-f0-9]{24}$').hasMatch(s)) {
+              postId = s;
+              break;
+            }
           }
         }
-      }
-
-      String contextId = '';
-      if (shareType != 'feed' && forwerdUrl.isNotEmpty) {
-        final parts = forwerdUrl.split('/');
-        if (shareType == 'announcement' && parts.length >= 3) {
-          contextId = parts[parts.length - 2];
-        } else {
-          contextId = parts.last;
+        // Check for ANNOUNCEMENT
+        else if (forwerdUrl.contains('/community/') &&
+            forwerdUrl.contains('/announcements')) {
+          shareType = 'announcement';
+        }
+        // Check for CAMPAIGN
+        else if (forwerdUrl.contains('/campaign/')) {
+          shareType = 'campaign';
+        }
+        // Check for SERVICE
+        else if (forwerdUrl.contains('/services/')) {
+          shareType = 'service';
         }
       }
 
       return {
         '_id': postId,
         'shareType': shareType,
-        'contextId': contextId,
         'forwerdUrl': forwerdUrl,
         'text': text,
         'images': image.isNotEmpty ? [image] : [],
-        'authorName':
-        forwerdMessage.isNotEmpty ? forwerdMessage : 'Shared',
+        'authorName': forwerdMessage.isNotEmpty ? forwerdMessage : 'Shared',
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
+        'isOriginalShared': !hasForwardedFrom, // ✅ TRUE if SHARED, FALSE if FORWARDED
+        'isForwarded': hasForwardedFrom, // ✅ TRUE only if has forwardedFrom
       };
     }
+
     return null;
   }
 

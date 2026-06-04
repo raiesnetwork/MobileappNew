@@ -221,62 +221,65 @@ class _FeedScreenState extends State<FeedScreen> {
   Future<void> _loadSinglePost(String postId) async {
     try {
       final response = await UserAPI().getPostById(postId);
-      print('📡 getPostById response: $response');
 
       if (response != null && response['success'] == true) {
         final postJson = response['data'] as Map<String, dynamic>?;
         if (postJson != null) {
-          try {
-            final targetPost = Post.fromJson(postJson);
-            final provider = context.read<CommentProvider>();
-            provider.injectSinglePost(targetPost);
-            setState(() {
-              posts = [targetPost];
-              _originalPosts = [targetPost];
-              _allPostsCache = [targetPost];
-              _hasMorePosts = false;
-              isLoading = false;
-            });
-            return;
-          } catch (e) {
-            print('Post.fromJson error: $e');
-          }
+          final targetPost = Post.fromJson(postJson);
+          if (!mounted) return;
+          final provider = context.read<CommentProvider>();
+          provider.injectSinglePost(targetPost);
+          setState(() {
+            posts = [targetPost];
+            _originalPosts = [targetPost];
+            _allPostsCache = [targetPost];
+            _hasMorePosts = false;
+            isLoading = false;
+            _isInitialized = true; // ✅ was missing
+          });
+          return;
         }
       }
 
+      // Post not found / deleted
+      if (!mounted) return;
       setState(() {
         posts = [];
         _originalPosts = [];
         _allPostsCache = [];
         _hasMorePosts = false;
         isLoading = false;
+        _isInitialized = true; // ✅ was missing — spinner never stopped
       });
 
-      if (mounted) {
-        showDialog(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('Post Not Found'),
-            content: const Text(
-                'This post no longer exists or may have been removed.'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  Navigator.pop(context);
-                },
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Post Unavailable'),
+          content: const Text(
+              'This post no longer exists or was removed.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                if (Navigator.canPop(context)) Navigator.pop(context);
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     } catch (e) {
       print('_loadSinglePost error: $e');
+      if (!mounted) return;
       setState(() {
         posts = [];
+        _originalPosts = [];
+        _allPostsCache = [];
         _hasMorePosts = false;
         isLoading = false;
+        _isInitialized = true; // ✅ was missing
       });
     }
   }

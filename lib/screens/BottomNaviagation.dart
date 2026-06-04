@@ -112,7 +112,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // ✅ Only fires when user taps bottom nav bar manually
   void _onTabTapped(int index) {
     setState(() => _currentIndex = index);
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -120,50 +119,26 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     });
   }
 
-  // ✅ Only for TRUE tab landings from notification:
-  // post → tab 0, community → tab 3, dashboard → tab 4
-  // NEVER call this for chat/groupchat/serviceReq/service/campaign
+  // ✅ navigateToTab — sets index immediately (no flash), no delayed setState
   void navigateToTab(
       int index, {
         String? postId,
-        String? chatUserId,
-        String? chatTitle,
-        Map<String, dynamic>? chatUserProfile,
       }) {
-    if (!_isInitialized || !mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) {
+      Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) navigateToTab(index, postId: postId);
       });
       return;
     }
 
+    // ✅ Immediately switch tab — no delay, prevents FeedScreen flash
     setState(() {
       if (index == 0 && postId != null) _pendingPostId = postId;
       _currentIndex = index;
     });
 
-    // Legacy support: if called with chatUserId
-    if (index == 2 && chatUserId != null) {
-      Future.delayed(const Duration(milliseconds: 150), () {
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatDetailScreen(
-              userId: chatUserId,
-              chatTitle: chatTitle ?? 'Chat',
-              userProfile: chatUserProfile ??
-                  {'profile': {'name': chatTitle ?? 'Chat'}},
-            ),
-          ),
-        );
-      });
-    }
-
-    // ✅ Clear notifications for this tab
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (mounted) _clearTabNotifications(index);
-    });
+    // ✅ Clear notifications immediately too
+    _clearTabNotifications(index);
   }
 
   Future<void> _clearTabNotifications(int tabIndex) async {
@@ -294,8 +269,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                           builder: (_) => const NotificationScreen(),
                         ),
                       );
-                      // ✅ ONLY reload badge — never clear any tab here
-                      // Tab clearing happens ONLY in _onTabTapped and navigateToTab
                       if (mounted) {
                         context
                             .read<NotificationProvider>()
@@ -426,7 +399,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
-      // ✅ IndexedStack — zero page-change events, no physics, no callbacks
       body: Consumer<CommunityProvider>(
         builder: (context, provider, child) {
           return IndexedStack(

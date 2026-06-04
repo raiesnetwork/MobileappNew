@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.ixes.app">
 
@@ -25,8 +26,8 @@
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- ✅ CRITICAL: Add this permission for Android 14+ screen sharing -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-
 
     <!-- ─── Features ─── -->
     <uses-feature android:name="android.hardware.location.network" android:required="false" />
@@ -112,6 +113,7 @@
             android:exported="false"
             android:foregroundServiceType="phoneCall"
             android:stopWithTask="false" />
+
         <!-- ─── Custom FCM Service (intercepts call notifications) ─── -->
         <service
             android:name=".MyFirebaseMessagingService"
@@ -126,10 +128,12 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="chat_notifications" />
 
+        <!-- ✅ CRITICAL: ScreenShareService with mediaProjection type -->
         <service
             android:name=".ScreenShareService"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaProjection"
+            android:stopWithTask="false" />
 
         <!-- CallKit Receiver -->
         <receiver

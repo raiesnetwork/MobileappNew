@@ -150,12 +150,14 @@ class MainActivity : FlutterActivity() {
 
             Log.d("MainActivity", "✅ startForegroundService called")
 
-            // ✅ CRITICAL: Wait 1 second for service to fully initialize
+            // ✅ CRITICAL FIX: Wait 2000ms (2 seconds) for FGS to fully initialize
+            // This ensures startForeground() has been called in ScreenShareService.onStartCommand()
+            // before Flutter calls setScreenShareEnabled()
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             handler.postDelayed({
-                Log.d("MainActivity", "✅ Service fully initialized, returning success to Flutter")
+                Log.d("MainActivity", "✅ Service fully initialized (2000ms delay), returning success to Flutter")
                 result.success(null)
-            }, 1000)
+            }, 2000)  // ← CHANGED FROM 1000ms TO 2000ms
 
         } catch (e: SecurityException) {
             Log.e("MainActivity", "❌ SecurityException: ${e.message}")
