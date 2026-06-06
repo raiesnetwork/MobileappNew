@@ -965,8 +965,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
 
                         // ── Regular message ──────────────────
-                        // ✅ Detect forwarded campaign by forwerdMessage + image present
+// ✅ Detect forwarded campaign by forwerdMessage + image present
                         final forwerdUrl = (message['forwerdUrl'] ?? '').toString();
+
+
+
                         final isCampaignForward =
                             (message['forwerdMessage'] ?? '').toString().isNotEmpty &&
                                 (message['image'] ?? '').toString().isNotEmpty &&
@@ -975,6 +978,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 !forwerdUrl.contains('/feeds/') &&
                                 !forwerdUrl.contains('/feedpage/');
 
+
                         final isSharedCard = isCampaignForward ||
                             (message['forwerd'] == true &&
                                 (message['forwerdUrl'] != null &&
@@ -982,14 +986,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 message['isAudio'] != true &&
                                 message['isFile'] != true);
 
+
                         Map<String, dynamic>? resolvedPost;
                         if (isCampaignForward) {
                           // Detect shareType from URL
                           String shareType = 'campaign';
+
+                          debugPrint('🔍 ===== CAMPAIGN DETECTED =====');
+                          debugPrint('🔍 Initial shareType: $shareType');
+
                           if (forwerdUrl.contains('/community/') && forwerdUrl.contains('/announcements')) {
                             shareType = 'announcement';
+                            debugPrint('🔍 Detected as ANNOUNCEMENT');
                           } else if (forwerdUrl.contains('/services/')) {
                             shareType = 'service';
+                            debugPrint('🔍 Detected as SERVICE');
+                          } else {
+                            debugPrint('🔍 Keeping as CAMPAIGN');
                           }
 
                           resolvedPost = {
@@ -1002,7 +1015,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             'forwerdUrl': forwerdUrl,
                             'likesCount': 0,
                             'commentsCount': 0,
+                            'isOriginalShared': true,  // ✅ ADD THIS
+                            'isForwarded': false,       // ✅ ADD THIS
                           };
+
+
                         } else {
                           resolvedPost = _resolveSharedPostData(message);
                         }

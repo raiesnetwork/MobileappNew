@@ -625,7 +625,7 @@ void main() async {
     runApp(IxesApp(
       initialToken:  token,
       initialUserId: userId,
-      showLanguage:  language == null,
+      showLanguage:  false,
     ));
   }, (error, stack) {
     final msg = error.toString();

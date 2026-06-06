@@ -239,14 +239,15 @@ class CommentService {
         "postId": postId,
         "userId": userId,
         "type": type,
-        "shareContext": shareContext,
+        "shareContext": shareContext,  // ✅ Always include this
       };
 
       if (shareContext != "feed" && contextId != null) {
         body["contextId"] = contextId;
       }
 
-      print('📤 sharePost BODY: $body');
+      print('📤 sharePost BODY: ${jsonEncode(body)}');
+      print('📤 shareContext being sent: $shareContext');  // ✅ Debug
 
       final response = await ApiService.post('/api/post/share', body);
       ApiService.checkResponse(response);
@@ -257,20 +258,19 @@ class CommentService {
       final decoded = jsonDecode(response.body);
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        print('✅ Post shared successfully');
+        print('✅ Post shared successfully with context: $shareContext');
         return {
           "success": true,
           "message": decoded['message'] ?? "Post sent successfully",
         };
       } else {
-        print('⚠️ Failed to share post');
         return {
           "success": false,
           "message": decoded['message'] ?? "Failed to share post",
         };
       }
     } catch (e) {
-      print("❌ Network or Decoding Error: $e");
+      print("❌ Error in sharePost: $e");
       return {
         "success": false,
         "message": "Error sharing post: ${e.toString()}",

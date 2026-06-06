@@ -513,6 +513,13 @@ class _MessageBubbleState extends State<MessageBubble> {
 
     final postData = widget.sharedPostData!;
     final shareType = postData['shareType']?.toString() ?? 'feed';
+
+    // ✅ ADD DEBUG HERE
+    debugPrint('📌 _buildSharedPost() called');
+    debugPrint('📌 sharedPostData: ${postData}');
+    debugPrint('📌 shareType received: $shareType');
+    debugPrint('📌 shareType == "campaign": ${shareType == 'campaign'}');
+
     final postId = postData['_id']?.toString() ?? '';
     final postContent = postData['text'] ?? '';
     final postImages = _resolvePostImages(postData);
@@ -538,31 +545,39 @@ class _MessageBubbleState extends State<MessageBubble> {
       // ✅ FORWARDED POST
       headerIcon = Icons.reply_rounded;
       headerLabel = 'Forwarded';
+      debugPrint('📌 Detected as FORWARDED');
     } else if (isOriginalShared) {
-
+      debugPrint('📌 Detected as ORIGINAL SHARED');
       // ✅ ORIGINAL SHARED POST
       switch (shareType) {
         case 'announcement':
           headerIcon = Icons.campaign_rounded;
           headerLabel = 'Shared Announcement';
+          debugPrint('📌 → Showing as ANNOUNCEMENT');
           break;
         case 'campaign':
           headerIcon = Icons.flag_rounded;
           headerLabel = 'Shared Campaign';
+          debugPrint('📌 → Showing as CAMPAIGN ✅');
           break;
         case 'service':
           headerIcon = Icons.miscellaneous_services_rounded;
           headerLabel = 'Shared Service';
+          debugPrint('📌 → Showing as SERVICE');
           break;
         default:
           headerIcon = Icons.share;
           headerLabel = 'Shared Post';
+          debugPrint('📌 → Showing as DEFAULT POST (shareType=$shareType)');
       }
     } else {
+      debugPrint('📌 Detected as UNKNOWN/DEFAULT');
       // Default
       headerIcon = Icons.share;
       headerLabel = 'Shared Post';
     }
+
+    // ... rest of the method
 
     return GestureDetector(
       onTap: () async {
@@ -1348,7 +1363,8 @@ class _MessageBubbleState extends State<MessageBubble> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Show label only when it's a forwarded post card
-                if (widget.isForwarded == true) _buildForwardedLabel(),
+                // Show label only when it's a forwarded post card (but NOT for shared posts)
+                if (widget.isForwarded == true && !widget.isSharedPost) _buildForwardedLabel(),
                 // Reply preview
                 if (widget.replyToMessage != null) ...[
                   Container(

@@ -47,6 +47,9 @@ class _LoginScreenState extends State<LoginScreen>
   bool _obscurePassword = true;
   bool _isPasswordLogin = true;
 
+  // Track whether the Google signing-in dialog is currently showing
+  bool _googleDialogVisible = false;
+
   AnimationController? _fadeController;
   Animation<double>?   _fadeAnimation;
   Animation<Offset>?   _slideAnimation;
@@ -144,42 +147,160 @@ class _LoginScreenState extends State<LoginScreen>
     } catch (e) { debugPrint('❌ FCM save error: $e'); }
   }
 
-  Future<void> _handleGoogleSignIn() async {
-    final prefs = await SharedPreferences.getInstance();
-    final oldToken = prefs.getString('auth_token');
-    if (oldToken != null) {
-      await AuthService.logout();
-      await prefs.remove('auth_token');
-      await prefs.remove('user_data');
-      await prefs.remove('user_id');
-      await prefs.remove('user_name');
+  // ── Network check helper ─────────────────────────────────────────────────
+  Future<bool> _hasNetwork() async {
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
     }
-    _showGoogleSigningInDialog();
-    final result = await _googleAuthService.signInWithGoogle();
+  }
+
+  void _showNoNetworkDialog() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E0060),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.15), width: 1),
+            boxShadow: [BoxShadow(
+                color: const Color(0xFF6C3FE8).withOpacity(0.4),
+                blurRadius: 40, spreadRadius: 2)],
+          ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 56, height: 56,
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.1),
+                  border: Border.all(color: Colors.white.withOpacity(0.2), width: 1)),
+              child: const Center(
+                child: Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 26),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'No Internet Connection',
+              style: TextStyle(color: Colors.white, fontSize: 18,
+                  fontWeight: FontWeight.w700, letterSpacing: -0.3),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Please check your network connection and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _C.accent,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('OK',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ── Google Sign-In ────────────────────────────────────────────────────────
+  Future<void> _handleGoogleSignIn() async {
+    // 1. Network check FIRST — before doing anything
+    final online = await _hasNetwork();
     if (!mounted) return;
-    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
-    if (result.success && result.token != null) {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      await authProvider.saveUserFromGoogle(
-        token: result.token!,
-        userId: result.user?['id'] ?? '',
-        username: result.user?['username'] ?? result.user?['name'] ?? '',
-        userData: result.user,
-      );
-      final resolvedId = authProvider.user?.id ?? '';
-      if (resolvedId.isNotEmpty) {
-        Provider.of<CommentProvider>(context, listen: false)
-            .setCurrentUserId(resolvedId);
+    if (!online) {
+      _showNoNetworkDialog();
+      return;
+    }
+
+    // 2. Show the signing-in dialog immediately and keep it alive
+    _googleDialogVisible = true;
+    _showGoogleSigningInDialog();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final oldToken = prefs.getString('auth_token');
+      if (oldToken != null) {
+        await AuthService.logout();
+        await prefs.remove('auth_token');
+        await prefs.remove('user_data');
+        await prefs.remove('user_id');
+        await prefs.remove('user_name');
       }
-      await _saveFcmToken();
+
+      final result = await _googleAuthService.signInWithGoogle();
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-              builder: (_) => const MainScreen(initialIndex: 0)));
-    } else {
-      _showSnack(
-          result.message ?? AppLocalizations.instance.googleSignInFailed,
-          isError: true);
+
+      if (result.success && result.token != null) {
+        // Keep the dialog showing while we finish setup
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        await authProvider.saveUserFromGoogle(
+          token: result.token!,
+          userId: result.user?['id'] ?? '',
+          username: result.user?['username'] ?? result.user?['name'] ?? '',
+          userData: result.user,
+        );
+        final resolvedId = authProvider.user?.id ?? '';
+        if (resolvedId.isNotEmpty) {
+          Provider.of<CommentProvider>(context, listen: false)
+              .setCurrentUserId(resolvedId);
+        }
+        await _saveFcmToken();
+        if (!mounted) return;
+
+        // Navigate — dialog dismisses naturally because the whole route is replaced
+        Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+                builder: (_) => const MainScreen(initialIndex: 0)));
+      } else {
+        // Dismiss dialog only on failure
+        _dismissGoogleDialog();
+        if (!mounted) return;
+        _showSnack(
+            result.message ?? AppLocalizations.instance.googleSignInFailed,
+            isError: true);
+      }
+    } catch (e) {
+      debugPrint('❌ Google sign-in error: $e');
+      _dismissGoogleDialog();
+      if (!mounted) return;
+      // Show friendly error instead of raw exception
+      final msg = e.toString();
+      if (msg.contains('network') ||
+          msg.contains('SocketException') ||
+          msg.contains('TimeoutException') ||
+          msg.contains('Failed host lookup')) {
+        _showNoNetworkDialog();
+      } else {
+        _showSnack(
+            AppLocalizations.instance.googleSignInFailed,
+            isError: true);
+      }
+    }
+  }
+
+  void _dismissGoogleDialog() {
+    if (_googleDialogVisible && mounted) {
+      _googleDialogVisible = false;
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     }
   }
 
@@ -198,10 +319,10 @@ class _LoginScreenState extends State<LoginScreen>
     final t = AppLocalizations.instance;
     showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: false,          // user cannot tap outside to close
       barrierColor: Colors.black.withOpacity(0.6),
       builder: (_) => WillPopScope(
-        onWillPop: () async => false,
+        onWillPop: () async => false,     // back-button does nothing
         child: Dialog(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -222,7 +343,8 @@ class _LoginScreenState extends State<LoginScreen>
                     color: Colors.white.withOpacity(0.1),
                     border: Border.all(color: Colors.white.withOpacity(0.2), width: 1)),
                 child: const Center(child: Text('G',
-                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: Colors.white))),
+                    style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700,
+                        color: Colors.white))),
               ),
               const SizedBox(height: 20),
               Text(t.signingYouIn,
@@ -230,11 +352,13 @@ class _LoginScreenState extends State<LoginScreen>
                       fontWeight: FontWeight.w700, letterSpacing: -0.3)),
               const SizedBox(height: 6),
               Text(t.verifyingGoogle, textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white60, fontSize: 13, height: 1.5)),
+                  style: const TextStyle(color: Colors.white60, fontSize: 13,
+                      height: 1.5)),
               const SizedBox(height: 24),
               SizedBox(width: 36, height: 36,
                   child: CircularProgressIndicator(strokeWidth: 2.5,
-                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF6C3FE8)),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                          Color(0xFF6C3FE8)),
                       backgroundColor: Colors.white.withOpacity(0.1))),
               const SizedBox(height: 16),
               Text(t.securingSession,
@@ -244,19 +368,19 @@ class _LoginScreenState extends State<LoginScreen>
           ),
         ),
       ),
-    );
+    ).then((_) {
+      // Mark as hidden if the dialog is dismissed for any reason
+      _googleDialogVisible = false;
+    });
   }
 
   // ── BUILD ─────────────────────────────────────────────────────────────────
-  // ValueListenableBuilder listens to AppLocalizations.notifier.
-  // When setLanguage() is called anywhere, notifier fires → builder re-runs
-  // → t is fresh → all Text widgets show the new language instantly. ✅
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<String>(
       valueListenable: AppLocalizations.notifier,
       builder: (context, _, __) {
-        final t = AppLocalizations.instance; // fresh on every language change
+        final t = AppLocalizations.instance;
         return _buildScaffold(context, t);
       },
     );
@@ -269,28 +393,33 @@ class _LoginScreenState extends State<LoginScreen>
       body: SafeArea(
         child: SingleChildScrollView(
           physics: const ClampingScrollPhysics(),
-          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 16),
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16),
           child: FadeTransition(
             opacity: _fadeAnimation ?? const AlwaysStoppedAnimation(1.0),
             child: SlideTransition(
-              position: _slideAnimation ?? const AlwaysStoppedAnimation(Offset.zero),
+              position: _slideAnimation ??
+                  const AlwaysStoppedAnimation(Offset.zero),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     SizedBox(height: 4.h),
-                    Hero(tag: 'app_logo', child: Image.asset(Images.LogoTrans, height: 14.h)),
+                    Hero(tag: 'app_logo',
+                        child: Image.asset(Images.LogoTrans, height: 14.h)),
                     SizedBox(height: 3.h),
 
                     Align(alignment: Alignment.centerLeft,
                         child: Text(t.welcomeBack,
-                            style: const TextStyle(color: _C.textPrimary, fontSize: 26,
-                                fontWeight: FontWeight.w700, letterSpacing: -0.5))),
+                            style: const TextStyle(color: _C.textPrimary,
+                                fontSize: 26, fontWeight: FontWeight.w700,
+                                letterSpacing: -0.5))),
                     const SizedBox(height: 4),
                     Align(alignment: Alignment.centerLeft,
                         child: Text(t.signInToYourAccount,
-                            style: const TextStyle(color: _C.textSecondary, fontSize: 14))),
+                            style: const TextStyle(color: _C.textSecondary,
+                                fontSize: 14))),
                     SizedBox(height: 2.5.h),
 
                     // Form card
@@ -322,7 +451,8 @@ class _LoginScreenState extends State<LoginScreen>
                                   onTap: _handleForgotPassword,
                                   child: Text(t.forgotPassword,
                                       style: const TextStyle(color: _C.accent,
-                                          fontSize: 12, fontWeight: FontWeight.w500)),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500)),
                                 ),
                               ),
                             ],
@@ -333,20 +463,29 @@ class _LoginScreenState extends State<LoginScreen>
                               builder: (_, authProvider, __) => _PrimaryButton(
                                 label: _isPasswordLogin ? t.login : t.sendOtp,
                                 isLoading: authProvider.isLoading,
-                                onPressed: _isPasswordLogin ? _handlePasswordLogin : _sendOTP,
+                                onPressed: _isPasswordLogin
+                                    ? _handlePasswordLogin
+                                    : _sendOTP,
                               ),
                             ),
 
                             const SizedBox(height: 20),
                             Row(children: [
-                              Expanded(child: Divider(color: _C.border, thickness: 1)),
-                              Padding(padding: const EdgeInsets.symmetric(horizontal: 14),
+                              Expanded(child: Divider(color: _C.border,
+                                  thickness: 1)),
+                              Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14),
                                   child: Text(t.or,
-                                      style: const TextStyle(color: _C.textMuted, fontSize: 12))),
-                              Expanded(child: Divider(color: _C.border, thickness: 1)),
+                                      style: const TextStyle(
+                                          color: _C.textMuted, fontSize: 12))),
+                              Expanded(child: Divider(color: _C.border,
+                                  thickness: 1)),
                             ]),
                             const SizedBox(height: 20),
-                            _GoogleButton(label: t.continueWithGoogle, onPressed: _handleGoogleSignIn),
+                            _GoogleButton(
+                                label: t.continueWithGoogle,
+                                onPressed: _handleGoogleSignIn),
                           ],
                         ),
                       ),
@@ -355,10 +494,12 @@ class _LoginScreenState extends State<LoginScreen>
                     SizedBox(height: 2.5.h),
                     Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                       Text(t.dontHaveAccount,
-                          style: const TextStyle(color: _C.textSecondary, fontSize: 13)),
+                          style: const TextStyle(color: _C.textSecondary,
+                              fontSize: 13)),
                       GestureDetector(
                         onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => SignupScreen())),
+                            MaterialPageRoute(
+                                builder: (_) => SignupScreen())),
                         child: Text(t.signUp,
                             style: const TextStyle(color: _C.accent,
                                 fontSize: 13, fontWeight: FontWeight.w600)),
@@ -368,19 +509,24 @@ class _LoginScreenState extends State<LoginScreen>
 
                     // Change Language button
                     GestureDetector(
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                          builder: (_) => const LanguageSelectionScreen(isFromSettings: true))),
+                      onTap: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) =>
+                          const LanguageSelectionScreen(
+                              isFromSettings: true))),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 10,
+                            horizontal: 16),
                         decoration: BoxDecoration(color: _C.surfaceHi,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: _C.border)),
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.language_rounded, color: _C.accent, size: 16),
+                          const Icon(Icons.language_rounded, color: _C.accent,
+                              size: 16),
                           const SizedBox(width: 8),
                           Text(t.changeLanguage,
                               style: const TextStyle(color: _C.accent,
-                                  fontSize: 13, fontWeight: FontWeight.w500)),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500)),
                         ]),
                       ),
                     ),
@@ -402,7 +548,8 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildMobileField(AppLocalizations t) {
     return Container(
       decoration: BoxDecoration(color: _C.surfaceHi,
-          borderRadius: BorderRadius.circular(12), border: Border.all(color: _C.border)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _C.border)),
       child: Row(children: [
         GestureDetector(
           onTap: () => showCountryPicker(
@@ -415,11 +562,14 @@ class _LoginScreenState extends State<LoginScreen>
               inputDecoration: InputDecoration(
                 hintText: 'Search country...',
                 hintStyle: const TextStyle(color: _C.textMuted),
-                prefixIcon: const Icon(Icons.search, color: _C.textMuted, size: 18),
+                prefixIcon: const Icon(Icons.search, color: _C.textMuted,
+                    size: 18),
                 filled: true, fillColor: _C.surfaceHi,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: _C.border)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
                     borderSide: const BorderSide(color: _C.border)),
               ),
             ),
@@ -433,13 +583,15 @@ class _LoginScreenState extends State<LoginScreen>
             decoration: const BoxDecoration(
                 border: Border(right: BorderSide(color: _C.border))),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text(_selectedCountry.flagEmoji, style: const TextStyle(fontSize: 18)),
+              Text(_selectedCountry.flagEmoji,
+                  style: const TextStyle(fontSize: 18)),
               const SizedBox(width: 6),
               Text('+${_selectedCountry.phoneCode}',
                   style: const TextStyle(color: _C.textPrimary,
                       fontSize: 14, fontWeight: FontWeight.w500)),
               const SizedBox(width: 2),
-              const Icon(Icons.keyboard_arrow_down_rounded, color: _C.textMuted, size: 16),
+              const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: _C.textMuted, size: 16),
             ]),
           ),
         ),
@@ -447,19 +599,24 @@ class _LoginScreenState extends State<LoginScreen>
           child: TextFormField(
             controller: _mobileController,
             keyboardType: TextInputType.phone,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(15)],
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(15),
+            ],
             style: const TextStyle(color: _C.textPrimary, fontSize: 15),
             decoration: InputDecoration(
               hintText: t.enterNumber,
               hintStyle: const TextStyle(color: _C.textMuted, fontSize: 14),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 14),
             ),
             validator: (value) {
               if (value == null || value.isEmpty) return t.enterMobileNumber;
-              if (value.length < _getMinPhoneNumberLength()) return t.numberTooShort;
-              if (value.length > _getPhoneNumberLength() + 2) return t.numberTooLong;
+              if (value.length < _getMinPhoneNumberLength())
+                return t.numberTooShort;
+              if (value.length > _getPhoneNumberLength() + 2)
+                return t.numberTooLong;
               return null;
             },
           ),
@@ -471,7 +628,8 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildPasswordField(AppLocalizations t) {
     return Container(
       decoration: BoxDecoration(color: _C.surfaceHi,
-          borderRadius: BorderRadius.circular(12), border: Border.all(color: _C.border)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _C.border)),
       child: TextFormField(
         controller: _passwordController,
         obscureText: _obscurePassword,
@@ -480,12 +638,17 @@ class _LoginScreenState extends State<LoginScreen>
           hintText: t.enterPassword,
           hintStyle: const TextStyle(color: _C.textMuted, fontSize: 14),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-          prefixIcon: const Icon(Icons.lock_outline_rounded, color: _C.textMuted, size: 18),
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14, vertical: 14),
+          prefixIcon: const Icon(Icons.lock_outline_rounded,
+              color: _C.textMuted, size: 18),
           suffixIcon: GestureDetector(
-            onTap: () => setState(() => _obscurePassword = !_obscurePassword),
+            onTap: () => setState(
+                    () => _obscurePassword = !_obscurePassword),
             child: Icon(
-                _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                _obscurePassword
+                    ? Icons.visibility_outlined
+                    : Icons.visibility_off_outlined,
                 color: _C.textMuted, size: 18),
           ),
         ),
@@ -501,13 +664,16 @@ class _LoginScreenState extends State<LoginScreen>
     return Container(
       height: 40,
       decoration: BoxDecoration(color: _C.surfaceHi,
-          borderRadius: BorderRadius.circular(10), border: Border.all(color: _C.border)),
-      child: Row(children: [_buildTab(t.passwordTab, true), _buildTab(t.otpTab, false)]),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: _C.border)),
+      child: Row(
+          children: [_buildTab(t.passwordTab, true), _buildTab(t.otpTab, false)]),
     );
   }
 
   Widget _buildTab(String label, bool isPassword) {
-    final isSelected = (isPassword && _isPasswordLogin) || (!isPassword && !_isPasswordLogin);
+    final isSelected =
+        (isPassword && _isPasswordLogin) || (!isPassword && !_isPasswordLogin);
     return Expanded(
       child: GestureDetector(
         onTap: () => setState(() => _isPasswordLogin = isPassword),
@@ -522,18 +688,23 @@ class _LoginScreenState extends State<LoginScreen>
           child: Text(label, style: TextStyle(
               color: isSelected ? Colors.white : _C.textSecondary,
               fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400)),
+              fontWeight: isSelected
+                  ? FontWeight.w600
+                  : FontWeight.w400)),
         ),
       ),
     );
   }
 }
 
+// ── Shared button widgets ────────────────────────────────────────────────────
+
 class _PrimaryButton extends StatelessWidget {
   final String label;
   final bool isLoading;
   final VoidCallback? onPressed;
-  const _PrimaryButton({required this.label, required this.isLoading, this.onPressed});
+  const _PrimaryButton(
+      {required this.label, required this.isLoading, this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -541,21 +712,23 @@ class _PrimaryButton extends StatelessWidget {
       height: 50,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-            backgroundColor: _C.accent, foregroundColor: Colors.white, elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            backgroundColor: _C.accent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
             disabledBackgroundColor: _C.accent.withOpacity(0.5)),
         onPressed: isLoading ? null : onPressed,
         child: isLoading
             ? const SizedBox(width: 18, height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: Colors.white))
             : Text(label, style: const TextStyle(fontSize: 15,
             fontWeight: FontWeight.w600, letterSpacing: 0.2)),
       ),
     );
   }
 }
-
-// Replace the _GoogleButton class at the bottom of login_screen.dart with this:
 
 class _GoogleButton extends StatelessWidget {
   final String label;
@@ -572,7 +745,8 @@ class _GoogleButton extends StatelessWidget {
             backgroundColor: _C.surfaceHi,
             foregroundColor: _C.textPrimary,
             side: const BorderSide(color: _C.border, width: 1),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
             padding: const EdgeInsets.symmetric(horizontal: 16),
             elevation: 0),
         onPressed: onPressed,
@@ -581,8 +755,7 @@ class _GoogleButton extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 22,
-              height: 22,
+              width: 22, height: 22,
               decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: _C.surface,
@@ -590,20 +763,17 @@ class _GoogleButton extends StatelessWidget {
               alignment: Alignment.center,
               child: const Text('G',
                   style: TextStyle(fontSize: 13,
-                      fontWeight: FontWeight.w700, color: _C.textPrimary)),
+                      fontWeight: FontWeight.w700,
+                      color: _C.textPrimary)),
             ),
             const SizedBox(width: 10),
             Flexible(
-              child: Text(
-                label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: _C.textPrimary),
-              ),
+              child: Text(label,
+                  textAlign: TextAlign.center, maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: _C.textPrimary)),
             ),
           ],
         ),

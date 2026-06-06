@@ -633,15 +633,30 @@ class CommentProvider with ChangeNotifier {
       _isLoading = false;
 
       if (result['success']) {
+        // Customize message based on shareContext
+        String message = result['message'] ?? 'Post shared successfully';
+
+        if (shareContext == 'campaign') {
+          message = 'Campaign shared successfully';
+        } else if (shareContext == 'announcement') {
+          message = 'Announcement shared successfully';
+        } else if (shareContext == 'service') {
+          message = 'Service shared successfully';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(result['message'] ?? 'Post shared successfully'),
+            content: Text(message),
             backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
         notifyListeners();
         return true;
-      } else {
+      }else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(result['message'] ?? 'Failed to share post'),

@@ -6,13 +6,25 @@ import 'package:intl/intl.dart';
 
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
-
 import '../../api_service/user_api_service.dart';
 import '../campaigns_page/campaigns_info screen.dart';
-import '../campaigns_page/getall_campaigns_screen.dart';
 import '../chats_page/group_chat/group_chat_detail.dart';
 import '../services_page/service_details.dart';
-import '../services_page/services_screen.dart';
+
+// ── Notification type buckets (single source of truth) ──────────────────────
+const _postTypes = [
+  'post', 'like', 'comment', 'PostLike', 'PostComment',
+  'PostShare', 'Post', 'Announcement',
+];
+const _chatTypes = [
+  'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation',
+];
+const _communityTypes = ['community', 'GroupRequest'];
+const _serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
+const _dashTypes = [
+  'campaign', 'Service', 'Invoice', 'StoreSubscription',
+  'SubDomain', 'AddProduct',
+];
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -31,144 +43,124 @@ class _NotificationScreenState extends State<NotificationScreen> {
     });
   }
 
-  Future<void> _refresh() async {
-    await Provider.of<NotificationProvider>(context, listen: false)
-        .loadNotifications();
-  }
+  Future<void> _refresh() =>
+      Provider.of<NotificationProvider>(context, listen: false)
+          .loadNotifications();
 
-  // ── Close notification screen then switch tab ─────────────────────────────
+  // ── Navigation helpers ───────────────────────────────────────────────────
+
+  /// Pop this screen then switch to [tab] in MainScreen.
   void _goToTab(int tab, {String? postId}) {
     Navigator.pop(context);
-    void doNavigate() {
+    void go() {
       final state = mainScreenKey.currentState;
       if (state == null || !state.mounted) {
-        Future.delayed(const Duration(milliseconds: 200), doNavigate);
+        Future.delayed(const Duration(milliseconds: 200), go);
         return;
       }
       state.navigateToTab(tab, postId: postId);
     }
-    doNavigate();
+    go();
   }
 
-  // ── Close notification screen then push a screen on top of current tab ────
-  // ✅ Does NOT change _currentIndex — back button returns to correct tab
+  /// Pop this screen then push [screen] on top — back button returns to
+  /// whichever tab was active (does NOT change _currentIndex).
   void _popAndPush(Widget screen) {
     Navigator.pop(context);
-    void doPush() {
+    void push() {
       final ctx = mainScreenKey.currentContext;
       if (ctx == null) {
-        Future.delayed(const Duration(milliseconds: 200), doPush);
+        Future.delayed(const Duration(milliseconds: 200), push);
         return;
       }
-      Navigator.push(
-        ctx,
-        MaterialPageRoute(builder: (_) => screen),
-      );
+      Navigator.push(ctx, MaterialPageRoute(builder: (_) => screen));
     }
-    doPush();
+    push();
   }
 
-  void _navigateFromNotification(Map<String, dynamic> notification) async {
-    final type = notification['type'] ?? '';
+  // ── Main navigation dispatcher ───────────────────────────────────────────
 
-    final provider = Provider.of<NotificationProvider>(context, listen: false);
-    provider.markTypesAsRead([type]);
+  Future<void> _onNotificationTapped(Map<String, dynamic> n) async {
+    final type = (n['type'] ?? '') as String;
+    final related = n['relatedData'] as Map<String, dynamic>?;
 
-    final relatedData = notification['relatedData'] as Map<String, dynamic>?;
+    // Mark this type as read immediately
+    Provider.of<NotificationProvider>(context, listen: false)
+        .markTypesAsRead([type]);
 
-    const postTypes = [
-      'post', 'like', 'comment', 'PostLike', 'PostComment',
-      'PostShare', 'Post', 'Announcement',
-    ];
-    const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation',
-    ];
-    const communityTypes = ['community', 'GroupRequest'];
-    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
-
-    // ── POST ──────────────────────────────────────────────────────────────────
-    if (postTypes.contains(type)) {
-      final postId = relatedData?['postId']?.toString() ??
-          relatedData?['referenceId']?.toString() ??
-          notification['referenceId']?.toString() ??
-          notification['postId']?.toString();
+    // ── POST ──────────────────────────────────────────────────────────────
+    if (_postTypes.contains(type)) {
+      final postId = related?['postId']?.toString() ??
+          related?['referenceId']?.toString() ??
+          n['referenceId']?.toString() ??
+          n['postId']?.toString();
 
       if (postId == null || postId.isEmpty || postId.length != 24) {
         _goToTab(0);
         return;
       }
 
-      Navigator.pop(context);
-
+      // Check post still exists before navigating
       final response = await UserAPI().getPostById(postId);
-      final postExists = response != null &&
+      if (!mounted) return;
+
+      final exists = response != null &&
           response['success'] == true &&
           response['data'] != null;
 
-      if (!mounted) return;
+      _goToTab(0, postId: exists ? postId : null);
 
-      void doNavigate() {
-        final state = mainScreenKey.currentState;
-        if (state == null || !state.mounted) {
-          Future.delayed(const Duration(milliseconds: 200), doNavigate);
-          return;
-        }
-        if (postExists) {
-          state.navigateToTab(0, postId: postId);
-        } else {
-          state.navigateToTab(0);
-          Future.delayed(const Duration(milliseconds: 400), () {
-            final ctx = mainScreenKey.currentContext;
-            if (ctx == null) return;
-            showDialog(
-              context: ctx,
-              barrierDismissible: false,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Post Not Found'),
-                content: const Text(
-                    'This post no longer exists or may have been removed.'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('OK'),
-                  ),
-                ],
-              ),
-            );
-          });
-        }
+      if (!exists) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          final ctx = mainScreenKey.currentContext;
+          if (ctx == null) return;
+          showDialog(
+            context: ctx,
+            barrierDismissible: false,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Post Not Found'),
+              content: const Text(
+                  'This post no longer exists or may have been removed.'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        });
       }
+      return;
+    }
 
-      doNavigate();
-
-      // ── CHAT (personal) ───────────────────────────────────────────────────────
-    } else if (chatTypes.contains(type)) {
+    // ── PERSONAL CHAT ─────────────────────────────────────────────────────
+    if (_chatTypes.contains(type)) {
       _goToTab(2);
+      return;
+    }
 
-      // ── GROUP CHAT ────────────────────────────────────────────────────────────
-    } else if (type == 'GroupChat') {
-      final groupId = relatedData?['groupId']?.toString() ??
-          notification['referenceId']?.toString();
+    // ── GROUP CHAT ────────────────────────────────────────────────────────
+    if (type == 'GroupChat') {
+      final groupId = related?['groupId']?.toString() ??
+          n['referenceId']?.toString();
 
-      final messageText = notification['message']?.toString() ?? '';
+      // Try to extract group name from the message string
+      final msg = n['message']?.toString() ?? '';
       String groupName = 'Group Chat';
-      final quoteMatch = RegExp(r'"([^"]+)"').firstMatch(messageText);
-      if (quoteMatch != null) {
-        groupName = quoteMatch.group(1) ?? 'Group Chat';
+      final q = RegExp(r'"([^"]+)"').firstMatch(msg);
+      if (q != null) {
+        groupName = q.group(1) ?? groupName;
       } else {
-        final inMatch = RegExp(r'\bin\s+(.+)$', caseSensitive: false)
-            .firstMatch(messageText);
-        if (inMatch != null) {
-          groupName = inMatch.group(1)?.trim() ?? 'Group Chat';
-        }
+        final m = RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(msg);
+        if (m != null) groupName = m.group(1)?.trim() ?? groupName;
       }
 
       Navigator.pop(context);
-
-      void doGroupNavigate() {
+      void go() {
         final state = mainScreenKey.currentState;
         if (state == null || !state.mounted) {
-          Future.delayed(const Duration(milliseconds: 200), doGroupNavigate);
+          Future.delayed(const Duration(milliseconds: 200), go);
           return;
         }
         state.navigateToTab(2);
@@ -189,140 +181,108 @@ class _NotificationScreenState extends State<NotificationScreen> {
           });
         }
       }
+      go();
+      return;
+    }
 
-      doGroupNavigate();
-
-      // ── SERVICE REQUEST ───────────────────────────────────────────────────────
-      // ✅ Does NOT change tab — pushes on top, back returns to same tab
-    } else if (serviceReqTypes.contains(type)) {
-      final serviceReqId =
-          relatedData?['assignedServiceReqId']?.toString() ??
-              relatedData?['serviceReqId']?.toString() ??
-              notification['referenceId']?.toString();
-
-      if (serviceReqId != null && serviceReqId.isNotEmpty) {
-        _popAndPush(ServiceRequestDetailsScreen(requestId: serviceReqId));
+    // ── SERVICE REQUEST ───────────────────────────────────────────────────
+    if (_serviceReqTypes.contains(type)) {
+      final id = related?['assignedServiceReqId']?.toString() ??
+          related?['serviceReqId']?.toString() ??
+          n['referenceId']?.toString();
+      if (id != null && id.isNotEmpty) {
+        _popAndPush(ServiceRequestDetailsScreen(requestId: id));
       } else {
         _goToTab(4);
       }
+      return;
+    }
 
-      // ── SERVICE ───────────────────────────────────────────────────────────────
-      // ✅ Does NOT change tab — pushes on top, back returns to same tab
-    } else if (type == 'Service') {
-      final serviceId = relatedData?['serviceId']?.toString() ??
-          notification['referenceId']?.toString();
-
-      if (serviceId != null && serviceId.isNotEmpty) {
-        _popAndPush(ServiceDetailsScreen(serviceId: serviceId));
+    // ── SERVICE ───────────────────────────────────────────────────────────
+    if (type == 'Service') {
+      final id = related?['serviceId']?.toString() ??
+          n['referenceId']?.toString();
+      if (id != null && id.isNotEmpty) {
+        _popAndPush(ServiceDetailsScreen(serviceId: id));
       } else {
         _goToTab(4);
       }
+      return;
+    }
 
-      // ── CAMPAIGN ──────────────────────────────────────────────────────────────
-      // ✅ Does NOT change tab — pushes on top, back returns to same tab
-    } else if (type == 'campaign') {
-      final campaignId = relatedData?['campaignId']?.toString() ??
-          notification['referenceId']?.toString();
-      final communityName =
-          relatedData?['communityName']?.toString() ??
-              notification['communityName']?.toString() ??
-              '';
-
-      if (campaignId != null && campaignId.isNotEmpty) {
+    // ── CAMPAIGN ──────────────────────────────────────────────────────────
+    if (type == 'campaign') {
+      final id = related?['campaignId']?.toString() ??
+          n['referenceId']?.toString();
+      final communityName = related?['communityName']?.toString() ??
+          n['communityName']?.toString() ??
+          '';
+      if (id != null && id.isNotEmpty) {
         _popAndPush(CampaignDetailsScreen(
-          campaignId: campaignId,
+          campaignId: id,
           communityName: communityName,
         ));
       } else {
         _goToTab(4);
       }
-
-      // ── COMMUNITY ─────────────────────────────────────────────────────────────
-    } else if (communityTypes.contains(type)) {
-      _goToTab(3);
-
-      // ── DASHBOARD fallbacks ───────────────────────────────────────────────────
-    } else if (type == 'Invoice' ||
-        type == 'StoreSubscription' ||
-        type == 'SubDomain' ||
-        type == 'AddProduct') {
-      _goToTab(4);
-
-      // ── DEFAULT ───────────────────────────────────────────────────────────────
-    } else {
-      _goToTab(0);
+      return;
     }
+
+    // ── COMMUNITY ─────────────────────────────────────────────────────────
+    if (_communityTypes.contains(type)) {
+      _goToTab(3);
+      return;
+    }
+
+    // ── DASHBOARD types ───────────────────────────────────────────────────
+    if (_dashTypes.contains(type)) {
+      _goToTab(4);
+      return;
+    }
+
+    // ── DEFAULT ───────────────────────────────────────────────────────────
+    _goToTab(0);
   }
 
-  IconData _getNotificationIcon(String type) {
-    const postTypes = [
-      'post', 'like', 'comment', 'PostLike', 'PostComment',
-      'PostShare', 'Post', 'Announcement',
-    ];
-    const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage',
-      'Conversation', 'GroupChat',
-    ];
-    const communityTypes = ['community', 'GroupRequest'];
-    const dashTypes = [
-      'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct',
-    ];
-    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
+  // ── Icon / colour helpers ────────────────────────────────────────────────
 
-    if (postTypes.contains(type)) return Icons.article;
-    if (chatTypes.contains(type)) return Icons.chat_bubble;
-    if (communityTypes.contains(type)) return Icons.group;
-    if (serviceReqTypes.contains(type)) return Icons.support_agent_outlined;
-    if (dashTypes.contains(type)) return Icons.dashboard;
+  IconData _iconFor(String type) {
+    if (_postTypes.contains(type)) return Icons.article;
+    if (_chatTypes.contains(type) || type == 'GroupChat') return Icons.chat_bubble;
+    if (_communityTypes.contains(type)) return Icons.group;
+    if (_serviceReqTypes.contains(type)) return Icons.support_agent_outlined;
+    if (_dashTypes.contains(type)) return Icons.dashboard;
     return Icons.notifications;
   }
 
-  Color _getNotificationColor(String type, bool isUnread) {
-    if (!isUnread) return Colors.grey.shade400;
-
-    const postTypes = [
-      'post', 'like', 'comment', 'PostLike', 'PostComment',
-      'PostShare', 'Post', 'Announcement',
-    ];
-    const chatTypes = [
-      'chat', 'message', 'directMessage', 'ChatMessage',
-      'Conversation', 'GroupChat',
-    ];
-    const communityTypes = ['community', 'GroupRequest'];
-    const dashTypes = [
-      'campaign', 'Service', 'Invoice', 'StoreSubscription',
-      'SubDomain', 'AddProduct',
-    ];
-    const serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
-
-    if (postTypes.contains(type)) return const Color(0xFFFF9800);
-    if (chatTypes.contains(type)) return const Color(0xFF9C27B0);
-    if (communityTypes.contains(type)) return const Color(0xFFFF4081);
-    if (serviceReqTypes.contains(type)) return const Color(0xFF00BCD4);
-    if (dashTypes.contains(type)) return const Color(0xFF2196F3);
+  Color _colorFor(String type, bool unread) {
+    if (!unread) return Colors.grey.shade400;
+    if (_postTypes.contains(type)) return const Color(0xFFFF9800);
+    if (_chatTypes.contains(type) || type == 'GroupChat')
+      return const Color(0xFF9C27B0);
+    if (_communityTypes.contains(type)) return const Color(0xFFFF4081);
+    if (_serviceReqTypes.contains(type)) return const Color(0xFF00BCD4);
+    if (_dashTypes.contains(type)) return const Color(0xFF2196F3);
     return Colors.blue;
   }
 
-  Future<void> _clearAllNotifications() async {
-    final provider =
-    Provider.of<NotificationProvider>(context, listen: false);
+  // ── Clear all ────────────────────────────────────────────────────────────
 
+  Future<void> _clearAll() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text('Clear All Notifications'),
         content: const Text(
-            'Are you sure you want to clear all notifications? This action cannot be undone.'),
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            'Are you sure you want to clear all notifications? This cannot be undone.'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Clear All'),
           ),
@@ -330,55 +290,54 @@ class _NotificationScreenState extends State<NotificationScreen> {
       ),
     );
 
-    if (confirmed == true) {
-      try {
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        String? userId = prefs.getString('user_id');
-        if (userId != null) {
-          provider.clearAll(userId);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('All notifications cleared'),
-                backgroundColor: Colors.green,
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error clearing notifications: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
+    if (confirmed != true) return;
 
-  String formatDate(String rawDate) {
     try {
-      final dateTime = DateTime.parse(rawDate).toLocal();
-      final now = DateTime.now();
-      final difference = now.difference(dateTime);
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
+      if (userId == null) return;
 
-      if (difference.inMinutes < 1) return 'Just now';
-      if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
-      if (difference.inHours < 24) return '${difference.inHours}h ago';
-      if (difference.inDays < 7) return '${difference.inDays}d ago';
-      return DateFormat('dd MMM yyyy • hh:mm a').format(dateTime);
-    } catch (_) {
-      return rawDate;
+      if (!mounted) return;
+      Provider.of<NotificationProvider>(context, listen: false)
+          .clearAll(userId);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('All notifications cleared'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error clearing notifications: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  List<Map<String, dynamic>> _getSortedNotifications(
-      List<Map<String, dynamic>> notifications) {
-    final sorted = List<Map<String, dynamic>>.from(notifications);
-    sorted.sort((a, b) {
+  // ── Date formatter ───────────────────────────────────────────────────────
+
+  String _formatDate(String raw) {
+    try {
+      final dt = DateTime.parse(raw).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'Just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return DateFormat('dd MMM yyyy • hh:mm a').format(dt);
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  List<Map<String, dynamic>> _sorted(List<Map<String, dynamic>> list) {
+    final copy = List<Map<String, dynamic>>.from(list);
+    copy.sort((a, b) {
       try {
         return DateTime.parse(b['createdAt'] ?? '')
             .compareTo(DateTime.parse(a['createdAt'] ?? ''));
@@ -386,8 +345,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return 0;
       }
     });
-    return sorted;
+    return copy;
   }
+
+  // ── Build ────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -395,29 +356,25 @@ class _NotificationScreenState extends State<NotificationScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text('Notifications'),
         centerTitle: true,
         actions: [
           Consumer<NotificationProvider>(
-            builder: (context, provider, child) {
-              if (provider.notifications.isNotEmpty) {
-                return TextButton.icon(
-                  onPressed: _clearAllNotifications,
-                  icon: const Icon(Icons.clear_all, size: 18),
-                  label: const Text('Clear All'),
-                  style:
-                  TextButton.styleFrom(foregroundColor: Colors.red),
-                );
-              }
-              return const SizedBox.shrink();
-            },
+            builder: (_, p, __) => p.notifications.isEmpty
+                ? const SizedBox.shrink()
+                : TextButton.icon(
+              onPressed: _clearAll,
+              icon: const Icon(Icons.clear_all, size: 18),
+              label: const Text('Clear All'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
           ),
         ],
       ),
       body: Consumer<NotificationProvider>(
-        builder: (context, provider, child) {
+        builder: (_, provider, __) {
           if (provider.isLoading) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -436,43 +393,37 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   const SizedBox(height: 16),
                   Text(
                     'No notifications found.',
-                    style: TextStyle(
-                        fontSize: 16, color: Colors.grey.shade600),
+                    style:
+                    TextStyle(fontSize: 16, color: Colors.grey.shade600),
                   ),
                 ],
               ),
             );
           }
 
-          final sortedNotifications =
-          _getSortedNotifications(provider.notifications);
+          final items = _sorted(provider.notifications);
 
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
               padding: const EdgeInsets.all(12),
-              itemCount: sortedNotifications.length,
-              itemBuilder: (context, index) {
-                final item = sortedNotifications[index];
-                final message = item['message'] ?? 'No message';
-                final type = item['type'] ?? 'Notification';
-                final createdAt = formatDate(item['createdAt'] ?? '');
-                final isUnread = item['read'] == false;
-                final iconData = _getNotificationIcon(type);
-                final iconColor = _getNotificationColor(type, isUnread);
+              itemCount: items.length,
+              itemBuilder: (_, i) {
+                final item = items[i];
+                final type = (item['type'] ?? '') as String;
+                final message = (item['message'] ?? 'No message') as String;
+                final unread = item['read'] == false;
+                final color = _colorFor(type, unread);
 
                 return GestureDetector(
-                  onTap: () => _navigateFromNotification(item),
+                  onTap: () => _onNotificationTapped(item),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: isUnread
-                          ? Colors.blue.shade50
-                          : Colors.white,
+                      color: unread ? Colors.blue.shade50 : Colors.white,
                       borderRadius: BorderRadius.circular(16),
-                      border: isUnread
-                          ? Border.all(
-                          color: Colors.blue.shade200, width: 1)
+                      border: unread
+                          ? Border.all(color: Colors.blue.shade200)
                           : null,
                       boxShadow: [
                         BoxShadow(
@@ -488,19 +439,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: isUnread
-                              ? iconColor.withOpacity(0.15)
+                          color: unread
+                              ? color.withOpacity(0.15)
                               : Colors.grey.shade100,
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(iconData, color: iconColor, size: 24),
+                        child: Icon(_iconFor(type), color: color, size: 24),
                       ),
                       title: Text(
                         message,
                         style: TextStyle(
-                          fontWeight: isUnread
-                              ? FontWeight.w600
-                              : FontWeight.w500,
+                          fontWeight:
+                          unread ? FontWeight.w600 : FontWeight.w500,
                           fontSize: 14,
                         ),
                       ),
@@ -514,14 +464,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: iconColor.withOpacity(0.1),
+                                  color: color.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
                                   type,
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: iconColor,
+                                    color: color,
                                     fontWeight: FontWeight.w500,
                                   ),
                                   overflow: TextOverflow.ellipsis,
@@ -531,7 +481,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                createdAt,
+                                _formatDate(item['createdAt'] ?? ''),
                                 style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey.shade600),
@@ -541,12 +491,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
                           ],
                         ),
                       ),
-                      trailing: isUnread
+                      trailing: unread
                           ? Container(
                         width: 10,
                         height: 10,
                         decoration: BoxDecoration(
-                          color: iconColor,
+                          color: color,
                           shape: BoxShape.circle,
                         ),
                       )

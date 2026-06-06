@@ -241,6 +241,12 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
             fUrl.contains('/campaign/') ||
             fUrl.contains('/services/'));
 
+    // ✅ NEW: Detect forwarded campaigns even when forwerdUrl is empty
+    final imageForward = widget.message['image']?.toString() ?? '';
+    final isForwardedCampaign = widget.message['forwerd'] == true &&
+        fUrl.isEmpty &&
+        imageForward.contains('campaign');
+
 // ── feed shares (valid post ID at end of URL) ───────────────
     String extractedPostId = '';
     if (fUrl.isNotEmpty && !isNonFeedShare) {
@@ -256,7 +262,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     _isSharedPost = !_isAudio &&
         !_isFile &&
         (hasValidSharedPost ||
-            isNonFeedShare ||                          // ← NEW
+            isNonFeedShare ||
+            isForwardedCampaign ||  // ✅ ADD THIS!
             (widget.message['forwerd'] == true && extractedPostId.isNotEmpty) ||
             hasForwardedFrom);
 
@@ -267,9 +274,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   //  RESOLVE POST DATA
   // ════════════════════════════════════════════════════════════════════════
   Map<String, dynamic>? _resolvePostData() {
-    // Add this block at the TOP of _resolvePostData(), before Priority 1:
-
-// ── Non-feed share (announcement / campaign / service) ──────
+    // ── Non-feed share (announcement / campaign / service) ──────
     final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
     if (widget.message['forwerd'] == true && fUrl.isNotEmpty &&
         (fUrl.contains('/announcements') ||
@@ -282,7 +287,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
       final image = widget.message['image']?.toString() ?? '';
       return {
-        '_id': '',               // no post navigation for these
+        '_id': '',
         'shareType': shareType,
         'forwerdUrl': fUrl,
         'text': widget.message['text']?.toString() ?? '',
@@ -293,6 +298,38 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         'commentsCount': 0,
       };
     }
+
+    // ✅ FIXED: Check forwarded campaign when forwerdUrl is empty
+// Handles both: image URL contains 'campaign' OR message is a re-forward of a campaign
+    final collectedImageUrl = widget.message['image']?.toString() ?? '';
+    final forwardedFromCheck = widget.message['forwardedFrom'];
+    final isReForward = forwardedFromCheck is Map && forwardedFromCheck.isNotEmpty;
+
+    if (widget.message['forwerd'] == true && fUrl.isEmpty && collectedImageUrl.isNotEmpty) {
+      // Case 1: image URL contains 'campaign' keyword (first forward)
+      final isCampaignUrl = collectedImageUrl.contains('campaign') &&
+          !collectedImageUrl.startsWith('data:image/');
+
+      // Case 2: re-forwarded message (forwardedFrom present) with any image
+      // The original was a campaign, image is now base64 — still treat as campaign
+      final isCampaignReforward = isReForward &&
+          widget.message['forwerdMessage']?.toString().isNotEmpty == true;
+
+      if (isCampaignUrl || isCampaignReforward) {
+        return {
+          '_id': '',
+          'shareType': 'campaign',
+          'forwerdUrl': '',
+          'text': widget.message['text']?.toString() ?? '',
+          'images': [_normalizeSingleUrl(collectedImageUrl)],
+          'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+          'authorProfile': '',
+          'likesCount': 0,
+          'commentsCount': 0,
+        };
+      }
+    }
+
     // Priority 1: real sharedPost object with valid MongoDB ObjectId
     final sharedPost = widget.message['sharedPost'];
     if (sharedPost is Map && sharedPost.isNotEmpty) {
@@ -313,13 +350,11 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           if (v is String && v.isNotEmpty) { images = [v]; break; }
         }
 
-        // Fall back to outer message image if sharedPost has none
         if (images.isEmpty) {
           final img = widget.message['image']?.toString() ?? '';
           if (img.isNotEmpty && img != 'null') images = [img];
         }
 
-        // Normalize URLs
         images = _normalizeImages(images);
         post['images'] = images;
 
@@ -341,19 +376,28 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       }
     }
 
-    // Priority 3: forwardedFrom (new backend format from logs)
-    // Structure: {forwardedFrom:{messageId,senderId}, image:url, text:content}
+    // Priority 3: forwardedFrom
     final forwardedFrom = widget.message['forwardedFrom'];
+
+    // 🔍 DEBUG: Log the forwarded message data
+    if (forwardedFrom is Map && forwardedFrom.isNotEmpty) {
+      print('🔍 [DEBUG] SECOND FORWARD - forwardedFrom message:');
+      print('   - text: ${widget.message['text']}');
+      print('   - image start: ${widget.message['image']?.toString().substring(0, 100)}...');
+      print('   - forwerdMessage: ${widget.message['forwerdMessage']}');
+      print('   - forwerd: ${widget.message['forwerd']}');
+      print('   - forwerdUrl: ${widget.message['forwerdUrl']}');
+      print('   - All keys: ${widget.message.keys.toList()}');
+    }
+
     if (postId.isEmpty && forwardedFrom is Map) {
-      // Use messageId as the post identifier for navigation
       postId = forwardedFrom['messageId']?.toString() ?? '';
-      // Validate it's a real ObjectId
       if (postId.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
         postId = '';
       }
     }
 
-    // Collect image — the log shows image is directly on the message
+    // Collect remaining image for feed posts
     String imageUrl = '';
     for (final key in ['image', 'forwerdImage', 'postImage',
       'sharedImage', 'forwerdImageUrl']) {
@@ -366,7 +410,26 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     if (postId.isEmpty && imageUrl.isEmpty) return null;
 
-    // Build the post card data from message fields
+// ✅ Safety net: if image looks like a campaign base64 re-forward, preserve shareType
+    final forwardedFromFinal = widget.message['forwardedFrom'];
+    final isReForwardFinal = forwardedFromFinal is Map && forwardedFromFinal.isNotEmpty;
+    if (isReForwardFinal &&
+        imageUrl.isNotEmpty &&
+        widget.message['forwerd'] == true &&
+        fUrl.isEmpty) {
+      return {
+        '_id': '',
+        'shareType': 'campaign',
+        'forwerdUrl': '',
+        'text': widget.message['text']?.toString() ?? '',
+        'images': [imageUrl],
+        'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+        'authorProfile': '',
+        'likesCount': 0,
+        'commentsCount': 0,
+      };
+    }
+
     return {
       '_id': postId,
       'text': widget.message['text']?.toString() ?? '',
@@ -377,6 +440,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       'commentsCount': 0,
     };
   }
+
+
 
 // ── URL helpers ──────────────────────────────────────────────────────────
   List<dynamic> _normalizeImages(List<dynamic> raw) {
@@ -843,28 +908,28 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                 final shareType = postData['shareType']?.toString() ?? 'feed';
                 IconData shareIcon;
                 String shareLabel;
-                switch (shareType) {
-                  case 'announcement':
-                    shareIcon = Icons.campaign_rounded;
-                    shareLabel = 'Shared Announcement';
-                    break;
-                  case 'campaign':
-                    shareIcon = Icons.flag_rounded;
-                    shareLabel = 'Shared Campaign';
-                    break;
-                  case 'service':
-                    shareIcon = Icons.miscellaneous_services_rounded;
-                    shareLabel = 'Shared Service';
-                    break;
-                  default:
-                    final isForwardedFrom =
-                        widget.message['forwardedFrom'] is Map &&
-                            (widget.message['forwardedFrom'] as Map).isNotEmpty;
-                    shareIcon =
-                    isForwardedFrom ? Icons.reply_rounded : Icons.share;
-                    shareLabel =
-                    isForwardedFrom ? 'Forwarded Post' : 'Shared Post';
+
+                // ✅ Check shareType FIRST, before forwardedFrom
+                if (shareType == 'campaign') {
+                  shareIcon = Icons.flag_rounded;
+                  shareLabel = 'Shared Campaign';
+                } else if (shareType == 'announcement') {
+                  shareIcon = Icons.campaign_rounded;
+                  shareLabel = 'Shared Announcement';
+                } else if (shareType == 'service') {
+                  shareIcon = Icons.miscellaneous_services_rounded;
+                  shareLabel = 'Shared Service';
+                } else {
+                  // Only for feed posts
+                  final isForwardedFrom =
+                      widget.message['forwardedFrom'] is Map &&
+                          (widget.message['forwardedFrom'] as Map).isNotEmpty;
+                  shareIcon =
+                  isForwardedFrom ? Icons.reply_rounded : Icons.share;
+                  shareLabel =
+                  isForwardedFrom ? 'Forwarded Post' : 'Shared Post';
                 }
+
                 return Row(children: [
                   Icon(shareIcon,
                       size: 14,
