@@ -925,8 +925,6 @@ class _MessageBubbleState extends State<MessageBubble> {
           imageUrl: url,
           fit: BoxFit.cover,
           placeholder: (context, url) => Container(
-            width: 250,
-            height: 200,
             color: widget.isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
             child: const Center(child: CircularProgressIndicator()),
           ),
@@ -937,76 +935,80 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     }
 
+    final borderRadius = BorderRadius.only(
+      topLeft: const Radius.circular(16),
+      topRight: const Radius.circular(16),
+      bottomLeft: widget.isMe ? const Radius.circular(16) : const Radius.circular(4),
+      bottomRight: widget.isMe ? const Radius.circular(4) : const Radius.circular(16),
+    );
+
     return GestureDetector(
       onTap: widget.status == 'sending' ? null : () => _handleFileOpen(context),
-      child: Container(
-        constraints: const BoxConstraints(
-          maxHeight: 300,
-          maxWidth: 250,
-          minWidth: 150,
-          minHeight: 150,
-        ),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18).copyWith(
-            bottomRight: widget.isMe ? const Radius.circular(4) : null,
-            bottomLeft: !widget.isMe ? const Radius.circular(4) : null,
-          ),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(18).copyWith(
-            bottomRight: widget.isMe ? const Radius.circular(4) : null,
-            bottomLeft: !widget.isMe ? const Radius.circular(4) : null,
-          ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: SizedBox(
+          width: 220,
+          height: 280, // taller than wide — natural photo feel
           child: Stack(
-            fit: StackFit.loose,
-            alignment: Alignment.center,
+            fit: StackFit.expand,
             children: [
               imageWidget,
-              
+
+              // Status overlays
               if (widget.status == 'sending')
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black45,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        ),
+                Container(
+                  color: Colors.black45,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     ),
                   ),
                 ),
-                
               if (widget.status == 'failed')
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black45,
-                    child: Center(
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: const BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.refresh,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                      ),
-                    ),
+                Container(
+                  color: Colors.black45,
+                  child: const Center(
+                    child: Icon(Icons.refresh, color: Colors.white, size: 28),
                   ),
                 ),
+
+              // Timestamp overlay — bottom right corner ON the image
+              Positioned(
+                bottom: 6,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _formatTime(widget.timestamp),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (widget.isMe && widget.status != null) ...[
+                        const SizedBox(width: 3),
+                        if (widget.status == 'sent' && widget.readBy)
+                          Icon(Icons.done_all, size: 12, color: Colors.blue[200])
+                        else
+                          Icon(_getStatusIcon(), size: 12, color: Colors.white70),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1513,43 +1515,35 @@ class _MessageBubbleState extends State<MessageBubble> {
                     ],
 
 
-                const SizedBox(height: 4),
-
-                // Timestamp and status
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: (widget.isFile && _isImageFile) ? 4.0 : 0,
-                    right: (widget.isFile && _isImageFile) ? 8.0 : 0,
-                    left: (widget.isFile && _isImageFile) ? 8.0 : 0,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                    Text(
-                      _formatTime(widget.timestamp),
-                      style: TextStyle(
-                        color: widget.isMe ? Colors.white70 : Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                    if (widget.isMe && widget.status != null) ...[
-                      const SizedBox(width: 4),
-                      if (widget.status == 'sent' && widget.readBy)
-                        Icon(
-                          Icons.done_all,
-                          size: 12,
-                          color: Colors.blue[300],
-                        )
-                      else
-                        Icon(
-                          _getStatusIcon(),
-                          size: 12,
-                          color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                if (!(widget.isFile && _isImageFile)) ...[
+                  const SizedBox(height: 4),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTime(widget.timestamp),
+                          style: TextStyle(
+                            color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                            fontSize: 12,
+                          ),
                         ),
-                    ],
-                  ],
-                ),
-                ), // Close Padding here
+                        if (widget.isMe && widget.status != null) ...[
+                          const SizedBox(width: 4),
+                          if (widget.status == 'sent' && widget.readBy)
+                            Icon(Icons.done_all, size: 12, color: Colors.blue[300])
+                          else
+                            Icon(
+                              _getStatusIcon(),
+                              size: 12,
+                              color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                            ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ], // Close Padding here
               ],
             ),
           ),

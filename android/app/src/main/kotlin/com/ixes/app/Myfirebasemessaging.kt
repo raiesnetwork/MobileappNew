@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -14,6 +15,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onCreate() {
         super.onCreate()
+        android.util.Log.d("IXES_FCM", "🟢 MyFirebaseMessagingService.onCreate() called")
         createNotificationChannels()
     }
 
@@ -23,13 +25,16 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val data = message.data
         val type = data["type"] ?: ""
 
-        android.util.Log.d("IXES_FCM", "📲 onMessageReceived: type=$type")
+        android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
+        android.util.Log.d("IXES_FCM", "🟢 onMessageReceived() CALLED (NATIVE KOTLIN)")
+        android.util.Log.d("IXES_FCM", "📲 type=$type")
         android.util.Log.d("IXES_FCM", "📦 Full data: $data")
+        android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
 
         // Ensure channels exist
         createNotificationChannels()
 
-        // ── CALL notifications: intercept and show CallKit UI ──────────────
+        // ── CALL notifications ──────────────────────────────────────
         if (type == "voice_call" || type == "video_call") {
             val roomName   = data["roomName"]   ?: ""
             val callerId   = data["callerId"]   ?: ""
@@ -42,7 +47,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
             android.util.Log.d("IXES_FCM", "📞 Intercepting call: $type | room=$roomName | caller=$callerName")
 
-            // ✅ CRITICAL FIX: Cancel ALL notifications to prevent duplicate ringing
             try {
                 val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
                 notifManager.cancelAll()
@@ -51,7 +55,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 android.util.Log.e("IXES_FCM", "Could not cancel notifications: $e")
             }
 
-            // Launch MainActivity with call data for Flutter/CallKit to handle
             val intent = Intent(this, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("isCallIntent", true)
@@ -66,42 +69,62 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        // ── CHAT notifications ─────────────────────────────────────────────
+        // ── CHAT notifications ──────────────────────────────────────
         if (type == "chat") {
-            // ✅ CRITICAL FIX: Try multiple field names for sender
-            val senderName = getSenderName(data)  // Use new helper function
+            android.util.Log.d("IXES_FCM", "🟡 Processing CHAT notification")
+
+            val senderName = getSenderName(data)
             val body       = data["body"] ?: data["message"] ?: "You have a new message"
             val senderId   = data["senderId"] ?: ""
             val conversationId = data["conversationId"] ?: ""
+            val groupId    = data["groupId"] ?: ""
+            val title = data["title"] ?: ""
+            val isGroupChat = title.contains("group", ignoreCase = true) ||
+                    title.contains("Group", ignoreCase = true)
 
-            android.util.Log.d("IXES_FCM", "💬 Chat notification | senderName='$senderName' | body='$body'")
-            android.util.Log.d("IXES_FCM", "   senderId=$senderId | conversationId=$conversationId")
+            android.util.Log.d("IXES_FCM", "🔍 Chat Check | isGroupChat=$isGroupChat | conversationId=$conversationId | title='$title'")
 
-            showChatNotification(
-                title          = senderName,      // Use actual sender name, not "New Message"
-                body           = body,
-                type           = type,
-                senderId       = senderId,
-                senderName     = senderName,
-                conversationId = conversationId,
-                groupId        = "",
-            )
+            if (isGroupChat && conversationId.isNotEmpty()) {
+                val groupName = extractGroupNameFromTitle(title)
+                android.util.Log.d("IXES_FCM", "💬 GROUP CHAT detected | conversationId=$conversationId | groupName=$groupName")
+                showChatNotification(
+                    title          = title,
+                    body           = body,
+                    type           = "GroupChat",
+                    senderId       = "",
+                    senderName     = senderName,
+                    conversationId = "",
+                    groupId        = conversationId,
+                    groupName      = groupName,
+                )
+            } else {
+                android.util.Log.d("IXES_FCM", "💬 PERSONAL CHAT detected | sender=$senderName")
+                showChatNotification(
+                    title          = senderName,
+                    body           = body,
+                    type           = type,
+                    senderId       = senderId,
+                    senderName     = senderName,
+                    conversationId = conversationId,
+                    groupId        = "",
+                )
+            }
             return
         }
 
-        // ── GROUP CHAT notifications ───────────────────────────────────────
+        // ── GROUP CHAT notifications ────────────────────────────────
         if (type == "GroupChat") {
+            android.util.Log.d("IXES_FCM", "🟡 Processing GROUP CHAT notification")
+
             val groupName  = data["groupName"]     ?: "Group"
-            val senderName = getSenderName(data)   // Use helper here too
+            val senderName = getSenderName(data)
             val body       = data["body"] ?: data["message"] ?: "New group message"
             val groupId    = data["groupId"]       ?: ""
 
-            // Show as "GroupName" in title, "SenderName: message" in body
+            android.util.Log.d("IXES_FCM", "💬 GroupChat | groupId=$groupId | groupName=$groupName | senderName=$senderName")
+
             val title = groupName
             val displayBody = if (senderName.isNotEmpty()) "$senderName: $body" else body
-
-            android.util.Log.d("IXES_FCM", "💬 GroupChat notification | title=$title | body=$displayBody")
-            android.util.Log.d("IXES_FCM", "   groupId=$groupId | groupName=$groupName | senderName=$senderName")
 
             showChatNotification(
                 title          = title,
@@ -111,87 +134,123 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 senderName     = senderName,
                 conversationId = "",
                 groupId        = groupId,
+                groupName      = groupName,
             )
             return
         }
 
-        // ── All other types: let FCM handle automatically ──────────────────
-        android.util.Log.d("IXES_FCM", "ℹ️ Unhandled type=$type — letting FCM handle")
+        android.util.Log.d("IXES_FCM", "ℹ️ Unhandled type=$type — skipping")
     }
 
-    // ── NEW HELPER: Get sender name from multiple possible field names ─────
     private fun getSenderName(data: Map<String, String>): String {
-        // Try these field names in order (backend might use different names)
-        val senderName = data["senderName"]      // First try
-            ?: data["sender"]                     // Alternative 1
-            ?: data["from"]                       // Alternative 2
-            ?: data["userName"]                   // Alternative 3
-            ?: data["name"]                       // Alternative 4
-            ?: data["title"]                      // Alternative 5 (fallback)
-            ?: "Chat"                             // Default fallback
+        val senderName = data["senderName"]
+            ?: data["sender"]
+            ?: data["from"]
+            ?: data["userName"]
+            ?: data["name"]
+            ?: data["title"]
+            ?: "Chat"
 
-        android.util.Log.d("IXES_FCM", "🔍 getSenderName result: '$senderName' (from ${data.keys})")
+        android.util.Log.d("IXES_FCM", "👤 getSenderName='$senderName'")
         return senderName
+    }
+
+    private fun extractGroupNameFromTitle(title: String): String {
+        val regex = Regex("""in the (.+?) group""")
+        val match = regex.find(title)
+
+        if (match != null) {
+            val groupName = match.groupValues[1]
+            android.util.Log.d("IXES_FCM", "✅ Extracted groupName='$groupName'")
+            return groupName
+        }
+
+        return "Group"
     }
 
     private fun createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-            // ── CHAT NOTIFICATIONS CHANNEL ────────────────────────────────
-            val chatChannelId = "chat_notifications"
-            val chatChannelName = "Chat Messages"
-            val chatChannelDescription = "Notifications for new chat messages"
+            android.util.Log.d("IXES_FCM", "🔧 Creating notification channels...")
 
-            val chatChannel = NotificationChannel(chatChannelId, chatChannelName, NotificationManager.IMPORTANCE_HIGH).apply {
-                description = chatChannelDescription
+            // ✅ DELETE OLD CHANNEL
+            try {
+                notificationManager.deleteNotificationChannel("chat_notifications")
+                android.util.Log.d("IXES_FCM", "✅ Deleted old chat channel")
+            } catch (e: Exception) {
+                android.util.Log.d("IXES_FCM", "⚠️ Could not delete old chat channel: $e")
+            }
+
+            // ── CHAT CHANNEL WITH SOUND ────────────────────────────────
+            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            android.util.Log.d("IXES_FCM", "🔊 Sound URI: $soundUri")
+
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                .build()
+
+            val chatChannel = NotificationChannel(
+                "chat_notifications",
+                "Chat Messages",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Chat notifications with sound"
+                enableLights(true)
+                lightColor = android.graphics.Color.GREEN
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 250, 500)
+                setShowBadge(true)
+
+                // ✅ SET SOUND AT CHANNEL LEVEL
+                setSound(soundUri, audioAttributes)
+
+                android.util.Log.d("IXES_FCM", "🔧 Chat channel config: sound=$soundUri, importance=HIGH")
+            }
+
+            // ── CALL CHANNEL ───────────────────────────────────────────
+            val callChannel = NotificationChannel(
+                "call_notifications",
+                "Incoming Calls",
+                NotificationManager.IMPORTANCE_MAX
+            ).apply {
+                description = "Call notifications without sound (CallKit handles)"
                 enableLights(true)
                 enableVibration(true)
-                setSound(null, null) // No sound for chat (optional)
+                setSound(null, null)
+            }
+
+            // ── GENERAL CHANNEL ────────────────────────────────────────
+            val generalChannel = NotificationChannel(
+                "general_notifications",
+                "General Notifications",
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = "General app notifications"
             }
 
             try {
                 notificationManager.createNotificationChannel(chatChannel)
-                android.util.Log.d("IXES_FCM", "✅ Chat notification channel created: $chatChannelId")
+                android.util.Log.d("IXES_FCM", "✅ Chat channel created (IMPORTANCE_HIGH + SOUND)")
             } catch (e: Exception) {
                 android.util.Log.e("IXES_FCM", "❌ Failed to create chat channel: $e")
             }
 
-            // ── CALL NOTIFICATIONS CHANNEL ────────────────────────────────
-            val callChannelId = "call_notifications"
-            val callChannelName = "Incoming Calls"
-            val callChannelDescription = "Notifications for incoming calls"
-
-            val callChannel = NotificationChannel(callChannelId, callChannelName, NotificationManager.IMPORTANCE_MAX).apply {
-                description = callChannelDescription
-                enableLights(true)
-                enableVibration(true)
-                // NO SOUND - CallKit will handle the ringtone
-                setSound(null, null)
-            }
-
             try {
                 notificationManager.createNotificationChannel(callChannel)
-                android.util.Log.d("IXES_FCM", "✅ Call notification channel created: $callChannelId")
+                android.util.Log.d("IXES_FCM", "✅ Call channel created")
             } catch (e: Exception) {
                 android.util.Log.e("IXES_FCM", "❌ Failed to create call channel: $e")
             }
 
-            // ── OTHER NOTIFICATIONS CHANNEL ────────────────────────────────
-            val generalChannelId = "general_notifications"
-            val generalChannelName = "General Notifications"
-            val generalChannelDescription = "General app notifications"
-
-            val generalChannel = NotificationChannel(generalChannelId, generalChannelName, NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = generalChannelDescription
-            }
-
             try {
                 notificationManager.createNotificationChannel(generalChannel)
-                android.util.Log.d("IXES_FCM", "✅ General notification channel created: $generalChannelId")
+                android.util.Log.d("IXES_FCM", "✅ General channel created")
             } catch (e: Exception) {
                 android.util.Log.e("IXES_FCM", "❌ Failed to create general channel: $e")
             }
+        } else {
+            android.util.Log.d("IXES_FCM", "⚠️ Android version < 8.0, skipping channel creation")
         }
     }
 
@@ -203,17 +262,20 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         senderName:     String,
         conversationId: String,
         groupId:        String,
+        groupName:      String = "Group",
     ) {
+        android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
+        android.util.Log.d("IXES_FCM", "📢 showChatNotification() BUILDING NOTIFICATION")
+        android.util.Log.d("IXES_FCM", "   title='$title' | body='$body' | type=$type")
+        android.util.Log.d("IXES_FCM", "   senderName='$senderName' | groupName='$groupName'")
+        android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
+
         val channelId    = "chat_notifications"
         val notifManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
 
-        // ── Ensure data is not empty ──────────────────────────────────────
         val finalTitle = if (title.isNotEmpty() && title != "Chat") title else "New Message"
         val finalBody = if (body.isNotEmpty()) body else "You have a new message"
 
-        android.util.Log.d("IXES_FCM", "📨 Building notification | finalTitle='$finalTitle' | finalBody='$finalBody'")
-
-        // ── Tap intent — opens app, Flutter handles deep navigation ─────────
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP or
@@ -224,8 +286,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             putExtra("senderName",     senderName)
             putExtra("conversationId", conversationId)
             putExtra("groupId",        groupId)
-
-            // CRITICAL: Add these extras so data survives app kill
+            putExtra("groupName",      groupName)
             putExtra("notificationTitle", finalTitle)
             putExtra("notificationBody", finalBody)
         }
@@ -245,19 +306,19 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // ✅ DO NOT SET SOUND HERE — Channel controls it
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(finalTitle)    // ✅ Actual sender name
-            .setContentText(finalBody)      // ✅ Actual message text
+            .setContentTitle(finalTitle)
+            .setContentText(finalBody)
             .setStyle(NotificationCompat.BigTextStyle().bigText(finalBody))
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-
-            .setSound(null)
-            .setVibrate(null)
+            .setVibrate(longArrayOf(0, 500, 250, 500))
+            .setColor(android.graphics.Color.GREEN)
             .build()
 
         val notifId = if (conversationId.isNotEmpty()) {
@@ -270,9 +331,15 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         try {
             notifManager.notify(notifId, notification)
-            android.util.Log.d("IXES_FCM", "✅ Chat notification shown | ID=$notifId | title='$finalTitle' | senderName='$senderName'")
+            android.util.Log.d("IXES_FCM", "✅ NOTIFICATION DISPLAYED")
+            android.util.Log.d("IXES_FCM", "   ID: $notifId")
+            android.util.Log.d("IXES_FCM", "   Title: $finalTitle")
+            android.util.Log.d("IXES_FCM", "   Body: $finalBody")
+            android.util.Log.d("IXES_FCM", "   Channel: $channelId")
+            android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
         } catch (e: Exception) {
-            android.util.Log.e("IXES_FCM", "❌ Failed to show notification: $e")
+            android.util.Log.e("IXES_FCM", "❌ FAILED TO SHOW NOTIFICATION: ${e.message}")
+            android.util.Log.e("IXES_FCM", android.util.Log.getStackTraceString(e))
         }
     }
 }

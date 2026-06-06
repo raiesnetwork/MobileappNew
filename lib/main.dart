@@ -186,6 +186,11 @@ Future<void> _showCallkitIncoming({
 // FCM background handler (app is KILLED — runs in separate isolate)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FCM background handler (app is KILLED — runs in separate isolate)
+// FIXED: Now shows chat notifications using native Android API
+// ─────────────────────────────────────────────────────────────────────────────
+
 @pragma('vm:entry-point')
 Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -195,6 +200,9 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
 
   debugPrint('🔔 [FCM KILLED] type=$type | sender=${data['senderName']} | group=${data['groupName']} | caller=${data['callerName']}');
 
+  // ────────────────────────────────────────────────────────────────────────────
+  // ✅ HANDLE CALL NOTIFICATIONS
+  // ────────────────────────────────────────────────────────────────────────────
   if (type == 'voice_call' || type == 'video_call') {
     final roomName   = data['roomName']   ?? '';
     final callerId   = data['callerId']   ?? '';
@@ -212,6 +220,127 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       callerName: callerName,
       callType:   type,
     );
+    return;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // ✅ HANDLE CHAT NOTIFICATIONS (SHOW NATIVE NOTIFICATION)
+  // ────────────────────────────────────────────────────────────────────────────
+  if (type == 'chat') {
+    final senderName = data['senderName'] ?? data['sender'] ?? data['from'] ?? 'Chat';
+    final body = data['body'] ?? data['message'] ?? 'You have a new message';
+    final senderId = data['senderId'] ?? '';
+    final conversationId = data['conversationId'] ?? '';
+    final groupId = data['groupId'] ?? '';
+    final title = data['title'] ?? '';
+
+    // Check if it's a group disguised as chat
+    final isGroupChat = title.toLowerCase().contains('group') && conversationId.isNotEmpty;
+
+    if (isGroupChat) {
+      final groupName = _extractGroupName(title);
+      debugPrint('📲 [FCM KILLED] Group chat detected | group=$groupName');
+
+      // Show notification via native Android API
+      await _showChatNotificationNatively(
+        title: groupName,
+        body: body,
+        senderName: senderName,
+        senderId: '',
+        conversationId: '',
+        groupId: conversationId,
+        groupName: groupName,
+      );
+
+      _storePendingGroup({
+        'groupId': conversationId,
+        'groupName': groupName,
+      });
+    } else {
+      debugPrint('📲 [FCM KILLED] Personal chat detected | sender=$senderName');
+
+      // Show notification via native Android API
+      await _showChatNotificationNatively(
+        title: senderName,
+        body: body,
+        senderName: senderName,
+        senderId: senderId,
+        conversationId: conversationId,
+        groupId: '',
+        groupName: 'Group',
+      );
+
+      _storePendingChat({
+        'senderId': senderId,
+        'senderName': senderName,
+        'conversationId': conversationId,
+      });
+    }
+    return;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // ✅ HANDLE GROUP CHAT NOTIFICATIONS
+  // ────────────────────────────────────────────────────────────────────────────
+  if (type == 'GroupChat') {
+    final groupName = data['groupName'] ?? 'Group';
+    final groupId = data['groupId'] ?? '';
+    final senderName = data['senderName'] ?? data['sender'] ?? 'Chat';
+    final body = data['body'] ?? data['message'] ?? 'New group message';
+
+    debugPrint('📲 [FCM KILLED] GroupChat | group=$groupName');
+
+    // Show notification via native Android API
+    await _showChatNotificationNatively(
+      title: groupName,
+      body: body,
+      senderName: senderName,
+      senderId: '',
+      conversationId: '',
+      groupId: groupId,
+      groupName: groupName,
+    );
+
+    _storePendingGroup({
+      'groupId': groupId,
+      'groupName': groupName,
+    });
+    return;
+  }
+
+  debugPrint('ℹ️ [FCM KILLED] Unhandled type=$type — skipping');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW: Show chat notification using native Android MethodChannel
+// ─────────────────────────────────────────────────────────────────────────────
+
+Future<void> _showChatNotificationNatively({
+  required String title,
+  required String body,
+  required String senderName,
+  required String senderId,
+  required String conversationId,
+  required String groupId,
+  required String groupName,
+}) async {
+  try {
+    const platform = MethodChannel('com.ixes.app/chat_notification');
+
+    await platform.invokeMethod('showNotification', {
+      'title': title,
+      'body': body,
+      'senderName': senderName,
+      'senderId': senderId,
+      'conversationId': conversationId,
+      'groupId': groupId,
+      'groupName': groupName,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+
+    debugPrint('📲 [FCM KILLED] Native notification invoked | title=$title');
+  } catch (e) {
+    debugPrint('❌ [FCM KILLED] Failed to show native notification: $e');
   }
 }
 
@@ -264,10 +393,31 @@ void _navigateToChat({
   }
 
   debugPrint('💬 [CHAT NAV] → ChatDetailScreen | sender=$senderName');
-  nav.pushNamedAndRemoveUntil('/main', (route) => false);
 
-  Future.delayed(const Duration(milliseconds: 400), () {
-    navigatorKey.currentState?.push(
+  final isAlreadyOnMain = nav.canPop() ? false : true;
+
+  if (!isAlreadyOnMain) {
+    nav.pushNamedAndRemoveUntil('/main', (route) => false);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => ChatDetailScreen(
+            userId:      senderId,
+            chatTitle:   senderName,
+            userProfile: {
+              '_id': senderId,
+              'profile': {
+                'name':         senderName,
+                'profileImage': '',
+              },
+            },
+          ),
+        ),
+      );
+      _clearChatState();
+    });
+  } else {
+    nav.push(
       MaterialPageRoute(
         builder: (_) => ChatDetailScreen(
           userId:      senderId,
@@ -283,7 +433,7 @@ void _navigateToChat({
       ),
     );
     _clearChatState();
-  });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -307,10 +457,25 @@ void _navigateToGroup({
   }
 
   debugPrint('💬 [GROUP NAV] → GroupChatDetailPage | group=$groupName');
-  nav.pushNamedAndRemoveUntil('/main', (route) => false);
 
-  Future.delayed(const Duration(milliseconds: 400), () {
-    navigatorKey.currentState?.push(
+  final isAlreadyOnMain = nav.canPop() ? false : true;
+
+  if (!isAlreadyOnMain) {
+    nav.pushNamedAndRemoveUntil('/main', (route) => false);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => GroupChatDetailPage(
+            groupId:   groupId,
+            groupName: groupName,
+            isAdmin:   false,
+          ),
+        ),
+      );
+      _clearGroupState();
+    });
+  } else {
+    nav.push(
       MaterialPageRoute(
         builder: (_) => GroupChatDetailPage(
           groupId:   groupId,
@@ -320,7 +485,26 @@ void _navigateToGroup({
       ),
     );
     _clearGroupState();
-  });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: detect group disguised as chat + extract group name
+// ─────────────────────────────────────────────────────────────────────────────
+
+bool _isGroupDisguisedAsChat(String title, String conversationId) {
+  return title.toLowerCase().contains('group') && conversationId.isNotEmpty;
+}
+
+String _extractGroupName(String title) {
+  final match = RegExp(r'in the (.+?) group', caseSensitive: false).firstMatch(title);
+  if (match != null) {
+    final name = match.group(1) ?? 'Group';
+    debugPrint('✅ [GROUP EXTRACT] groupName="$name" from title="$title"');
+    return name;
+  }
+  debugPrint('⚠️ [GROUP EXTRACT] Could not extract from title="$title" — using Group');
+  return 'Group';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -365,7 +549,6 @@ Future<void> _initFCM() async {
     });
 
     // ── Listen for chat notification taps from native Android ───────────────
-    // Fires for ALL app states: killed, background, foreground
     const _chatChannel = MethodChannel('com.ixes.app/chat');
     _chatChannel.setMethodCallHandler((call) async {
       if (call.method == 'chatTapped') {
@@ -416,19 +599,6 @@ Future<void> _initFCM() async {
         }
       }
 
-      if (type == 'chat') {
-        final senderId       = d['senderId']       ?? '';
-        final senderName     = d['senderName']     ?? 'Chat';
-        final conversationId = d['conversationId'] ?? '';
-        if (senderId.isNotEmpty) {
-          _storePendingChat({
-            'senderId':       senderId,
-            'senderName':     senderName,
-            'conversationId': conversationId,
-          });
-        }
-      }
-
       if (type == 'GroupChat') {
         final groupId   = d['groupId']   ?? '';
         final groupName = d['groupName'] ?? 'Group';
@@ -437,6 +607,31 @@ Future<void> _initFCM() async {
             'groupId':   groupId,
             'groupName': groupName,
           });
+        }
+      }
+
+      // ✅ FIXED: detect group disguised as type=chat
+      if (type == 'chat') {
+        final title          = d['title']          ?? '';
+        final conversationId = d['conversationId'] ?? '';
+        final senderId       = d['senderId']       ?? '';
+        final senderName     = d['senderName']     ?? 'Chat';
+
+        if (_isGroupDisguisedAsChat(title, conversationId)) {
+          final groupName = _extractGroupName(title);
+          debugPrint('📲 [FCM INITIAL] Group disguised as chat | conversationId=$conversationId | groupName=$groupName');
+          _storePendingGroup({
+            'groupId':   conversationId,
+            'groupName': groupName,
+          });
+        } else {
+          if (senderId.isNotEmpty) {
+            _storePendingChat({
+              'senderId':       senderId,
+              'senderName':     senderName,
+              'conversationId': conversationId,
+            });
+          }
         }
       }
     }
@@ -475,17 +670,30 @@ Future<void> _initFCM() async {
         }
       }
 
+      // ✅ FIXED: detect group disguised as type=chat
       if (type == 'chat') {
+        final title          = d['title']          ?? '';
+        final conversationId = d['conversationId'] ?? '';
         final senderId       = d['senderId']       ?? '';
         final senderName     = d['senderName']     ?? 'Chat';
-        final conversationId = d['conversationId'] ?? '';
-        if (senderId.isNotEmpty) {
-          await Future.delayed(const Duration(milliseconds: 500));
-          _navigateToChat(
-            senderId:       senderId,
-            senderName:     senderName,
-            conversationId: conversationId,
+
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        if (_isGroupDisguisedAsChat(title, conversationId)) {
+          final groupName = _extractGroupName(title);
+          debugPrint('📂 [FCM OPENED] Group disguised as chat | conversationId=$conversationId | groupName=$groupName');
+          _navigateToGroup(
+            groupId:   conversationId,
+            groupName: groupName,
           );
+        } else {
+          if (senderId.isNotEmpty) {
+            _navigateToChat(
+              senderId:       senderId,
+              senderName:     senderName,
+              conversationId: conversationId,
+            );
+          }
         }
       }
 

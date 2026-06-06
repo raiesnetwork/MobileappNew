@@ -2,12 +2,13 @@ package com.ixes.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Bundle
 import android.util.Log
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -17,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private val SCREEN_CHANNEL = "com.ixes.app/screen_share"
     private val CALL_CHANNEL   = "com.ixes.app/calls"
     private val CHAT_CHANNEL   = "com.ixes.app/chat"
+    private val CHAT_NOTIF_CHANNEL = "com.ixes.app/chat_notification"  // ← NEW CHANNEL
     private val FGS_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     private val PERMISSION_REQUEST_CODE = 1001
 
@@ -25,6 +27,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // ── Existing channels ──────────────────────────────────────────────────
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -50,10 +53,48 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHAT_CHANNEL)
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // ✅ NEW CHANNEL: Handle chat notifications from Flutter background handler
+        // ────────────────────────────────────────────────────────────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHAT_NOTIF_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "showNotification" -> {
+                        try {
+                            val title = call.argument<String>("title") ?: "New Message"
+                            val body = call.argument<String>("body") ?: "You have a new message"
+                            val senderName = call.argument<String>("senderName") ?: ""
+                            val senderId = call.argument<String>("senderId") ?: ""
+                            val conversationId = call.argument<String>("conversationId") ?: ""
+                            val groupId = call.argument<String>("groupId") ?: ""
+                            val groupName = call.argument<String>("groupName") ?: "Group"
+
+                            Log.d("MainActivity", "📲 [CHANNEL] showNotification called | title=$title | body=$body")
+
+                            showChatNotificationFromChannel(
+                                title = title,
+                                body = body,
+                                senderName = senderName,
+                                senderId = senderId,
+                                conversationId = conversationId,
+                                groupId = groupId,
+                                groupName = groupName,
+                            )
+
+                            result.success(null)
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "❌ showNotification error: ${e.message}")
+                            result.error("NOTIFICATION_ERROR", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
         createNotificationChannels()
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         handleCallIntent(intent)
         handleChatIntent(intent)
@@ -91,15 +132,27 @@ class MainActivity : FlutterActivity() {
 
     // ── Chat handler ───────────────────────────────────────────────────────
     private fun handleChatIntent(intent: Intent?) {
-        if (intent?.getBooleanExtra("isChatIntent", false) != true) return
+        if (intent?.getBooleanExtra("isChatIntent", false) != true) {
+            Log.d("MainActivity", "⚠️ handleChatIntent: isChatIntent is false or missing")
+            return
+        }
 
         val type           = intent.getStringExtra("type")           ?: return
         val senderId       = intent.getStringExtra("senderId")       ?: ""
         val senderName     = intent.getStringExtra("senderName")     ?: ""
         val conversationId = intent.getStringExtra("conversationId") ?: ""
         val groupId        = intent.getStringExtra("groupId")        ?: ""
+        val groupName      = intent.getStringExtra("groupName")      ?: "Group"
 
-        Log.d("MainActivity", "💬 handleChatIntent | type=$type | senderId=$senderId | senderName=$senderName | groupId=$groupId")
+        Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        Log.d("MainActivity", "💬 handleChatIntent RECEIVED")
+        Log.d("MainActivity", "  type=$type")
+        Log.d("MainActivity", "  senderId='$senderId' (length=${senderId.length})")
+        Log.d("MainActivity", "  senderName='$senderName'")
+        Log.d("MainActivity", "  conversationId='$conversationId'")
+        Log.d("MainActivity", "  groupId='$groupId' (length=${groupId.length})")
+        Log.d("MainActivity", "  groupName='$groupName'")
+        Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
@@ -111,9 +164,10 @@ class MainActivity : FlutterActivity() {
                         "senderName"     to senderName,
                         "conversationId" to conversationId,
                         "groupId"        to groupId,
+                        "groupName"      to groupName,
                     )
                 )
-                Log.d("MainActivity", "✅ chatTapped sent to Flutter | senderName=$senderName")
+                Log.d("MainActivity", "✅ chatTapped sent to Flutter | type=$type | groupId=$groupId")
             }
         }, 1500)
     }
@@ -150,14 +204,11 @@ class MainActivity : FlutterActivity() {
 
             Log.d("MainActivity", "✅ startForegroundService called")
 
-            // ✅ CRITICAL FIX: Wait 2000ms (2 seconds) for FGS to fully initialize
-            // This ensures startForeground() has been called in ScreenShareService.onStartCommand()
-            // before Flutter calls setScreenShareEnabled()
             val handler = android.os.Handler(android.os.Looper.getMainLooper())
             handler.postDelayed({
                 Log.d("MainActivity", "✅ Service fully initialized (2000ms delay), returning success to Flutter")
                 result.success(null)
-            }, 2000)  // ← CHANGED FROM 1000ms TO 2000ms
+            }, 2000)
 
         } catch (e: SecurityException) {
             Log.e("MainActivity", "❌ SecurityException: ${e.message}")
@@ -217,6 +268,90 @@ class MainActivity : FlutterActivity() {
                 enableVibration(true)
             }
             notifManager.createNotificationChannel(callChannel)
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ✅ NEW: Show chat notification from Flutter MethodChannel
+    // ────────────────────────────────────────────────────────────────────────────
+
+    private fun showChatNotificationFromChannel(
+        title: String,
+        body: String,
+        senderName: String,
+        senderId: String,
+        conversationId: String,
+        groupId: String,
+        groupName: String,
+    ) {
+        val channelId = "chat_notifications"
+        val notifManager = getSystemService(NotificationManager::class.java)
+
+        val finalTitle = if (title.isNotEmpty() && title != "Chat") title else "New Message"
+        val finalBody = if (body.isNotEmpty()) body else "You have a new message"
+
+        Log.d("MainActivity", "═══════════════════════════════════════════════════════")
+        Log.d("MainActivity", "📲 [FLUTTER→NATIVE] showChatNotificationFromChannel()")
+        Log.d("MainActivity", "   title='$finalTitle' | body='$finalBody'")
+        Log.d("MainActivity", "   senderName='$senderName' | groupName='$groupName'")
+        Log.d("MainActivity", "═══════════════════════════════════════════════════════")
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("isChatIntent",   true)
+            putExtra("type",           if (groupId.isNotEmpty()) "GroupChat" else "chat")
+            putExtra("senderId",       senderId)
+            putExtra("senderName",     senderName)
+            putExtra("conversationId", conversationId)
+            putExtra("groupId",        groupId)
+            putExtra("groupName",      groupName)
+        }
+
+        val requestCode = if (conversationId.isNotEmpty()) {
+            conversationId.hashCode()
+        } else if (groupId.isNotEmpty()) {
+            groupId.hashCode()
+        } else {
+            System.currentTimeMillis().toInt()
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(finalTitle)
+            .setContentText(finalBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(finalBody))
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVibrate(longArrayOf(0, 500, 250, 500))
+            .build()
+
+        val notifId = if (conversationId.isNotEmpty()) {
+            conversationId.hashCode()
+        } else if (groupId.isNotEmpty()) {
+            groupId.hashCode()
+        } else {
+            System.currentTimeMillis().toInt()
+        }
+
+        try {
+            notifManager.notify(notifId, notification)
+            Log.d("MainActivity", "✅ NOTIFICATION DISPLAYED FROM FLUTTER")
+            Log.d("MainActivity", "   ID: $notifId | Title: $finalTitle | Body: $finalBody")
+            Log.d("MainActivity", "═══════════════════════════════════════════════════════")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "❌ Failed to show notification: ${e.message}")
         }
     }
 }
