@@ -127,8 +127,13 @@ class _LoginScreenState extends State<LoginScreen>
         Provider.of<CommentProvider>(context, listen: false).setCurrentUserId(userId);
       }
       await _saveFcmToken();
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 0)));
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const MainScreen(initialIndex: 0),
+        ),
+            (route) => false,
+      );
     } else {
       _showSnack(result['message'], isError: true);
     }
@@ -207,6 +212,7 @@ class _LoginScreenState extends State<LoginScreen>
                   backgroundColor: _C.accent,
                   foregroundColor: Colors.white,
                   elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),
@@ -266,10 +272,15 @@ class _LoginScreenState extends State<LoginScreen>
         await _saveFcmToken();
         if (!mounted) return;
 
-        // Navigate — dialog dismisses naturally because the whole route is replaced
-        Navigator.of(context).pushReplacement(
-            MaterialPageRoute(
-                builder: (_) => const MainScreen(initialIndex: 0)));
+        _dismissGoogleDialog();
+
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const MainScreen(initialIndex: 0),
+          ),
+              (route) => false,
+        );
       } else {
         // Dismiss dialog only on failure
         _dismissGoogleDialog();
@@ -715,6 +726,7 @@ class _PrimaryButton extends StatelessWidget {
             backgroundColor: _C.accent,
             foregroundColor: Colors.white,
             elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12)),
             disabledBackgroundColor: _C.accent.withOpacity(0.5)),
@@ -747,7 +759,7 @@ class _GoogleButton extends StatelessWidget {
             side: const BorderSide(color: _C.border, width: 1),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12)),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             elevation: 0),
         onPressed: onPressed,
         child: Row(

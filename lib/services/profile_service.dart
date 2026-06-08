@@ -39,26 +39,98 @@ class ProfileService {
     }
   }
 
-  // ── Update User Profile ────────────────────────────────────────────────
+  // ── Update User Profile with RETRY LOGIC ───────────────────────────────
   Future<Map<String, dynamic>> updateUserProfile(
       Map<String, dynamic> profileData, {
         String? profileImagePath,
       }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      var token = prefs.getString('auth_token');
       if (token == null || token.isEmpty) return _tokenError();
 
+      // First attempt
+      print('📤 [PROFILE_SERVICE] Attempt 1: Starting profile update...');
+      var response = await _sendMultipartProfileUpdate(
+        profileData: profileData,
+        profileImagePath: profileImagePath,
+        token: token,
+      );
+
+      // If 401, try refreshing token and retry ONCE
+      if (response.statusCode == 401) {
+        print('⚠️ [PROFILE_SERVICE] Got 401 — attempting token refresh and retry...');
+
+        final refreshedToken = await ApiService.refreshToken();
+
+        if (refreshedToken != null && refreshedToken.isNotEmpty) {
+          print('✅ [PROFILE_SERVICE] Token refreshed, retrying upload...');
+
+          // Retry with fresh token
+          response = await _sendMultipartProfileUpdate(
+            profileData: profileData,
+            profileImagePath: profileImagePath,
+            token: refreshedToken,
+          );
+
+          if (response.statusCode == 200) {
+            print('✅ [PROFILE_SERVICE] Retry successful after token refresh');
+            final decoded = _safeJsonDecode(response.body);
+            return {
+              'error': false,
+              'message': decoded['message'] ?? 'Profile updated successfully',
+              'data': decoded,
+            };
+          }
+        }
+
+        // Still 401 after retry — now logout
+        print('🔐 [PROFILE_SERVICE] 401 still after retry — user needs to login');
+        if (ApiService.onUnauthorized != null) {
+          ApiService.onUnauthorized!();
+        }
+      }
+
+      // Handle other status codes
+      print('updateUserProfile status: ${response.statusCode}');
+      print('updateUserProfile body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final decoded = _safeJsonDecode(response.body);
+        return {
+          'error': false,
+          'message': decoded['message'] ?? 'Profile updated successfully',
+          'data': decoded,
+        };
+      }
+
+      return _errorFrom(response.body, 'Failed to update profile');
+    } catch (e) {
+      print('❌ [PROFILE_SERVICE] Exception: $e');
+      return _exception(e, 'updating profile');
+    }
+  }
+
+  // ── Helper: Send multipart request with given token ────────────────────
+  Future<http.Response> _sendMultipartProfileUpdate({
+    required Map<String, dynamic> profileData,
+    required String? profileImagePath,
+    required String token,
+  }) async {
+    try {
       final uri = Uri.parse('${apiBaseUrl}api/profile');
       final request = http.MultipartRequest('PUT', uri)
-        ..headers['Authorization'] = 'Bearer $token';
+        ..headers['Authorization'] = 'Bearer $token'
+        ..headers['x-platform'] = Platform.isAndroid ? 'mobile' : 'mobile'; // Add x-platform header
 
+      // Add fields
       profileData.forEach((key, value) {
         if (value != null && key != 'profileImage' && key != 'profileImageBase64') {
           request.fields[key] = value.toString();
         }
       });
 
+      // Add image if provided
       if (profileImagePath != null && profileImagePath.isNotEmpty) {
         final file = File(profileImagePath);
         if (await file.exists()) {
@@ -75,23 +147,11 @@ class ProfileService {
       print('updateUserProfile → fields: ${request.fields.keys}');
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);
-      ApiService.checkResponse(response); // ✅ 401 check
 
-      print('updateUserProfile status: ${response.statusCode}');
-      print('updateUserProfile body: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final decoded = _safeJsonDecode(response.body);
-        return {
-          'error': false,
-          'message': decoded['message'] ?? 'Profile updated successfully',
-          'data': decoded,
-        };
-      }
-      return _errorFrom(response.body, 'Failed to update profile');
+      return response;
     } catch (e) {
-      print('updateUserProfile exception: $e');
-      return _exception(e, 'updating profile');
+      print('❌ [MULTIPART] Error: $e');
+      rethrow;
     }
   }
 

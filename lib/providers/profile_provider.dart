@@ -1,3 +1,13 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// ProfileProvider
+// FIX: Call clearAllData() on logout BEFORE navigating away so the next
+//      account never sees the previous user's profile for even a single frame.
+//
+// Usage in your logout flow:
+//   context.read<ProfileProvider>().clearAllData();
+//   // then navigate to login
+// ─────────────────────────────────────────────────────────────────────────────
+
 import 'package:flutter/material.dart';
 import '../services/profile_service.dart';
 
@@ -76,7 +86,7 @@ class ProfileProvider with ChangeNotifier {
     return _dashboardError == null;
   }
 
-  // ── profileImagePath: local file path from image picker, null = no change
+  // ─── UPDATE PROFILE WITH MULTIPART UPLOAD ─────────────────────────────────
   Future<bool> updateUserProfile(
       Map<String, dynamic> profileData, {
         String? profileImagePath,
@@ -84,24 +94,46 @@ class ProfileProvider with ChangeNotifier {
     _isUpdatingProfile = true;
     _updateProfileError = null;
     notifyListeners();
+
     try {
+      print('📤 [PROFILE] Starting profile update...');
+
       final result = await _profileService.updateUserProfile(
         profileData,
         profileImagePath: profileImagePath,
       );
+
       if (!result['error']) {
-        // Re-fetch profile so UI shows updated photo immediately
+        print('✅ [PROFILE] Update successful, refreshing profile...');
         await getUserProfile();
         _updateProfileError = null;
         _isUpdatingProfile = false;
         notifyListeners();
         return true;
       } else {
-        _updateProfileError = result['message'];
+        final errorMsg = result['message'] as String?;
+        if (errorMsg?.contains('401') == true ||
+            errorMsg?.contains('Unauthorized') == true) {
+          _updateProfileError = 'Session expired. Please log in again.';
+        } else if (errorMsg?.contains('timeout') == true ||
+            errorMsg?.contains('TimeoutException') == true) {
+          _updateProfileError = 'Upload timed out. Please try again.';
+        } else {
+          _updateProfileError = errorMsg ?? 'Failed to update profile';
+        }
       }
     } catch (e) {
-      _updateProfileError = 'Error updating profile: $e';
+      final errorStr = e.toString();
+      if (errorStr.contains('SocketException') ||
+          errorStr.contains('Failed host lookup')) {
+        _updateProfileError = 'No internet connection. Please try again.';
+      } else if (errorStr.contains('TimeoutException')) {
+        _updateProfileError = 'Upload timed out. Please try again.';
+      } else {
+        _updateProfileError = 'Error updating profile: $e';
+      }
     }
+
     _isUpdatingProfile = false;
     notifyListeners();
     return false;
@@ -133,7 +165,7 @@ class ProfileProvider with ChangeNotifier {
     notifyListeners();
     try {
       final result = await _profileService.createEvent(eventData);
-      if (!result['error']) {
+      if (!result['event'] == null) {
         if (result['event'] != null) _events.add(result['event']);
         _createEventError = null;
         _isCreatingEvent = false;
@@ -150,10 +182,24 @@ class ProfileProvider with ChangeNotifier {
     return false;
   }
 
-  void clearProfileError() { _profileError = null; notifyListeners(); }
-  void clearUpdateProfileError() { _updateProfileError = null; notifyListeners(); }
-  void clearCreateEventError() { _createEventError = null; notifyListeners(); }
+  void clearProfileError() {
+    _profileError = null;
+    notifyListeners();
+  }
 
+  void clearUpdateProfileError() {
+    _updateProfileError = null;
+    notifyListeners();
+  }
+
+  void clearCreateEventError() {
+    _createEventError = null;
+    notifyListeners();
+  }
+
+  // ── FIX: Call this BEFORE navigating to login on logout ───────────────────
+  // This ensures _userProfile is null when the next account's profile screen
+  // opens, so there is zero chance of the previous user's data flashing.
   void clearAllData() {
     _userProfile = null;
     _dashboardData = null;
@@ -162,6 +208,6 @@ class ProfileProvider with ChangeNotifier {
         _updateProfileError = _createEventError = null;
     _isLoadingProfile = _isLoadingDashboard = _isLoadingEvents =
         _isUpdatingProfile = _isCreatingEvent = false;
-    notifyListeners();
+    notifyListeners(); // UI rebuilds immediately with null data before navigation
   }
 }

@@ -807,6 +807,7 @@ class _MeetingRoomScreenState extends State<MeetingRoomScreen> {
                 itemCount: _cameraTrack.length,
                 itemBuilder: (_, i) => Container(
                   width: 90,
+                  height: 98,          // ← ADD explicit height (110 - 6 - 6 padding)
                   margin: const EdgeInsets.only(right: 6),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
