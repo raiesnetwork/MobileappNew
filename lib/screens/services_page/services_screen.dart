@@ -58,7 +58,6 @@ class _ServicesScreenState extends State<ServicesScreen>
 
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
-      // Rebuild to update FAB visibility and title
       if (!_tabController.indexIsChanging) setState(() {});
     });
 
@@ -395,6 +394,32 @@ class _ServicesScreenState extends State<ServicesScreen>
     }).length;
   }
 
+  // ✅ UPDATED: _getImageUrl with better handling
+  String? _getImageUrl(dynamic imageData) {
+    if (imageData == null) return null;
+
+    // Try array first (images field)
+    if (imageData is List && imageData.isNotEmpty) {
+      for (var img in imageData) {
+        if (img is String && img.isNotEmpty && !img.startsWith('data:')) {
+          print('✅ Image from array: $img');
+          return img;
+        }
+      }
+    }
+
+    // Try string (image field)
+    if (imageData is String && imageData.isNotEmpty) {
+      if (!imageData.startsWith('data:')) {
+        print('✅ Image URL: $imageData');
+        return imageData;
+      }
+    }
+
+    print('⚠️ No valid image URL found');
+    return null;
+  }
+
   // ── Search Bar ──────────────────────────────────────────────────────────────
   Widget _buildSearchBar() {
     return Container(
@@ -625,17 +650,6 @@ class _ServicesScreenState extends State<ServicesScreen>
     );
   }
 
-  // ── Image URL helper ────────────────────────────────────────────────────────
-  String? _getImageUrl(dynamic imageData) {
-    if (imageData == null) return null;
-    if (imageData is List && imageData.isNotEmpty) {
-      final firstImage = imageData[0];
-      if (firstImage is String && firstImage.isNotEmpty) return firstImage;
-    }
-    if (imageData is String && imageData.isNotEmpty) return imageData;
-    return null;
-  }
-
   // ── Service Card ────────────────────────────────────────────────────────────
   Widget _buildServiceCard({required dynamic service}) {
     if (service is! Map<String, dynamic>) return const SizedBox.shrink();
@@ -670,7 +684,7 @@ class _ServicesScreenState extends State<ServicesScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Image ──
+            // ✅ UPDATED: Image Section with better error handling
             ClipRRect(
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(16),
@@ -702,7 +716,10 @@ class _ServicesScreenState extends State<ServicesScreen>
                         ),
                       );
                     },
-                    errorBuilder: (_, __, ___) => _imagePlaceholder(),
+                    errorBuilder: (context, error, stackTrace) {
+                      print('❌ Error loading image: $imageUrl - $error');
+                      return _imagePlaceholder();
+                    },
                   )
                       : _imagePlaceholder(),
 
@@ -1105,7 +1122,7 @@ class _ServicesScreenState extends State<ServicesScreen>
                   onPressed: () async {
                     Navigator.pop(context);
                     final uri = Uri.parse(
-                        'https://.ixes.ai/api/service/create-service');
+                        'https://ixes.ai/api/service/create-service');
                     if (await canLaunchUrl(uri)) {
                       await launchUrl(uri,
                           mode: LaunchMode.externalApplication);

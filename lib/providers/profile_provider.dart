@@ -23,12 +23,14 @@ class ProfileProvider with ChangeNotifier {
   bool _isLoadingEvents = false;
   bool _isUpdatingProfile = false;
   bool _isCreatingEvent = false;
+  bool _isDeletingAccount = false;
 
   String? _profileError;
   String? _dashboardError;
   String? _eventsError;
   String? _updateProfileError;
   String? _createEventError;
+  String? _deleteAccountError;
 
   Map<String, dynamic>? get userProfile => _userProfile;
   Map<String, dynamic>? get dashboardData => _dashboardData;
@@ -39,12 +41,14 @@ class ProfileProvider with ChangeNotifier {
   bool get isLoadingEvents => _isLoadingEvents;
   bool get isUpdatingProfile => _isUpdatingProfile;
   bool get isCreatingEvent => _isCreatingEvent;
+  bool get isDeletingAccount => _isDeletingAccount;
 
   String? get profileError => _profileError;
   String? get dashboardError => _dashboardError;
   String? get eventsError => _eventsError;
   String? get updateProfileError => _updateProfileError;
   String? get createEventError => _createEventError;
+  String? get deleteAccountError => _deleteAccountError;
 
   Future<bool> getUserProfile() async {
     _isLoadingProfile = true;
@@ -139,6 +143,74 @@ class ProfileProvider with ChangeNotifier {
     return false;
   }
 
+  // ─── DELETE ACCOUNT REQUEST ──────────────────────────────────────────────
+  /// Submits an account deletion request with a reason
+  /// This is a soft delete request that admins will review
+  Future<bool> deleteAccountRequest(String message) async {
+    _isDeletingAccount = true;
+    _deleteAccountError = null;
+    notifyListeners();
+
+    try {
+      print('🗑️ [PROFILE] Submitting account deletion request...');
+
+      final result = await _profileService.deleteAccountRequest(message);
+
+      if (!result['error']) {
+        print('✅ [PROFILE] Deletion request submitted successfully');
+        _deleteAccountError = null;
+        _isDeletingAccount = false;
+        notifyListeners();
+        return true;
+      } else {
+        final errorMsg = result['message'] as String?;
+        _deleteAccountError = errorMsg ?? 'Failed to submit deletion request';
+      }
+    } catch (e) {
+      print('❌ [PROFILE] Error: $e');
+      _deleteAccountError = 'Error submitting deletion request: $e';
+    }
+
+    _isDeletingAccount = false;
+    notifyListeners();
+    return false;
+  }
+
+  // // ─── PERMANENTLY DELETE ACCOUNT ──────────────────────────────────────────
+  // /// Permanently deletes the user account immediately
+  // /// This should only be used after user confirmation
+  // Future<bool> deleteAccount(String message) async {
+  //   _isDeletingAccount = true;
+  //   _deleteAccountError = null;
+  //   notifyListeners();
+
+  //
+
+  //   try {
+  //     print('🗑️ [PROFILE] Permanently deleting account...');
+  //
+  //     final result = await _profileService.deleteAccount(message);
+  //
+  //     if (!result['error']) {
+  //       print('✅ [PROFILE] Account deleted permanently');
+  //       _deleteAccountError = null;
+  //       _isDeletingAccount = false;
+  //       notifyListeners();
+  //       return true;
+  //     } else {
+  //       final errorMsg = result['message'] as String?;
+  //       _deleteAccountError = errorMsg ?? 'Failed to delete account';
+  //     }
+  //   } catch (e) {
+  //     print('❌ [PROFILE] Error: $e');
+  //     _deleteAccountError = 'Error deleting account: $e';
+  //   }
+  //
+  //   _isDeletingAccount = false;
+  //   notifyListeners();
+  //   return false;
+  // }
+
   Future<bool> fetchEvents() async {
     _isLoadingEvents = true;
     _eventsError = null;
@@ -165,7 +237,7 @@ class ProfileProvider with ChangeNotifier {
     notifyListeners();
     try {
       final result = await _profileService.createEvent(eventData);
-      if (!result['event'] == null) {
+      if (result['event'] == null) {
         if (result['event'] != null) _events.add(result['event']);
         _createEventError = null;
         _isCreatingEvent = false;
@@ -197,6 +269,11 @@ class ProfileProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  void clearDeleteAccountError() {
+    _deleteAccountError = null;
+    notifyListeners();
+  }
+
   // ── FIX: Call this BEFORE navigating to login on logout ───────────────────
   // This ensures _userProfile is null when the next account's profile screen
   // opens, so there is zero chance of the previous user's data flashing.
@@ -205,9 +282,9 @@ class ProfileProvider with ChangeNotifier {
     _dashboardData = null;
     _events = [];
     _profileError = _dashboardError = _eventsError =
-        _updateProfileError = _createEventError = null;
+        _updateProfileError = _createEventError = _deleteAccountError = null;
     _isLoadingProfile = _isLoadingDashboard = _isLoadingEvents =
-        _isUpdatingProfile = _isCreatingEvent = false;
+        _isUpdatingProfile = _isCreatingEvent = _isDeletingAccount = false;
     notifyListeners(); // UI rebuilds immediately with null data before navigation
   }
 }

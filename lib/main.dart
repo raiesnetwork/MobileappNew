@@ -1312,7 +1312,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
   Future<void> _checkActiveCallsOnResume() async {
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
+      // ✅ FIX: Wait longer to ensure providers are initialized
+      await Future.delayed(const Duration(milliseconds: 1000));
       if (!mounted) return;
 
       final calls = await FlutterCallkitIncoming.activeCalls();
@@ -1407,33 +1408,44 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     }
 
     try {
-      final isConnected = SocketService().socket?.connected == true;
+      // ✅ FIX: Check the correct socket (VOICE/VIDEO, not CHAT)
+      final isVoiceConnected = ctx.read<VoiceCallProvider>().isConnected;
+      final isVideoConnected = ctx.read<VideoCallProvider>().isConnected;
+      final isCallSocketConnected = (callType == 'video_call') ? isVideoConnected : isVoiceConnected;
 
-      if (isConnected) {
+      debugPrint('🔌 [REJECT] Check socket — callType=$callType | isConnected=$isCallSocketConnected');
+
+      if (isCallSocketConnected) {
+        debugPrint('✅ [REJECT] Socket connected — emitting rejection');
         _emitReject(ctx, callType);
         return;
       }
 
-      debugPrint('🔄 [REJECT] Socket disconnected — reconnecting');
-      ctx.read<PersonalChatProvider>().reconnectSocket();
+      debugPrint('🔄 [REJECT] Call socket disconnected — waiting for reconnect');
 
+      // ✅ Wait for the call provider's socket to connect
       bool reconnected = false;
-      for (int i = 0; i < 20; i++) {
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (SocketService().socket?.connected == true) {
+      for (int i = 0; i < 25; i++) {
+        await Future.delayed(const Duration(milliseconds: 150));
+        final currentConnected = (callType == 'video_call')
+            ? ctx.read<VideoCallProvider>().isConnected
+            : ctx.read<VoiceCallProvider>().isConnected;
+        if (currentConnected) {
           reconnected = true;
+          debugPrint('✅ [REJECT] Call socket reconnected after ${i * 150}ms');
           break;
         }
       }
 
       if (reconnected) {
+        debugPrint('✅ [REJECT] Emitting rejection after reconnect');
         _emitReject(ctx, callType);
       } else {
-        debugPrint('⚠️ [REJECT] Reconnect timed out — REST fallback');
+        debugPrint('⚠️ [REJECT] Call socket reconnect timed out — using REST fallback');
         await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
       }
     } catch (e) {
-      debugPrint('❌ [REJECT] $e — REST fallback');
+      debugPrint('❌ [REJECT] Exception: $e — REST fallback');
       await _rejectViaRestApi(callerId: callerId, roomName: roomName, callType: callType);
     }
   }

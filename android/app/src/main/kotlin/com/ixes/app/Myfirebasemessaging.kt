@@ -31,6 +31,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         android.util.Log.d("IXES_FCM", "📦 Full data: $data")
         android.util.Log.d("IXES_FCM", "═══════════════════════════════════════════════════════")
 
+        // ✅ FIX: Ignore empty/dummy notifications
+        if (data.isEmpty()) {
+            android.util.Log.d("IXES_FCM", "⚠️ Empty payload received — ignoring")
+            return
+        }
+
+        if (type.isEmpty()) {
+            android.util.Log.d("IXES_FCM", "⚠️ No 'type' field — ignoring")
+            return
+        }
+
         // Ensure channels exist
         createNotificationChannels()
 

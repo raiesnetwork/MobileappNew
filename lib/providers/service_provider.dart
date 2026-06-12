@@ -209,6 +209,19 @@ class ServicesProvider with ChangeNotifier {
       _servicesCurrentPage = response['currentPage'] ?? 1;
       _servicesTotalCount = response['totalServices'] ?? 0;
       _hasError = false;
+
+      // ✅ DEBUG LOGGING
+      print('═══════════════════════════════════════════════════════════');
+      print('📸 SERVICES LIST - IMAGE DEBUG');
+      print('═══════════════════════════════════════════════════════════');
+      for (int i = 0; i < _services.length; i++) {
+        print('Service $i: ${_services[i]['name']}');
+        print('  - image field: ${_services[i]['image']}');
+        print('  - images field: ${_services[i]['images']}');
+        print('  - image type: ${_services[i]['image'].runtimeType}');
+        print('---');
+      }
+      print('═══════════════════════════════════════════════════════════');
       print('✅ Fetched ${_services.length} services');
     } else {
       _hasError = true;
@@ -491,6 +504,7 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // ✅ UPDATED: fetchServiceDetailsSeparate with debug logging
   Future<void> fetchServiceDetailsSeparate(String id) async {
     _isServiceDetailsLoading = true;
     _hasServiceDetailsError = false;
@@ -501,6 +515,19 @@ class ServicesProvider with ChangeNotifier {
     final response = await _service.getServiceDetails(id);
     if (!response['error']) {
       _serviceDetails = response['data'] ?? {};
+
+      // ✅ DEBUG LOGGING
+      print('═══════════════════════════════════════════════════════════');
+      print('📸 SERVICE DETAILS - IMAGE DEBUG');
+      print('═══════════════════════════════════════════════════════════');
+      print('Service ID: ${_serviceDetails['_id']}');
+      print('Service Name: ${_serviceDetails['name']}');
+      print('Single Image (image): ${_serviceDetails['image']}');
+      print('Multiple Images (images): ${_serviceDetails['images']}');
+      print('Image Type: ${_serviceDetails['image'].runtimeType}');
+      print('Images Type: ${_serviceDetails['images'].runtimeType}');
+      print('═══════════════════════════════════════════════════════════');
+
       _serviceDetailsMessage =
           response['message'] ?? 'Service details fetched successfully';
     } else {
@@ -514,7 +541,7 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-// Add these fields near your other _myProducts fields
+  // Add these fields near your other _myProducts fields
   int _currentPage = 1;
   int _totalPages = 1;
   bool _isLoadingMore = false;
@@ -522,7 +549,7 @@ class ServicesProvider with ChangeNotifier {
   bool get isLoadingMore => _isLoadingMore;
   bool get hasMoreProducts => _currentPage < _totalPages;
 
-// Replace your existing fetchMyProducts with this
+  // Replace your existing fetchMyProducts with this
   Future<void> fetchMyProducts() async {
     _currentPage = 1;
     _myProducts = [];
@@ -546,7 +573,7 @@ class ServicesProvider with ChangeNotifier {
     notifyListeners();
   }
 
-// Add this new method
+  // Add this new method
   Future<void> loadMoreProducts() async {
     if (_isLoadingMore || !hasMoreProducts) return;
 

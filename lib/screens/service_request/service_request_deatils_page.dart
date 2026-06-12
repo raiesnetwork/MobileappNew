@@ -771,7 +771,7 @@ class _ServiceRequestDetailsScreenState
 
           if (files.isEmpty && _pendingFiles.isEmpty)
             _buildEmptyTab(Icons.attach_file_rounded, 'No attachments',
-                'Upload photos or files to add attachments')
+                'Upload photos, videos or files to add attachments')
           else ...[
             if (_pendingFiles.isNotEmpty) ...[
               Text('Pending Upload (${_pendingFiles.length})',
@@ -840,13 +840,13 @@ class _ServiceRequestDetailsScreenState
                   size: 28, color: _accent),
             ),
             const SizedBox(height: 10),
-            Text('Tap to add photos or files',
+            Text('Tap to add media or files',
                 style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
                     color: _accent)),
             const SizedBox(height: 4),
-            Text('Camera, gallery, or files',
+            Text('Photos, videos, or files',
                 style:
                 TextStyle(fontSize: 12, color: Colors.grey[500])),
           ],
@@ -855,6 +855,7 @@ class _ServiceRequestDetailsScreenState
     );
   }
 
+  // ✅ UPDATED: Added video options
   void _showFilePicker() {
     showModalBottomSheet(
       context: context,
@@ -879,6 +880,8 @@ class _ServiceRequestDetailsScreenState
                 style:
                 TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
             const SizedBox(height: 8),
+
+            // ✅ PHOTO OPTIONS
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
@@ -906,15 +909,56 @@ class _ServiceRequestDetailsScreenState
                 child: const Icon(Icons.photo_library_outlined,
                     color: Colors.purple, size: 20),
               ),
-              title: const Text('Choose from Gallery',
+              title: const Text('Choose Photo',
                   style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('Pick from photos',
+              subtitle: Text('Pick from gallery',
                   style: TextStyle(color: Colors.grey[500], fontSize: 12)),
               onTap: () async {
                 Navigator.pop(context);
                 await _pickImage(ImageSource.gallery);
               },
             ),
+
+            const Divider(height: 16),
+
+            // ✅ NEW: VIDEO OPTIONS
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.1),
+                    shape: BoxShape.circle),
+                child: const Icon(Icons.videocam_outlined,
+                    color: Colors.red, size: 20),
+              ),
+              title: const Text('Record Video',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text('Use camera to record (Max 5 mins)',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    shape: BoxShape.circle),
+                child: const Icon(Icons.video_library_outlined,
+                    color: Colors.orange, size: 20),
+              ),
+              title: const Text('Choose Video',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text('Pick from gallery',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+              onTap: () async {
+                Navigator.pop(context);
+                await _pickVideo(ImageSource.gallery);
+              },
+            ),
+
             const SizedBox(height: 8),
           ],
         ),
@@ -932,13 +976,48 @@ class _ServiceRequestDetailsScreenState
       if (picked != null) {
         setState(() => _pendingFiles.add(File(picked.path)));
         _tabController.animateTo(2); // Switch to attachments tab
+        _showSnack('Photo added successfully', Colors.green);
       }
     } catch (e) {
       if (mounted) _showSnack('Failed to pick image: $e', Colors.red);
     }
   }
 
-  // ✅ NEW _uploadFiles
+  // ✅ NEW: Pick video with validation
+  Future<void> _pickVideo(ImageSource source) async {
+    try {
+      final picked = await _picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(minutes: 5), // ✅ Max 5 minutes
+      );
+      if (picked != null) {
+        final file = File(picked.path);
+        final sizeInMB = file.lengthSync() / (1024 * 1024);
+
+        // ✅ Validate file size (max 100MB)
+        if (sizeInMB > 100) {
+          if (mounted) {
+            _showSnack(
+              'Video too large (${sizeInMB.toStringAsFixed(2)} MB). Max: 100MB',
+              Colors.red,
+            );
+          }
+          return;
+        }
+
+        setState(() => _pendingFiles.add(file));
+        _tabController.animateTo(2);
+        _showSnack(
+          'Video added (${sizeInMB.toStringAsFixed(2)} MB)',
+          Colors.green,
+        );
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Failed to pick video: $e', Colors.red);
+    }
+  }
+
+  // ✅ Updated _uploadFiles
   Future<void> _uploadFiles() async {
     if (_pendingFiles.isEmpty) return;
     setState(() => _isUploadingFiles = true);
@@ -991,26 +1070,36 @@ class _ServiceRequestDetailsScreenState
     }
   }
 
+  // ✅ Helper: Check if file is video
+  bool _isVideo(String fileName) {
+    return ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'm4v']
+        .any((ext) => fileName.toLowerCase().endsWith('.$ext'));
+  }
 
-  // ✅ Updated _buildFileItem with tappable thumbnail
+  // ✅ Updated _buildFileItem with video support
   Widget _buildFileItem(Map<String, dynamic> file, int index) {
     final originalName = file['fileName'] ?? 'Unknown file';
     final url = file['fileUrl'] ?? '';
     final uploadedBy = file['uploadedBy'] ?? '';
     final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp']
         .any((ext) => originalName.toLowerCase().endsWith('.$ext'));
+    final isVideo = _isVideo(originalName); // ✅ Check if video
 
     // ✅ Rename display name
     final ext = originalName.contains('.')
         ? originalName.split('.').last.toLowerCase()
         : '';
-    final displayName = isImage
+    final displayName = isVideo
+        ? 'Video $index${ext.isNotEmpty ? '.$ext' : ''}'
+        : isImage
         ? 'Image $index${ext.isNotEmpty ? '.$ext' : ''}'
         : 'File $index${ext.isNotEmpty ? '.$ext' : ''}';
 
     return GestureDetector(
       onTap: (isImage && url.isNotEmpty)
           ? () => _openFullscreen(url, displayName)
+          : (isVideo && url.isNotEmpty)
+          ? () => _openVideoPlayer(url, displayName) // ✅ Video player
           : url.isNotEmpty
           ? () async {
         try { await launchUrl(Uri.parse(url)); } catch (_) { _showSnack('Cannot open file', Colors.red); }
@@ -1031,21 +1120,43 @@ class _ServiceRequestDetailsScreenState
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: isImage ? Colors.blue.withOpacity(0.08) : Colors.grey[100],
+                color: isVideo
+                    ? Colors.red.withOpacity(0.08)
+                    : isImage
+                    ? Colors.blue.withOpacity(0.08)
+                    : Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: isImage && url.isNotEmpty
-                  ? ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.network(url,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        Icon(Icons.image_outlined, color: Colors.blue[400], size: 22)),
-              )
-                  : Icon(
-                isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
-                color: isImage ? Colors.blue[400] : Colors.grey[500],
-                size: 22,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  if ((isImage || isVideo) && url.isNotEmpty)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(url,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              Icon(isVideo ? Icons.videocam : Icons.image_outlined,
+                                  color: isVideo ? Colors.red[400] : Colors.blue[400], size: 22)),
+                    )
+                  else
+                    Icon(
+                      isVideo ? Icons.videocam : isImage ? Icons.image_outlined : Icons.insert_drive_file_outlined,
+                      color: isVideo ? Colors.red[400] : isImage ? Colors.blue[400] : Colors.grey[500],
+                      size: 22,
+                    ),
+                  // ✅ Video play button overlay
+                  if (isVideo)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      padding: const EdgeInsets.all(4),
+                      child: const Icon(Icons.play_arrow_rounded,
+                          color: Colors.white, size: 14),
+                    ),
+                ],
               ),
             ),
             const SizedBox(width: 12),
@@ -1053,7 +1164,7 @@ class _ServiceRequestDetailsScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(displayName,  // ✅ shows "Image 1.jpg" instead of "scaled100.jpg"
+                  Text(displayName,
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis),
@@ -1064,7 +1175,7 @@ class _ServiceRequestDetailsScreenState
               ),
             ),
             Icon(
-              isImage ? Icons.fullscreen_rounded : Icons.open_in_new_rounded,
+              isVideo ? Icons.play_circle_outline_rounded : isImage ? Icons.fullscreen_rounded : Icons.open_in_new_rounded,
               size: 18,
               color: Colors.grey[400],
             ),
@@ -1073,7 +1184,8 @@ class _ServiceRequestDetailsScreenState
       ),
     );
   }
-  // ✅ Add this new method anywhere in the class
+
+  // ✅ NEW: Open image fullscreen
   void _openFullscreen(String url, String name) {
     Navigator.push(context, MaterialPageRoute(
       builder: (_) => Scaffold(
@@ -1110,15 +1222,80 @@ class _ServiceRequestDetailsScreenState
     ));
   }
 
+  // ✅ NEW: Open video player fullscreen
+  void _openVideoPlayer(String url, String name) {
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          title: Text(name, style: const TextStyle(fontSize: 14)),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.open_in_new_rounded),
+              onPressed: () async {
+                try { await launchUrl(Uri.parse(url)); } catch (_) {}
+              },
+            ),
+          ],
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.grey[800],
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.play_arrow_rounded,
+                  size: 60,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Tap to play video',
+                  style: TextStyle(color: Colors.grey[400], fontSize: 14)),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                onPressed: () async {
+                  try {
+                    await launchUrl(Uri.parse(url));
+                  } catch (_) {
+                    _showSnack('Cannot open video', Colors.red);
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.play_arrow_rounded),
+                label: const Text('Open in Player'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ));
+  }
+
+  // ✅ Updated _buildPendingFile with video support
   Widget _buildPendingFile(int index, File file) {
     final name = file.path.split('/').last;
+    final isVideo = _isVideo(name);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.05),
+        color: isVideo ? Colors.red.withOpacity(0.05) : Colors.orange.withOpacity(0.05),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.orange.withOpacity(0.3)),
+        border: Border.all(
+          color: isVideo ? Colors.red.withOpacity(0.3) : Colors.orange.withOpacity(0.3),
+        ),
       ),
       child: Row(
         children: [
@@ -1127,15 +1304,35 @@ class _ServiceRequestDetailsScreenState
             height: 44,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
+              color: isVideo ? Colors.red.withOpacity(0.1) : null,
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.file(file,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Icon(
-                      Icons.image_outlined,
-                      color: Colors.orange[400],
-                      size: 22)),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (!isVideo)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(file,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Icon(
+                            Icons.image_outlined,
+                            color: Colors.orange[400],
+                            size: 22)),
+                  )
+                else
+                  Icon(Icons.videocam,
+                      color: Colors.red[400], size: 22),
+                if (isVideo)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      shape: BoxShape.circle,
+                    ),
+                    padding: const EdgeInsets.all(2),
+                    child: const Icon(Icons.play_arrow_rounded,
+                        color: Colors.white, size: 12),
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 12),
@@ -1148,9 +1345,10 @@ class _ServiceRequestDetailsScreenState
                         fontSize: 13, fontWeight: FontWeight.w600),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
-                Text('Ready to upload',
+                Text(isVideo ? 'Ready to upload (Video)' : 'Ready to upload',
                     style: TextStyle(
-                        fontSize: 11, color: Colors.orange[600])),
+                        fontSize: 11,
+                        color: isVideo ? Colors.red[600] : Colors.orange[600])),
               ],
             ),
           ),
@@ -1472,4 +1670,3 @@ class _ServiceRequestDetailsScreenState
     }
   }
 }
-

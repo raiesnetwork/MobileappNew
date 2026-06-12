@@ -101,17 +101,16 @@ class VideoCallProvider extends ChangeNotifier {
     _ensureRegisteredOnStartup();
   }
 
-  // ✅ Runs in background after initialize(). Polls until socket is connected
-  // then registers the user. Safe to call alongside onConnect — double
-  // registration is idempotent on the server.
   Future<void> _ensureRegisteredOnStartup() async {
-    const pollInterval = Duration(milliseconds: 300);
-    const maxWait = Duration(seconds: 15);
+    const pollInterval = Duration(milliseconds: 100);  // ✅ FASTER poll
+    const maxWait = Duration(seconds: 8);  // ✅ SHORTER timeout
     final deadline = DateTime.now().add(maxWait);
+
+    debugPrint('🔌 [VIDEO] Fast registration starting for $_currentUserId');
 
     while (_service.isConnected != true) {
       if (DateTime.now().isAfter(deadline)) {
-        debugPrint('⏰ [VIDEO] _ensureRegisteredOnStartup: timeout — socket did not connect');
+        debugPrint('⏰ [VIDEO] Fast registration: timeout — socket did not connect');
         return;
       }
       await Future.delayed(pollInterval);
@@ -119,18 +118,22 @@ class VideoCallProvider extends ChangeNotifier {
 
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
       _service.registerUser(_currentUserId!);
-      debugPrint('✅ [VIDEO] _ensureRegisteredOnStartup: registered $_currentUserId');
+      debugPrint('✅ [VIDEO] Fast registered $_currentUserId');
     }
+
+    // ✅ Wait for registration to complete
+    await Future.delayed(const Duration(milliseconds: 500));
   }
 
   void _setupListeners() {
-    // ✅ FIX: Service-level on*() now calls off() before on() — no stacking
     _service.onConnect(() {
       debugPrint('✅ Video socket connected');
       _isConnected = true;
       if (_currentUserId != null && _currentUserId!.isNotEmpty) {
         _service.registerUser(_currentUserId!);
       }
+      // ✅ FIX: Re-attach listeners on every reconnect
+      _reattachSocketListeners();
       _safeNotify();
     });
 
@@ -140,6 +143,12 @@ class VideoCallProvider extends ChangeNotifier {
       _safeNotify();
     });
 
+    // ✅ Initial listener attachment
+    _reattachSocketListeners();
+  }
+
+// ✅ NEW METHOD: Re-attach listeners on reconnect
+  void _reattachSocketListeners() {
     _service.onIncomingVideoCall((data) {
       debugPrint('📞 Incoming video call: $data');
       _currentRoomName   = data['roomName'];
@@ -167,7 +176,7 @@ class VideoCallProvider extends ChangeNotifier {
       _lastEndTime  = DateTime.now();
       _saveCallRecord(status: 'outgoing');
       _clearCallData();
-      _reRegisterUser(); // ✅ restore server registration so next incoming call works
+      _reRegisterUser();
       _safeNotify();
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == CallState.ended) { _callState = CallState.idle; _safeNotify(); }
@@ -177,11 +186,6 @@ class VideoCallProvider extends ChangeNotifier {
     _service.onVideoCallEnded((data) {
       debugPrint('📴 Call ended: $data');
 
-      // ✅ FIX: Server echoes video-call-ended back to the CALLER when they cancel.
-      // This echo can arrive AFTER a new incoming call has set callState=ringing,
-      // killing the new call. Guard with two checks:
-      // 1. Already idle → we handled it ourselves, ignore server echo
-      // 2. We self-ended within last 5s → echo from our own cancel, ignore it
       final selfEndedRecently = _selfEndedAt != null &&
           DateTime.now().difference(_selfEndedAt!).inSeconds < 5;
 
@@ -226,7 +230,7 @@ class VideoCallProvider extends ChangeNotifier {
       }
       _callEndedBeforeJoin = true;
       _clearCallData();
-      _reRegisterUser(); // ✅ restore server registration so next incoming call works
+      _reRegisterUser();
       _safeNotify();
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == CallState.ended) { _callState = CallState.idle; _safeNotify(); }
@@ -253,11 +257,15 @@ class VideoCallProvider extends ChangeNotifier {
   // next incoming call until they restart the app (which triggers onConnect
   // → registerUser). Calling this after every call end restores the mapping.
   // ════════════════════════════════════════════════════════════════════════
-
   void _reRegisterUser() {
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
-      _service.registerUser(_currentUserId!);
-      debugPrint('📝 [VIDEO] Re-registered after call end: $_currentUserId');
+      // ✅ FIX: Delay slightly to ensure socket is ready
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (_currentUserId != null) {
+          _service.registerUser(_currentUserId!);
+          debugPrint('📝 [VIDEO] Re-registered after call end: $_currentUserId');
+        }
+      });
     }
   }
 

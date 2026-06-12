@@ -160,6 +160,8 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         types = _tabDashTypes;
         break;
       default:
+
+
         return;
     }
     await context.read<NotificationProvider>().markTypesAsRead(types);

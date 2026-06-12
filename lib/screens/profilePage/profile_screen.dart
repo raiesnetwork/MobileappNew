@@ -221,10 +221,9 @@ class _ProfileScreenState extends State<ProfileScreen>
               tooltip: 'Edit Profile',
             ),
             _AppBarIconButton(
-              icon: Icons.logout_rounded,
-              onPressed: () =>
-                  _handleLogout(context, authProvider, profileProvider),
-              tooltip: 'Logout',
+              icon: Icons.more_vert_rounded,
+              onPressed: () => _showAccountMenu(context, authProvider, profileProvider),
+              tooltip: 'More Options',
             ),
             const SizedBox(width: 4),
           ],
@@ -837,6 +836,18 @@ class _ProfileScreenState extends State<ProfileScreen>
     }
   }
 
+  void _showAccountMenu(BuildContext context, AuthProvider authProvider,
+      ProfileProvider profileProvider) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _AccountMenuBottomSheet(
+        authProvider: authProvider,
+        profileProvider: profileProvider,
+      ),
+    );
+  }
+
   ImageProvider? _getProfileImage(Map<String, dynamic>? profile) {
     if (profile == null) return null;
     final raw = profile['profileImage']?.toString().trim() ?? '';
@@ -855,6 +866,360 @@ class _ProfileScreenState extends State<ProfileScreen>
       return NetworkImage(raw);
     }
     return null;
+  }
+}
+
+// ── Account Menu Bottom Sheet ────────────────────────────────────────────────
+
+class _AccountMenuBottomSheet extends StatelessWidget {
+  final AuthProvider authProvider;
+  final ProfileProvider profileProvider;
+
+  const _AccountMenuBottomSheet({
+    required this.authProvider,
+    required this.profileProvider,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 8),
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Account Options',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1A1A2E),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _MenuOption(
+              icon: Icons.delete_outline_rounded,
+              iconColor: const Color(0xFFEF4444),
+              iconBg: const Color(0xFFFFF5F5),
+              title: 'Delete Account',
+              subtitle: 'Request account deletion',
+              onTap: () {
+                Navigator.pop(context);
+                _showDeleteAccountDialog(context);
+              },
+            ),
+            const Divider(height: 1, indent: 72, color: Color(0xFFF0F0F8)),
+            _MenuOption(
+              icon: Icons.logout_rounded,
+              iconColor: const Color(0xFFFFA500),
+              iconBg: const Color(0xFFFFF3E0),
+              title: 'Sign Out',
+              subtitle: 'Log out from your account',
+              onTap: () {
+                Navigator.pop(context);
+                _showLogoutDialog(context);
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(BuildContext context) {
+    final reasonController = TextEditingController();
+    bool isLoading = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(children: [
+            Icon(Icons.warning_rounded, color: Color(0xFFEF4444)),
+            SizedBox(width: 8),
+            Text(
+              'Delete Account',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+            ),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "This action cannot be undone. All your data will be permanently deleted.",
+                  style: TextStyle(
+                    color: Color(0xFF5A5A7A),
+                    height: 1.5,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  "Please tell us why you want to delete your account:",
+                  style: TextStyle(
+                    color: Color(0xFF1A1A2E),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonController,
+                  minLines: 3,
+                  maxLines: 5,
+                  maxLength: 500,
+                  enabled: !isLoading,
+                  decoration: InputDecoration(
+                    hintText: "Enter your reason...",
+                    hintStyle: const TextStyle(color: Color(0xFFB0B0B0)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: Color(0xFF6B35E8),
+                        width: 2,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.all(12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.pop(ctx),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Color(0xFF9494AA)),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF4444),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              ),
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                if (reasonController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a reason'),
+                      backgroundColor: Color(0xFFEF4444),
+                    ),
+                  );
+                  return;
+                }
+
+                setState(() => isLoading = true);
+
+                final success = await profileProvider.deleteAccountRequest(
+                  reasonController.text.trim(),
+                );
+
+                if (!context.mounted) return;
+
+                setState(() => isLoading = false);
+
+                if (success) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Account deletion request submitted. We will process it shortly.',
+                      ),
+                      backgroundColor: Color(0xFF00B894),
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        profileProvider.deleteAccountError ??
+                            'Failed to submit deletion request',
+                      ),
+                      backgroundColor: const Color(0xFFEF4444),
+                    ),
+                  );
+                }
+              },
+              child: isLoading
+                  ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              )
+                  : const Text(
+                'Delete Account',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showLogoutDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.logout_rounded, color: Color(0xFFEF4444)),
+          SizedBox(width: 8),
+          Text(
+            'Sign Out',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+          ),
+        ]),
+        content: const Text(
+          "Are you sure you want to sign out?\nYou'll need to log in again.",
+          style: TextStyle(color: Color(0xFF5A5A7A), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF9494AA))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await authProvider.logout(context);
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (_) => const LoginScreen(),
+                  ),
+                      (route) => false,
+                );
+              }
+            },
+            child: const Text('Sign Out',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuOption extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBg;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _MenuOption({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBg,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: iconBg,
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(icon, color: iconColor, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF9494AA),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              Icons.chevron_right_rounded,
+              size: 22,
+              color: Color(0xFFCCCCDD),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

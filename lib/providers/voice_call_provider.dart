@@ -108,13 +108,15 @@ class VoiceCallProvider extends ChangeNotifier {
   // then registers the user. Safe to call alongside onConnect — double
   // registration is idempotent on the server.
   Future<void> _ensureRegisteredOnStartup() async {
-    const pollInterval = Duration(milliseconds: 300);
-    const maxWait = Duration(seconds: 15);
+    const pollInterval = Duration(milliseconds: 100);  // ✅ FASTER poll
+    const maxWait = Duration(seconds: 8);  // ✅ SHORTER timeout for first call
     final deadline = DateTime.now().add(maxWait);
+
+    debugPrint('🔌 [VOICE] Fast registration starting for $_currentUserId');
 
     while (_service.isConnected != true) {
       if (DateTime.now().isAfter(deadline)) {
-        debugPrint('⏰ [VOICE] _ensureRegisteredOnStartup: timeout — socket did not connect');
+        debugPrint('⏰ [VOICE] Fast registration: timeout — socket did not connect');
         return;
       }
       await Future.delayed(pollInterval);
@@ -122,8 +124,11 @@ class VoiceCallProvider extends ChangeNotifier {
 
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
       _service.registerUser(_currentUserId!);
-      debugPrint('✅ [VOICE] _ensureRegisteredOnStartup: registered ${_currentUserId}');
+      debugPrint('✅ [VOICE] Fast registered $_currentUserId immediately');
     }
+
+    // ✅ Wait for registration to complete
+    await Future.delayed(const Duration(milliseconds: 500));
   }
 
   void _setupListeners() {
@@ -137,6 +142,8 @@ class VoiceCallProvider extends ChangeNotifier {
         _service.registerUser(_currentUserId!);
         debugPrint('📝 Voice user registered: $_currentUserId');
       }
+      // ✅ FIX: Re-attach listeners on every reconnect
+      _reattachSocketListeners();
       _safeNotify();
     });
 
@@ -146,6 +153,14 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotify();
     });
 
+    // ✅ Initial listener attachment
+    _reattachSocketListeners();
+
+    debugPrint('✅ Voice call listeners set up');
+  }
+
+// ✅ NEW METHOD: Re-attach listeners on reconnect
+  void _reattachSocketListeners() {
     _service.onIncomingVoiceCall((data) {
       debugPrint('📞 PROVIDER: Incoming voice call: $data');
       _currentRoomName   = data['roomName'];
@@ -175,7 +190,7 @@ class VoiceCallProvider extends ChangeNotifier {
       _lastEndTime  = DateTime.now();
       _saveCallRecord(status: 'outgoing');
       _clearCallData();
-      _reRegisterUser(); // ✅ restore server registration so next incoming call works
+      _reRegisterUser();
       _safeNotify();
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == VoiceCallState.ended) { _callState = VoiceCallState.idle; _safeNotify(); }
@@ -185,17 +200,12 @@ class VoiceCallProvider extends ChangeNotifier {
     _service.onVoiceCallEnded((data) {
       debugPrint('📴 PROVIDER: Voice call ended: $data');
 
-      // ✅ FIX: Server echoes voice-call-ended back to the CALLER when they cancel.
-      // This echo can arrive AFTER a new incoming call has set callState=ringing,
-      // killing the new call. Guard with two checks:
-      // 1. Already idle → we handled it ourselves, ignore server echo
-      // 2. We self-ended within last 5s → echo from our own cancel, ignore it
       final selfEndedRecently = _selfEndedAt != null &&
           DateTime.now().difference(_selfEndedAt!).inSeconds < 5;
 
       if (_callState == VoiceCallState.idle || selfEndedRecently) {
         debugPrint('⚠️ [VOICE] Ignoring voice-call-ended — '
-            'idle=${ _callState == VoiceCallState.idle} selfEndedRecently=$selfEndedRecently');
+            'idle=${_callState == VoiceCallState.idle} selfEndedRecently=$selfEndedRecently');
         return;
       }
 
@@ -231,7 +241,7 @@ class VoiceCallProvider extends ChangeNotifier {
       _saveCallRecord(status: 'outgoing');
       _callEndedBeforeJoin = true;
       _clearCallData();
-      _reRegisterUser(); // ✅ restore server registration so next incoming call works
+      _reRegisterUser();
       _safeNotify();
       Future.delayed(const Duration(seconds: 3), () {
         if (_callState == VoiceCallState.ended) { _callState = VoiceCallState.idle; _safeNotify(); }
@@ -266,8 +276,6 @@ class VoiceCallProvider extends ChangeNotifier {
       _participants.removeWhere((p) => p['participantId'] == data['participantId']);
       _safeNotify();
     });
-
-    debugPrint('✅ Voice call listeners set up');
   }
 
   // ════════════════════════════════════════════════════════════════════════
@@ -280,8 +288,13 @@ class VoiceCallProvider extends ChangeNotifier {
 
   void _reRegisterUser() {
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
-      _service.registerUser(_currentUserId!);
-      debugPrint('📝 [VOICE] Re-registered after call end: $_currentUserId');
+      // ✅ FIX: Delay slightly to ensure socket is ready
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (_currentUserId != null) {
+          _service.registerUser(_currentUserId!);
+          debugPrint('📝 [VOICE] Re-registered after call end: $_currentUserId');
+        }
+      });
     }
   }
 

@@ -25,6 +25,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     _provider = context.read<VideoCallProvider>();
     _provider.addListener(_handleCallStateChange);
     _initAndStartRinging();
+
+    // ✅ FIX: Check state immediately (in case it changed while building)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _handleCallStateChange();
+    });
   }
 
   Future<void> _initAndStartRinging() async {

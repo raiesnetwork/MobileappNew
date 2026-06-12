@@ -155,6 +155,48 @@ class ProfileService {
     }
   }
 
+  // ── Request Account Deletion ───────────────────────────────────────────
+  Future<Map<String, dynamic>> deleteAccountRequest(String message) async {
+    try {
+      final body = {'message': message};
+      final response = await ApiService.post('/api/auth/delete-account-request', body);
+      ApiService.checkResponse(response);
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        return {
+          'error': false,
+          'message': decoded['message'] ?? 'Account deletion request submitted',
+          'data': decoded,
+        };
+      }
+      return _errorFrom(response.body, 'Failed to submit deletion request');
+    } catch (e) {
+      return _exception(e, 'submitting deletion request');
+    }
+  }
+
+  // // ── Permanently Delete Account ─────────────────────────────────────────
+  // Future<Map<String, dynamic>> deleteAccount(String message) async {
+  //   try {
+  //     final body = {'message': message};
+  //     final response = await ApiService.delete('/api/auth/delete-account', body);
+  //     ApiService.checkResponse(response);
+  //
+  //     if (response.statusCode == 200) {
+  //       final decoded = jsonDecode(response.body);
+  //       return {
+  //         'error': false,
+  //         'message': decoded['message'] ?? 'Account deleted successfully',
+  //         'data': decoded,
+  //       };
+  //     }
+  //     return _errorFrom(response.body, 'Failed to delete account');
+  //   } catch (e) {
+  //     return _exception(e, 'deleting account');
+  //   }
+  // }
+
   // ── Fetch Events ───────────────────────────────────────────────────────
   Future<Map<String, dynamic>> fetchEvents() async {
     try {

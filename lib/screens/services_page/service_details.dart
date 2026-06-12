@@ -155,6 +155,44 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
     );
   }
 
+  // ✅ NEW: Image Error Placeholder
+  Widget _imageErrorPlaceholder() {
+    return Container(
+      height: 260,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Primary.withOpacity(0.2),
+            Primary.withOpacity(0.05),
+          ],
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.image_not_supported_rounded,
+              size: 48,
+              color: Primary.withOpacity(0.5),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Image not available',
+              style: TextStyle(
+                color: Primary.withOpacity(0.6),
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ServicesProvider>(
@@ -282,67 +320,56 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
               : SingleChildScrollView(
             child: Column(
               children: [
-                // Hero Image Section
+                // ✅ Hero Image Section - FIXED
                 Container(
                   height: 260,
                   width: double.infinity,
                   child: Stack(
                     children: [
-                      // Image
+                      // ✅ NEW: Direct Network Image instead of base64
                       service['image'] != null && service['image'].toString().isNotEmpty
-                          ? () {
-                        String base64Image = service['image'].toString();
-                        if (base64Image.startsWith('data:image')) {
-                          base64Image = base64Image.replaceFirst(RegExp(r'data:image/[^;]+;base64,'), '');
-                        }
-                        try {
-                          final imageBytes = base64Decode(base64Image);
+                          ? Image.network(
+                        service['image'].toString(),
+                        height: 260,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
                           return Container(
-                            decoration: BoxDecoration(
-                              image: DecorationImage(
-                                image: MemoryImage(imageBytes),
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                  colors: [
-                                    Colors.transparent,
-                                    Colors.black.withOpacity(0.25),
-                                  ],
-                                ),
+                            height: 260,
+                            color: Colors.grey.shade100,
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                color: Primary,
+                                strokeWidth: 2,
                               ),
                             ),
                           );
-                        } catch (e) {
-                          return Container(
-                            color: Colors.grey[200],
-                            child: const Icon(
-                              Icons.broken_image,
-                              size: 64,
-                              color: Colors.grey,
+                        },
+                        errorBuilder: (context, error, stackTrace) {
+                          print('❌ Image load error: $error');
+                          return _imageErrorPlaceholder();
+                        },
+                      )
+                          : _imageErrorPlaceholder(),
+
+                      // Gradient overlay
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          height: 70,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.35),
+                                Colors.transparent,
+                              ],
                             ),
-                          );
-                        }
-                      }()
-                          : Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              Primary.withOpacity(0.3),
-                              Primary.withOpacity(0.1),
-                            ],
                           ),
-                        ),
-                        child: const Icon(
-                          Icons.image,
-                          size: 64,
-                          color: Colors.white,
                         ),
                       ),
                     ],
@@ -386,11 +413,6 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
 
                         const SizedBox(height: 15),
 
-
-
-
-
-
                         // Description Card
                         Container(
                           width: double.infinity,
@@ -430,7 +452,7 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
                           ),
                         ),
 
-                        const SizedBox(height:12),
+                        const SizedBox(height: 12),
 
                         // Information Grid
                         Column(
@@ -554,17 +576,13 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
                           ),
                         ),
 
-                        const SizedBox(height:15),
+                        const SizedBox(height: 15),
 
                         // Book Now Button
-                        // Replace the existing "Book Now" button in service_details.dart with this code:
-
-// Book Now Button
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: () {
-                              // Navigate to BookingScreen
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -606,9 +624,6 @@ class _ServiceDetailsScreenState extends State<ServiceDetailsScreen> {
                             ),
                           ),
                         ),
-
-// Don't forget to add this import at the top of service_details.dart:
-// import 'booking_screen.dart';
                       ],
                     ),
                   ),
