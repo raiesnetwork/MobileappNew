@@ -10,6 +10,7 @@ import 'package:ixes.app/api_service/user_api_service.dart';
 import 'package:ixes.app/screens/home/feedpage/sharepost_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 import '../../../models/post_model.dart';
 import '../../../providers/comment_provider.dart';
 import '../../../services/comment_service.dart';
@@ -111,15 +112,16 @@ class _FeedScreenState extends State<FeedScreen> {
     }
   }
 
+  /// ✅ FIX: Only clear and reload when explicitly refreshing (pull-to-refresh)
   Future<void> _refreshFeed() async {
     setState(() {
+      isLoading = true; // Use isLoading instead of clearing posts
       _currentPage = 0;
-      posts.clear();
-      _originalPosts.clear();
-      _allPostsCache.clear();
+      _allPostsCache.clear(); // Clear cache but keep posts visible
       _hasMorePosts = true;
       _isSearching = false;
       _currentSearchQuery = '';
+      _searchController.clear();
     });
 
     final provider = context.read<CommentProvider>();
@@ -138,6 +140,8 @@ class _FeedScreenState extends State<FeedScreen> {
       );
     }
 
+    if (!mounted) return;
+
     setState(() {
       final currentPosts =
       isCommunityFeed ? provider.communityPosts : provider.posts;
@@ -146,6 +150,8 @@ class _FeedScreenState extends State<FeedScreen> {
       _allPostsCache = List.from(currentPosts);
       _currentPage = 1;
       _hasMorePosts = currentPosts.length == _postsPerPage;
+      isLoading = false;
+      _isInitialized = true;
     });
   }
 
@@ -154,6 +160,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final existingPosts =
     isCommunityFeed ? provider.communityPosts : provider.posts;
 
+    // ✅ FIX: Use existing posts if available
     if (existingPosts.isNotEmpty && widget.postId == null) {
       setState(() {
         posts = List.from(existingPosts);
@@ -162,7 +169,7 @@ class _FeedScreenState extends State<FeedScreen> {
         _currentPage = (existingPosts.length / _postsPerPage).ceil();
         _hasMorePosts = existingPosts.length % _postsPerPage == 0;
         isLoading = false;
-        _isInitialized = true;
+        _isInitialized = true; // ✅ Mark as initialized
       });
       return;
     }
@@ -235,13 +242,12 @@ class _FeedScreenState extends State<FeedScreen> {
             _allPostsCache = [targetPost];
             _hasMorePosts = false;
             isLoading = false;
-            _isInitialized = true; // ✅ was missing
+            _isInitialized = true;
           });
           return;
         }
       }
 
-      // Post not found / deleted
       if (!mounted) return;
       setState(() {
         posts = [];
@@ -249,7 +255,7 @@ class _FeedScreenState extends State<FeedScreen> {
         _allPostsCache = [];
         _hasMorePosts = false;
         isLoading = false;
-        _isInitialized = true; // ✅ was missing — spinner never stopped
+        _isInitialized = true;
       });
 
       showDialog(
@@ -279,12 +285,11 @@ class _FeedScreenState extends State<FeedScreen> {
         _allPostsCache = [];
         _hasMorePosts = false;
         isLoading = false;
-        _isInitialized = true; // ✅ was missing
+        _isInitialized = true;
       });
     }
   }
 
-  // ✅ FIX: _loadMorePosts now has its own proper closing brace
   void _loadMorePosts() async {
     if (isLoadingMore || !_hasMorePosts || _isSearching) return;
 
@@ -331,7 +336,7 @@ class _FeedScreenState extends State<FeedScreen> {
       _hasMorePosts = newPosts.length >= _postsPerPage;
       isLoadingMore = false;
     });
-  } // ← THIS was the missing brace that caused all the errors
+  }
 
   void _performSearch(String query) {
     setState(() {
@@ -508,7 +513,10 @@ class _FeedScreenState extends State<FeedScreen> {
                   communityId: isCommunityFeed ? widget.communityId : null,
                 ),
               ),
-            ).then((_) => _refreshFeed());
+            ).then((_) {
+              // ✅ FIX: Only refresh, don't clear posts completely
+              _refreshFeed();
+            });
           },
           child: Container(
             width: 56,
@@ -707,6 +715,19 @@ class _FeedScreenState extends State<FeedScreen> {
     );
   }
 
+  /// ✅ NEW WIDGET: Handle video URLs directly
+  Widget _buildUrlVideo(String videoUrl, String postId) {
+    return Container(
+      width: double.infinity,
+      height: 300,
+      color: Colors.black,
+      child: VideoPlayerWidget(
+        key: ValueKey('video_$postId'),
+        videoUrl: videoUrl,
+      ),
+    );
+  }
+
   Widget _buildPostCard(BuildContext context, Post post) {
     final filteredImages = post.postImages
         .where((img) => img.isNotEmpty && !img.startsWith('/'))
@@ -715,6 +736,7 @@ class _FeedScreenState extends State<FeedScreen> {
     final isTargetPost = widget.postId != null && widget.postId == post.id;
 
     return Container(
+      key: ValueKey('post_${post.id}'),
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -956,14 +978,19 @@ class _FeedScreenState extends State<FeedScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
                       child: filteredImages.length == 1
-                          ? _buildSingleImage(filteredImages.first)
-                          : _buildImageCarousel(filteredImages),
+                          ? _buildSingleImage(filteredImages.first, postId: post.id)
+                          : _buildImageCarousel(filteredImages, postId: post.id),
                     ),
+                  // ✅ FIX: Handle both URL and base64 videos
                   if (post.postVideo != null && post.postVideo!.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),
                       child: ClipRRect(
-                        child: Base64VideoWidget(
+                        borderRadius: BorderRadius.circular(8),
+                        child: post.postVideo!.first.startsWith('http')
+                            ? _buildUrlVideo(post.postVideo!.first, post.id)
+                            : Base64VideoWidget(
+                            key: ValueKey('b64video_${post.id}'),
                             base64Video: post.postVideo!.first),
                       ),
                     ),
@@ -1015,7 +1042,6 @@ class _FeedScreenState extends State<FeedScreen> {
   }
 
   Widget _buildActionButtons(Post post) {
-    // ✅ Use the class-level processingLikes, not a local shadowing variable
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -1094,17 +1120,35 @@ class _FeedScreenState extends State<FeedScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            isLoading
-                ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    Colors.grey[600]!),
-              ),
-            )
-                : icon,
+            Stack(
+              alignment: Alignment.center,
+              children: [
+                // ✅ Always show the icon (displays optimistic like state immediately)
+                icon,
+                // ✅ Subtle loading overlay only during API call
+                if (isLoading)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.white.withOpacity(0.25),
+                      ),
+                      child: Center(
+                        child: SizedBox(
+                          width: 13,
+                          height: 13,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.grey[500]!,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             const SizedBox(width: 6),
             Text(
               label,
@@ -1126,12 +1170,23 @@ class _FeedScreenState extends State<FeedScreen> {
     isCommunityFeed ? provider.communityPosts : provider.posts;
     if (!postsList.any((p) => p.id == post.id)) return;
 
+    // ✅ Add to processing immediately (shows overlay)
     if (!processingLikes.contains(post.id)) {
       processingLikes.add(post.id);
+      setState(() {}); // Force rebuild to show overlay
+
+      // API call happens in background
       await provider.toggleLike(post.id);
-      processingLikes.remove(post.id);
+
+      // ✅ Remove from processing (hides overlay)
+      if (mounted) {
+        processingLikes.remove(post.id);
+        setState(() {});
+      }
     }
   }
+
+
 
   void _handleComment(Post post) async {
     await _showCommentsBottomSheet(post.id);
@@ -1200,7 +1255,8 @@ class _FeedScreenState extends State<FeedScreen> {
                                   comment.userName.isNotEmpty
                                       ? comment.userName
                                       : 'User';
-                                  final createdAt = DateTime.tryParse(
+                                  final createdAt =
+                                  DateTime.tryParse(
                                       comment.createdAt);
                                   final timeAgo = createdAt != null
                                       ? timeAgoFromDateTime(createdAt)
@@ -1221,7 +1277,8 @@ class _FeedScreenState extends State<FeedScreen> {
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment:
-                                            CrossAxisAlignment.start,
+                                            CrossAxisAlignment
+                                                .start,
                                             children: [
                                               Row(
                                                 children: [
@@ -1247,17 +1304,20 @@ class _FeedScreenState extends State<FeedScreen> {
                                         ),
                                         if (comment.userId.isNotEmpty &&
                                             comment.userId ==
-                                                provider.currentUserId)
+                                                provider
+                                                    .currentUserId)
                                           PopupMenuButton<String>(
                                             icon: Icon(Icons.more_vert,
                                                 size: 18,
-                                                color: Colors.grey[500]),
+                                                color:
+                                                Colors.grey[500]),
                                             onSelected: (value) async {
                                               FocusScope.of(context)
                                                   .unfocus();
                                               await Future.delayed(
                                                   const Duration(
-                                                      milliseconds: 100));
+                                                      milliseconds:
+                                                      100));
                                               if (value == 'edit') {
                                                 final editController =
                                                 TextEditingController(
@@ -1324,14 +1384,29 @@ class _FeedScreenState extends State<FeedScreen> {
                                                                 autofocus:
                                                                 false,
                                                                 decoration: InputDecoration(
-                                                                    hintText: 'Write your comment...',
-                                                                    hintStyle: TextStyle(color: Colors.grey[400]),
-                                                                    filled: true,
-                                                                    fillColor: Colors.grey[50],
-                                                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-                                                                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
-                                                                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.blue.shade400, width: 1.5)),
-                                                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12)),
+                                                                    hintText:
+                                                                    'Write your comment...',
+                                                                    hintStyle: TextStyle(
+                                                                        color: Colors.grey[400]),
+                                                                    filled:
+                                                                    true,
+                                                                    fillColor:
+                                                                    Colors
+                                                                        .grey[50],
+                                                                    border: OutlineInputBorder(
+                                                                        borderRadius: BorderRadius.circular(10),
+                                                                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                                                                    enabledBorder: OutlineInputBorder(
+                                                                        borderRadius: BorderRadius.circular(10),
+                                                                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                                                                    focusedBorder: OutlineInputBorder(
+                                                                        borderRadius: BorderRadius.circular(10),
+                                                                        borderSide: BorderSide(color: Colors.blue.shade400, width: 1.5)),
+                                                                    contentPadding: const EdgeInsets.symmetric(
+                                                                        horizontal:
+                                                                        14,
+                                                                        vertical:
+                                                                        12)),
                                                               ),
                                                               const SizedBox(
                                                                   height: 20),
@@ -1339,36 +1414,79 @@ class _FeedScreenState extends State<FeedScreen> {
                                                                 children: [
                                                                   Expanded(
                                                                     child: OutlinedButton(
-                                                                        onPressed: () => Navigator.pop(ctx),
-                                                                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), side: BorderSide(color: Colors.grey.shade300)),
-                                                                        child: Text('Cancel', style: TextStyle(color: Colors.grey[700]))),
+                                                                        onPressed: () =>
+                                                                            Navigator.pop(ctx),
+                                                                        style: OutlinedButton.styleFrom(
+                                                                            padding: const EdgeInsets.symmetric(
+                                                                                vertical:
+                                                                                12),
+                                                                            shape: RoundedRectangleBorder(
+                                                                                borderRadius: BorderRadius.circular(
+                                                                                    10)),
+                                                                            side: BorderSide(
+                                                                                color: Colors.grey.shade300)),
+                                                                        child: Text(
+                                                                            'Cancel',
+                                                                            style: TextStyle(
+                                                                                color: Colors.grey[700]))),
                                                                   ),
                                                                   const SizedBox(
                                                                       width:
                                                                       12),
                                                                   Expanded(
-                                                                    child: ElevatedButton(
-                                                                      onPressed: () async {
-                                                                        final trimmed = editController.text.trim();
-                                                                        if (trimmed.isEmpty) return;
-                                                                        Navigator.pop(ctx);
-                                                                        final p = context.read<CommentProvider>();
-                                                                        final success = await p.editComment(
-                                                                          context: context,
-                                                                          commentId: comment.id,
-                                                                          commentContent: trimmed,
-                                                                          postId: postId,
-                                                                          offset: 0,
-                                                                          limit: 10,
-                                                                          communityId: widget.communityId,
+                                                                    child:
+                                                                    ElevatedButton(
+                                                                      onPressed:
+                                                                          () async {
+                                                                        final trimmed =
+                                                                        editController.text.trim();
+                                                                        if (trimmed
+                                                                            .isEmpty)
+                                                                          return;
+                                                                        Navigator.pop(
+                                                                            ctx);
+                                                                        final p =
+                                                                        context.read<CommentProvider>();
+                                                                        final success =
+                                                                        await p.editComment(
+                                                                          context:
+                                                                          context,
+                                                                          commentId:
+                                                                          comment.id,
+                                                                          commentContent:
+                                                                          trimmed,
+                                                                          postId:
+                                                                          postId,
+                                                                          offset:
+                                                                          0,
+                                                                          limit:
+                                                                          10,
+                                                                          communityId:
+                                                                          widget.communityId,
                                                                         );
                                                                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                                                                          content: Text(success ? 'Comment updated successfully' : 'Failed to update comment'),
-                                                                          backgroundColor: success ? Colors.green : Colors.red,
+                                                                          content:
+                                                                          Text(success ? 'Comment updated successfully' : 'Failed to update comment'),
+                                                                          backgroundColor:
+                                                                          success
+                                                                              ? Colors.green
+                                                                              : Colors.red,
                                                                         ));
                                                                       },
-                                                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade600, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)), elevation: 0),
-                                                                      child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w600)),
+                                                                      style: ElevatedButton.styleFrom(
+                                                                          backgroundColor:
+                                                                          Colors.blue.shade600,
+                                                                          foregroundColor:
+                                                                          Colors.white,
+                                                                          padding: const EdgeInsets.symmetric(
+                                                                              vertical: 12),
+                                                                          shape: RoundedRectangleBorder(
+                                                                              borderRadius: BorderRadius.circular(10)),
+                                                                          elevation: 0),
+                                                                      child: const Text(
+                                                                          'Save',
+                                                                          style: TextStyle(
+                                                                              fontWeight: FontWeight.w600)),
                                                                     ),
                                                                   ),
                                                                 ],
@@ -1615,14 +1733,15 @@ class _FeedScreenState extends State<FeedScreen> {
       ),
     );
   }
-} // ← End of _FeedScreenState
+}
 
 // ─────────────────────────────────────────────
 // Top-level helpers (outside any class)
 // ─────────────────────────────────────────────
 
-Widget _buildSingleImage(String imageString) {
+Widget _buildSingleImage(String imageString, {required String postId}) {
   return Container(
+    key: ValueKey('img_$postId'),
     margin: const EdgeInsets.symmetric(horizontal: 16),
     child: ClipRRect(
       child: _isNetworkImage(imageString)
@@ -1643,8 +1762,8 @@ Widget _buildSingleImage(String imageString) {
   );
 }
 
-Widget _buildImageCarousel(List<String> images) {
-  return _ImageCarouselWithDots(images: images);
+Widget _buildImageCarousel(List<String> images, {required String postId}) {
+  return _ImageCarouselWithDots(key: ValueKey('carousel_$postId'), images: images);
 }
 
 bool _isNetworkImage(String imageString) {
@@ -1679,13 +1798,129 @@ bool _isNetworkImageRobust(String imageString) {
   }
 }
 
+// ✅ NEW: Video Player Widget for URL videos
+class VideoPlayerWidget extends StatefulWidget {
+  final String videoUrl;
+
+  const VideoPlayerWidget({
+    required this.videoUrl,
+    Key? key,
+  }) : super(key: key);
+
+  @override
+  State<VideoPlayerWidget> createState() => _VideoPlayerWidgetState();
+}
+
+class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
+  late VideoPlayerController _controller;
+  bool _isInitialized = false;
+  bool _hasError = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeVideo();
+  }
+
+  @override
+  void didUpdateWidget(covariant VideoPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      _controller.dispose();
+      setState(() {
+        _isInitialized = false;
+        _hasError = false;
+      });
+      _initializeVideo();
+    }
+  }
+
+  void _initializeVideo() async {
+    try {
+      _controller = VideoPlayerController.networkUrl(
+        Uri.parse(widget.videoUrl),
+      );
+      await _controller.initialize();
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      print('Error loading video: $e');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error, color: Colors.red, size: 32),
+            const SizedBox(height: 8),
+            const Text('Failed to load video'),
+          ],
+        ),
+      );
+    }
+
+    if (!_isInitialized) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    return Stack(
+      children: [
+        Center(
+          child: AspectRatio(
+            aspectRatio: _controller.value.aspectRatio,
+            child: VideoPlayer(_controller),
+          ),
+        ),
+        Center(
+          child: IconButton(
+            onPressed: () {
+              setState(() {
+                _controller.value.isPlaying
+                    ? _controller.pause()
+                    : _controller.play();
+              });
+            },
+            icon: Icon(
+              _controller.value.isPlaying
+                  ? Icons.pause_circle_filled
+                  : Icons.play_circle_filled,
+              color: Colors.white,
+              size: 50,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ─────────────────────────────────────────────
 // _ImageCarouselWithDots — top-level widget
 // ─────────────────────────────────────────────
 
 class _ImageCarouselWithDots extends StatefulWidget {
   final List<String> images;
-  const _ImageCarouselWithDots({required this.images});
+  const _ImageCarouselWithDots({super.key, required this.images});
 
   @override
   State<_ImageCarouselWithDots> createState() => _ImageCarouselWithDotsState();

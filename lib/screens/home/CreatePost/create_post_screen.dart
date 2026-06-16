@@ -68,6 +68,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     return base64Images;
   }
 
+  // ✅ NEW: Pick multiple images from gallery
   Future<void> _pickImages() async {
     try {
       final List<XFile> images = await _imagePicker.pickMultipleMedia(
@@ -79,10 +80,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       if (images.isNotEmpty) {
         final imageFiles = images
             .where((file) =>
-                file.path.toLowerCase().endsWith('.jpg') ||
-                file.path.toLowerCase().endsWith('.jpeg') ||
-                file.path.toLowerCase().endsWith('.png') ||
-                file.path.toLowerCase().endsWith('.gif'))
+        file.path.toLowerCase().endsWith('.jpg') ||
+            file.path.toLowerCase().endsWith('.jpeg') ||
+            file.path.toLowerCase().endsWith('.png') ||
+            file.path.toLowerCase().endsWith('.gif'))
             .take(5)
             .toList();
 
@@ -101,6 +102,31 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
+  // ✅ NEW: Capture single image from camera
+  Future<void> _captureImage() async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+        maxWidth: 1920,
+        maxHeight: 1080,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedImages = [image];
+          _selectedMediaType = 'image';
+          _selectedVideo = null;
+          _videoController?.dispose();
+          _videoController = null;
+        });
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error capturing image: $e');
+    }
+  }
+
+  // ✅ NEW: Pick video from gallery
   Future<void> _pickVideo() async {
     try {
       final XFile? video = await _imagePicker.pickVideo(
@@ -125,11 +151,139 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     }
   }
 
-// Remove these methods since we're no longer using base64:
-// - _convertToBase64()
-// - _convertImagesToBase64()
+  // ✅ NEW: Record video from camera
+  Future<void> _captureVideo() async {
+    try {
+      final XFile? video = await _imagePicker.pickVideo(
+        source: ImageSource.camera,
+        maxDuration: const Duration(minutes: 5),
+      );
 
-// Update the _createPost method to pass file paths instead of base64 strings:
+      if (video != null) {
+        final controller = VideoPlayerController.file(File(video.path));
+        await controller.initialize();
+
+        setState(() {
+          _selectedVideo = video;
+          _selectedMediaType = 'video';
+          _selectedImages.clear();
+          _videoController?.dispose();
+          _videoController = controller;
+        });
+      }
+    } catch (e) {
+      _showErrorSnackBar('Error capturing video: $e');
+    }
+  }
+
+  // ✅ NEW: Professional media picker modal
+  void _showMediaPickerModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            // Title
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Text(
+                'Select Media Source',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+              child: Text(
+                'Choose how you want to add media to your post',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+            // Media options grid
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
+                children: [
+                  _MediaOptionCard(
+                    icon: Icons.image,
+                    title: 'Gallery Images',
+                    subtitle: 'Pick from gallery',
+                    color: Colors.blue,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickImages();
+                    },
+                  ),
+                  _MediaOptionCard(
+                    icon: Icons.camera_alt,
+                    title: 'Camera Image',
+                    subtitle: 'Take a photo',
+                    color: Colors.green,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _captureImage();
+                    },
+                  ),
+                  _MediaOptionCard(
+                    icon: Icons.video_library,
+                    title: 'Gallery Video',
+                    subtitle: 'Pick from gallery',
+                    color: Colors.orange,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _pickVideo();
+                    },
+                  ),
+                  _MediaOptionCard(
+                    icon: Icons.videocam,
+                    title: 'Camera Video',
+                    subtitle: 'Record a video',
+                    color: Colors.red,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _captureVideo();
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _createPost() async {
     if (!_formKey.currentState!.validate()) return;
@@ -168,8 +322,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final success = await postProvider.createPost(
         mediaType: _selectedMediaType,
         postContent: content,
-        postImages: imagePaths,  // Pass file paths instead of base64
-        postVideo: videoPath,    // Pass file path instead of base64
+        postImages: imagePaths,
+        postVideo: videoPath,
         communityId: widget.communityId,
       );
 
@@ -310,8 +464,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                             color: const Color(0xFFF2F4F5),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: _showErrorMessage 
-                                  ? Colors.red.shade300 
+                              color: _showErrorMessage
+                                  ? Colors.red.shade300
                                   : Colors.transparent,
                             ),
                           ),
@@ -376,9 +530,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     ),
                   ),
 
-                  // const SizedBox(height: 20),
-
-                  // Media type selector with improved layout
+                  // ✅ UPDATED: Media Type Selector with single button
                   Card(
                     elevation: 2,
                     shadowColor: Colors.grey.withOpacity(0.1),
@@ -386,7 +538,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -399,61 +551,37 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Select media type to add content',
+                            'Select images or videos for your post',
                             style: TextStyle(
-                              fontSize: 10.sp,
+                              fontSize: 12,
                               color: Colors.grey[600],
                               fontWeight: FontWeight.w400,
                             ),
                           ),
-                          const SizedBox(height: 20),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _MediaTypeChip(
-                                  label: 'Text Only',
-                                  icon: Icons.text_fields,
-                                  selected: _selectedMediaType == 'content',
-                                  onSelected: () {
-                                    setState(() {
-                                      _selectedMediaType = 'content';
-                                      _selectedImages.clear();
-                                      _selectedVideo = null;
-                                      _videoController?.dispose();
-                                      _videoController = null;
-                                    });
-                                  },
+                          const SizedBox(height: 16),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _showMediaPickerModal,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Primary,
+                                foregroundColor: Colors.white,
+                                padding:
+                                const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                elevation: 0,
+                              ),
+                              icon: const Icon(Icons.add_photo_alternate),
+                              label: const Text(
+                                'Choose Media Source',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _MediaTypeChip(
-                                  label: 'Images',
-                                  icon: Icons.photo_library,
-                                  selected: _selectedMediaType == 'image',
-                                  onSelected: () {
-                                    setState(() {
-                                      _selectedMediaType = 'image';
-                                    });
-                                    _pickImages();
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: _MediaTypeChip(
-                                  label: 'Video',
-                                  icon: Icons.videocam,
-                                  selected: _selectedMediaType == 'video',
-                                  onSelected: () {
-                                    setState(() {
-                                      _selectedMediaType = 'video';
-                                    });
-                                    _pickVideo();
-                                  },
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
                         ],
                       ),
@@ -550,13 +678,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                     child: Stack(
                                       children: [
                                         ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius:
+                                          BorderRadius.circular(12),
                                           child: Image.file(
                                             File(_selectedImages[index].path),
                                             width: 120,
                                             height: 120,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) {
+                                            errorBuilder: (context, error,
+                                                stackTrace) {
                                               return Container(
                                                 width: 120,
                                                 height: 120,
@@ -576,7 +706,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                           child: GestureDetector(
                                             onTap: () => _removeImage(index),
                                             child: Container(
-                                              padding: const EdgeInsets.all(4),
+                                              padding:
+                                              const EdgeInsets.all(4),
                                               decoration: const BoxDecoration(
                                                 color: Colors.red,
                                                 shape: BoxShape.circle,
@@ -598,7 +729,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ],
 
                           // Selected video display
-                          if (_selectedVideo != null && _videoController != null) ...[
+                          if (_selectedVideo != null &&
+                              _videoController != null) ...[
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
@@ -627,7 +759,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                   if (_videoController!.value.isInitialized)
                                     Center(
                                       child: AspectRatio(
-                                        aspectRatio: _videoController!.value.aspectRatio,
+                                        aspectRatio: _videoController!
+                                            .value.aspectRatio,
                                         child: VideoPlayer(_videoController!),
                                       ),
                                     )
@@ -641,7 +774,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                                     child: IconButton(
                                       onPressed: () {
                                         setState(() {
-                                          if (_videoController!.value.isPlaying) {
+                                          if (_videoController!.value
+                                              .isPlaying) {
                                             _videoController!.pause();
                                           } else {
                                             _videoController!.play();
@@ -670,9 +804,8 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
                   // Post button with loader
                   Container(
-                    padding:  EdgeInsets.symmetric(horizontal: 15.w),
+                    padding: EdgeInsets.symmetric(horizontal: 15.w),
                     width: double.infinity,
-                    // height: 50,
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _createPost,
                       style: ElevatedButton.styleFrom(
@@ -687,35 +820,35 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                       ),
                       child: _isLoading
                           ? Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  // height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                const Text(
-                                  'Posting...',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 16,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : const Text(
-                              'Post',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                              AlwaysStoppedAnimation<Color>(
+                                Colors.white,
                               ),
                             ),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Posting...',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ],
+                      )
+                          : const Text(
+                        'Post',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
                     ),
                   ),
 
@@ -730,51 +863,71 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   }
 }
 
-class _MediaTypeChip extends StatelessWidget {
-  final String label;
+// ✅ NEW: Professional Media Option Card
+class _MediaOptionCard extends StatelessWidget {
   final IconData icon;
-  final bool selected;
-  final VoidCallback onSelected;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
 
-  const _MediaTypeChip({
-    required this.label,
+  const _MediaOptionCard({
     required this.icon,
-    required this.selected,
-    required this.onSelected,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onSelected,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        decoration: BoxDecoration(
-          color: selected ? Primary : Colors.grey[50],
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected ? Primary : Colors.grey[300]!,
-            width: 1.5,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[200]!, width: 1),
+            borderRadius: BorderRadius.circular(16),
+            color: Colors.grey[50],
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: selected ? Colors.white : Colors.grey[600],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: selected ? Colors.white : Colors.grey[600],
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  icon,
+                  color: color,
+                  size: 28,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w400,
+                  color: Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );

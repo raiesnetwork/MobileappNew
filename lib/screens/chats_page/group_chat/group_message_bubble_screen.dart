@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../../providers/group_provider.dart';
 import '../../../providers/video_call_provider.dart';
@@ -66,7 +67,12 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   String? _localAudioPath;
   StreamSubscription? _playerSub;
 
-  // ── AutomaticKeepAliveClientMixin ────────────────────────────────────────
+  // ── Shared-post inline video player ─────────────────────────────────
+  VideoPlayerController? _sharedVideoController;
+  bool _sharedVideoInitialized = false;
+  bool _sharedVideoPlaying = false;
+  bool _sharedVideoError = false;
+
   @override
   bool get wantKeepAlive => _isSharedPost || _isAudio;
 
@@ -79,7 +85,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     _parseMessage();
     if (_isSharedPost) {
       _cachedPostData = _resolvePostData();
-      // If we couldn't resolve real post data, demote to forwarded text
       if (_cachedPostData == null) {
         _isSharedPost = false;
         _isForwardedMsg = widget.message['forwerd'] == true;
@@ -89,6 +94,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       _initPlayer();
       final ms = widget.message['audioDurationMs'];
       if (ms is int && ms > 0) _duration = Duration(milliseconds: ms);
+    }
+
+    // Pre-init shared post video
+    if (_isSharedPost && _cachedPostData != null) {
+      final videoUrl = _extractVideoUrl(_cachedPostData!);
+      if (videoUrl != null && videoUrl.isNotEmpty) {
+        _initSharedVideo(videoUrl);
+      }
     }
   }
 
@@ -100,6 +113,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       _player!.pausePlayer().catchError((_) {});
       _isPlaying = false;
     }
+    _sharedVideoController?.pause();
+    _sharedVideoPlaying = false;
     super.deactivate();
   }
 
@@ -111,68 +126,224 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       _player!.closePlayer().catchError((_) {});
       _player = null;
     }
+    _sharedVideoController?.pause();
+    _sharedVideoController?.dispose();
+    _sharedVideoController = null;
     super.dispose();
   }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  VIDEO HELPERS
+  // ════════════════════════════════════════════════════════════════════════
+
+  /// Extract first usable video URL from any post-data map.
+  String? _extractVideoUrl(Map<String, dynamic> postData) {
+    for (final key in [
+      'postVideo',
+      'video',
+      'videos',
+      'videoUrl',
+      'mediaVideo',
+    ]) {
+      final v = postData[key];
+      if (v is List && v.isNotEmpty) {
+        final first = v.first?.toString() ?? '';
+        if (first.isNotEmpty) return _normalizeSingleUrl(first);
+      }
+      if (v is String && v.isNotEmpty) return _normalizeSingleUrl(v);
+    }
+    return null;
+  }
+
+  Future<void> _initSharedVideo(String videoUrl) async {
+    try {
+      VideoPlayerController ctrl;
+      if (videoUrl.startsWith('http://') || videoUrl.startsWith('https://')) {
+        ctrl = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      } else {
+        return; // base64 not supported via URL controller
+      }
+      await ctrl.initialize();
+      if (!mounted) {
+        ctrl.dispose();
+        return;
+      }
+      setState(() {
+        _sharedVideoController = ctrl;
+        _sharedVideoInitialized = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _sharedVideoError = true);
+    }
+  }
+
+  void _toggleSharedVideo() {
+    if (_sharedVideoController == null || !_sharedVideoInitialized) return;
+    setState(() {
+      if (_sharedVideoPlaying) {
+        _sharedVideoController!.pause();
+        _sharedVideoPlaying = false;
+      } else {
+        _sharedVideoController!.play();
+        _sharedVideoPlaying = true;
+      }
+    });
+  }
+
+  // ── Inline video widget ───────────────────────────────────────────────
+  Widget _buildSharedPostVideo() {
+    if (_sharedVideoError) {
+      return Container(
+        height: 150,
+        decoration: BoxDecoration(
+          color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.videocam_off,
+                  size: 32,
+                  color: _isMe ? Colors.white38 : Colors.grey[400]),
+              const SizedBox(height: 6),
+              Text('Video unavailable',
+                  style: TextStyle(
+                      color: _isMe ? Colors.white60 : Colors.grey[500],
+                      fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (!_sharedVideoInitialized || _sharedVideoController == null) {
+      return Container(
+        height: 150,
+        decoration: BoxDecoration(
+          color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            valueColor: AlwaysStoppedAnimation<Color>(
+                _isMe ? Colors.white70 : Colors.grey[600]!),
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: _toggleSharedVideo,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: AspectRatio(
+          aspectRatio:
+          _sharedVideoController!.value.aspectRatio.clamp(0.5, 2.5),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              VideoPlayer(_sharedVideoController!),
+              Center(
+                child: AnimatedOpacity(
+                  opacity: _sharedVideoPlaying ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.play_arrow,
+                        color: Colors.white, size: 28),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 6,
+                left: 6,
+                child: Container(
+                  padding:
+                  const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.videocam, size: 11, color: Colors.white),
+                      SizedBox(width: 3),
+                      Text('Video',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  SHARE
+  // ════════════════════════════════════════════════════════════════════════
   Future<void> _shareMessage() async {
     try {
-      // ── Share FILE / IMAGE ───────────────────────────────────────
       if (_isFile || _isAudio) {
         String? filePath;
         String? fileUrl;
 
         if (_isAudio) {
           filePath = widget.message['localFilePath']?.toString();
-          fileUrl  = widget.message['audioUrl']?.toString() ?? '';
+          fileUrl = widget.message['audioUrl']?.toString() ?? '';
         } else {
           filePath = widget.message['localFilePath']?.toString();
-          fileUrl  = widget.message['fileUrl']?.toString() ?? '';
+          fileUrl = widget.message['fileUrl']?.toString() ?? '';
         }
 
-        // Use local file if available
-        if (filePath != null && filePath.isNotEmpty && File(filePath).existsSync()) {
+        if (filePath != null &&
+            filePath.isNotEmpty &&
+            File(filePath).existsSync()) {
           await Share.shareXFiles([XFile(filePath)]);
-
           return;
         }
 
-        // Download from URL then share
-        if (fileUrl.isNotEmpty) {
+        if (fileUrl != null && fileUrl.isNotEmpty) {
           if (!fileUrl.startsWith('http')) {
             fileUrl = 'https://api.ixes.ai/$fileUrl';
           }
-
-          // Show loading
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Row(children: [
-                  SizedBox(
-                    width: 18, height: 18,
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Row(children: [
+                SizedBox(
+                    width: 18,
+                    height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  ),
-                  SizedBox(width: 12),
-                  Text('Preparing file to share...'),
-                ]),
-                duration: Duration(seconds: 10),
-              ),
-            );
+                        strokeWidth: 2, color: Colors.white)),
+                SizedBox(width: 12),
+                Text('Preparing file to share...'),
+              ]),
+              duration: Duration(seconds: 10),
+            ));
           }
-
           try {
-            final tmpDir  = await getTemporaryDirectory();
-            final fileName = widget.message['fileName']?.toString()
-                ?? 'file_${DateTime.now().millisecondsSinceEpoch}';
+            final tmpDir = await getTemporaryDirectory();
+            final fileName = widget.message['fileName']?.toString() ??
+                'file_${DateTime.now().millisecondsSinceEpoch}';
             final savePath = '${tmpDir.path}/$fileName';
-
-            // Use cached file if exists
             if (!File(savePath).existsSync()) {
               final response = await http.get(Uri.parse(fileUrl));
               await File(savePath).writeAsBytes(response.bodyBytes);
             }
-
             if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
-
             await Share.shareXFiles([XFile(savePath)]);
           } catch (e) {
             if (mounted) {
@@ -187,11 +358,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         return;
       }
 
-      // ── Share TEXT ───────────────────────────────────────────────
       final text = widget.message['text']?.toString() ?? '';
-      if (text.isNotEmpty) {
-        await Share.share(text);
-      }
+      if (text.isNotEmpty) await Share.share(text);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -201,14 +369,16 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       }
     }
   }
+
   // ════════════════════════════════════════════════════════════════════════
-  //  PARSE MESSAGE — single source of truth, strict detection
+  //  PARSE MESSAGE
   // ════════════════════════════════════════════════════════════════════════
   void _parseMessage() {
     final rawSender = widget.message['senderId'];
     if (rawSender is Map<String, dynamic>) {
       _senderMap = rawSender;
-      _senderName = rawSender['profile']?['name']?.toString() ?? 'Unknown';
+      _senderName =
+          rawSender['profile']?['name']?.toString() ?? 'Unknown';
       _senderId = rawSender['_id']?.toString() ?? '';
     } else {
       _senderMap = null;
@@ -216,71 +386,73 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       _senderId = rawSender?.toString() ?? '';
     }
 
-    _isMe = widget.currentUserId != null && widget.currentUserId == _senderId;
+    _isMe =
+        widget.currentUserId != null && widget.currentUserId == _senderId;
     _isAudio = widget.message['isAudio'] == true;
     _isFile = widget.message['isFile'] == true ||
         (widget.message['fileUrl'] != null &&
             widget.message['fileUrl'].toString().isNotEmpty &&
             !_isAudio);
 
-    // Replace the _isSharedPost detection block inside _parseMessage():
-
     final sharedPost = widget.message['sharedPost'];
     final hasValidSharedPost = sharedPost is Map &&
         sharedPost.isNotEmpty &&
         sharedPost['_id'] != null &&
         sharedPost['_id'].toString().length == 24 &&
-        RegExp(r'^[a-f0-9]{24}$').hasMatch(sharedPost['_id'].toString());
+        RegExp(r'^[a-f0-9]{24}$')
+            .hasMatch(sharedPost['_id'].toString());
 
     final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
 
-// ── non-feed shares (announcement, campaign, service) ──────
     final isNonFeedShare = widget.message['forwerd'] == true &&
         fUrl.isNotEmpty &&
         (fUrl.contains('/announcements') ||
             fUrl.contains('/campaign/') ||
             fUrl.contains('/services/'));
 
-    // ✅ NEW: Detect forwarded campaigns even when forwerdUrl is empty
     final imageForward = widget.message['image']?.toString() ?? '';
     final isForwardedCampaign = widget.message['forwerd'] == true &&
         fUrl.isEmpty &&
         imageForward.contains('campaign');
 
-// ── feed shares (valid post ID at end of URL) ───────────────
     String extractedPostId = '';
     if (fUrl.isNotEmpty && !isNonFeedShare) {
       final segment = fUrl.split('/').last.trim();
-      if (segment.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
+      if (segment.length == 24 &&
+          RegExp(r'^[a-f0-9]{24}$').hasMatch(segment)) {
         extractedPostId = segment;
       }
     }
 
     final forwardedFrom = widget.message['forwardedFrom'];
-    final hasForwardedFrom = forwardedFrom is Map && forwardedFrom.isNotEmpty;
+    final hasForwardedFrom =
+        forwardedFrom is Map && forwardedFrom.isNotEmpty;
 
     _isSharedPost = !_isAudio &&
         !_isFile &&
         (hasValidSharedPost ||
             isNonFeedShare ||
-            isForwardedCampaign ||  // ✅ ADD THIS!
-            (widget.message['forwerd'] == true && extractedPostId.isNotEmpty) ||
+            isForwardedCampaign ||
+            (widget.message['forwerd'] == true &&
+                extractedPostId.isNotEmpty) ||
             hasForwardedFrom);
 
-    _isForwardedMsg = widget.message['forwerd'] == true && !_isSharedPost;
+    _isForwardedMsg =
+        widget.message['forwerd'] == true && !_isSharedPost;
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  RESOLVE POST DATA
+  //  RESOLVE POST DATA — now carries video fields
   // ════════════════════════════════════════════════════════════════════════
   Map<String, dynamic>? _resolvePostData() {
-    // ── Non-feed share (announcement / campaign / service) ──────
     final fUrl = widget.message['forwerdUrl']?.toString() ?? '';
-    if (widget.message['forwerd'] == true && fUrl.isNotEmpty &&
+
+    // Non-feed share
+    if (widget.message['forwerd'] == true &&
+        fUrl.isNotEmpty &&
         (fUrl.contains('/announcements') ||
             fUrl.contains('/campaign/') ||
             fUrl.contains('/services/'))) {
-
       String shareType = 'announcement';
       if (fUrl.contains('/campaign/')) shareType = 'campaign';
       if (fUrl.contains('/services/')) shareType = 'service';
@@ -292,26 +464,25 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         'forwerdUrl': fUrl,
         'text': widget.message['text']?.toString() ?? '',
         'images': image.isNotEmpty ? [_normalizeSingleUrl(image)] : [],
-        'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+        'postVideo': _extractRawVideoFromMessage(),
+        'authorName':
+        widget.message['forwerdMessage']?.toString() ?? 'Shared',
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
       };
     }
 
-    // ✅ FIXED: Check forwarded campaign when forwerdUrl is empty
-// Handles both: image URL contains 'campaign' OR message is a re-forward of a campaign
     final collectedImageUrl = widget.message['image']?.toString() ?? '';
     final forwardedFromCheck = widget.message['forwardedFrom'];
-    final isReForward = forwardedFromCheck is Map && forwardedFromCheck.isNotEmpty;
+    final isReForward =
+        forwardedFromCheck is Map && forwardedFromCheck.isNotEmpty;
 
-    if (widget.message['forwerd'] == true && fUrl.isEmpty && collectedImageUrl.isNotEmpty) {
-      // Case 1: image URL contains 'campaign' keyword (first forward)
+    if (widget.message['forwerd'] == true &&
+        fUrl.isEmpty &&
+        collectedImageUrl.isNotEmpty) {
       final isCampaignUrl = collectedImageUrl.contains('campaign') &&
           !collectedImageUrl.startsWith('data:image/');
-
-      // Case 2: re-forwarded message (forwardedFrom present) with any image
-      // The original was a campaign, image is now base64 — still treat as campaign
       final isCampaignReforward = isReForward &&
           widget.message['forwerdMessage']?.toString().isNotEmpty == true;
 
@@ -322,7 +493,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           'forwerdUrl': '',
           'text': widget.message['text']?.toString() ?? '',
           'images': [_normalizeSingleUrl(collectedImageUrl)],
-          'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+          'postVideo': _extractRawVideoFromMessage(),
+          'authorName':
+          widget.message['forwerdMessage']?.toString() ?? 'Shared',
           'authorProfile': '',
           'likesCount': 0,
           'commentsCount': 0,
@@ -330,44 +503,63 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       }
     }
 
-    // Priority 1: real sharedPost object with valid MongoDB ObjectId
+    // Real sharedPost object
     final sharedPost = widget.message['sharedPost'];
     if (sharedPost is Map && sharedPost.isNotEmpty) {
       final id = sharedPost['_id']?.toString() ?? '';
       if (id.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
         final post = Map<String, dynamic>.from(sharedPost as Map);
 
+        // ── images ──
         List<dynamic> images = [];
-        for (final key in ['images', 'image', 'media', 'attachments',
-          'postImages', 'photos', 'imageUrl']) {
+        for (final key in [
+          'images', 'image', 'media', 'attachments',
+          'postImages', 'photos', 'imageUrl'
+        ]) {
           final v = post[key];
           if (v is List && v.isNotEmpty) {
             final filtered = v
                 .where((e) => e != null && e.toString().isNotEmpty)
                 .toList();
-            if (filtered.isNotEmpty) { images = filtered; break; }
+            if (filtered.isNotEmpty) {
+              images = filtered;
+              break;
+            }
           }
-          if (v is String && v.isNotEmpty) { images = [v]; break; }
+          if (v is String && v.isNotEmpty) {
+            images = [v];
+            break;
+          }
         }
-
         if (images.isEmpty) {
           final img = widget.message['image']?.toString() ?? '';
           if (img.isNotEmpty && img != 'null') images = [img];
         }
-
         images = _normalizeImages(images);
         post['images'] = images;
 
-        if (post['authorName'] == null || post['authorName'].toString().isEmpty) {
-          post['authorName'] = widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
+        // ── video: preserve from sharedPost, fallback to message ──
+        if (!_hasVideoKey(post)) {
+          final rawVideo = _extractRawVideoFromMessage();
+          if (rawVideo != null) post['postVideo'] = rawVideo;
+        } else {
+          post['postVideo'] = _normalizeVideoField(post['postVideo'] ??
+              post['video'] ??
+              post['videos'] ??
+              post['videoUrl']);
+        }
+
+        if (post['authorName'] == null ||
+            post['authorName'].toString().isEmpty) {
+          post['authorName'] =
+              widget.message['forwerdMessage']?.toString() ?? 'Shared Post';
         }
         return post;
       }
     }
 
-    // Priority 2: forwerdUrl with valid post ID
+    // forwerdUrl with post ID
     String postId = '';
-
     if (fUrl.isNotEmpty && fUrl != 'null') {
       final segment = fUrl.split('/').last.trim();
       if (segment.length == 24 &&
@@ -376,31 +568,20 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       }
     }
 
-    // Priority 3: forwardedFrom
+    // forwardedFrom
     final forwardedFrom = widget.message['forwardedFrom'];
-
-    // 🔍 DEBUG: Log the forwarded message data
-    if (forwardedFrom is Map && forwardedFrom.isNotEmpty) {
-      print('🔍 [DEBUG] SECOND FORWARD - forwardedFrom message:');
-      print('   - text: ${widget.message['text']}');
-      print('   - image start: ${widget.message['image']?.toString().substring(0, 100)}...');
-      print('   - forwerdMessage: ${widget.message['forwerdMessage']}');
-      print('   - forwerd: ${widget.message['forwerd']}');
-      print('   - forwerdUrl: ${widget.message['forwerdUrl']}');
-      print('   - All keys: ${widget.message.keys.toList()}');
-    }
-
     if (postId.isEmpty && forwardedFrom is Map) {
       postId = forwardedFrom['messageId']?.toString() ?? '';
-      if (postId.length != 24 || !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
+      if (postId.length != 24 ||
+          !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
         postId = '';
       }
     }
 
-    // Collect remaining image for feed posts
     String imageUrl = '';
-    for (final key in ['image', 'forwerdImage', 'postImage',
-      'sharedImage', 'forwerdImageUrl']) {
+    for (final key in [
+      'image', 'forwerdImage', 'postImage', 'sharedImage', 'forwerdImageUrl'
+    ]) {
       final val = widget.message[key]?.toString() ?? '';
       if (val.isNotEmpty && val != 'null') {
         imageUrl = _normalizeSingleUrl(val);
@@ -410,9 +591,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     if (postId.isEmpty && imageUrl.isEmpty) return null;
 
-// ✅ Safety net: if image looks like a campaign base64 re-forward, preserve shareType
     final forwardedFromFinal = widget.message['forwardedFrom'];
-    final isReForwardFinal = forwardedFromFinal is Map && forwardedFromFinal.isNotEmpty;
+    final isReForwardFinal =
+        forwardedFromFinal is Map && forwardedFromFinal.isNotEmpty;
     if (isReForwardFinal &&
         imageUrl.isNotEmpty &&
         widget.message['forwerd'] == true &&
@@ -423,7 +604,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         'forwerdUrl': '',
         'text': widget.message['text']?.toString() ?? '',
         'images': [imageUrl],
-        'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared',
+        'postVideo': _extractRawVideoFromMessage(),
+        'authorName':
+        widget.message['forwerdMessage']?.toString() ?? 'Shared',
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
@@ -434,16 +617,59 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       '_id': postId,
       'text': widget.message['text']?.toString() ?? '',
       'images': imageUrl.isNotEmpty ? [imageUrl] : [],
-      'authorName': widget.message['forwerdMessage']?.toString() ?? 'Shared Post',
+      'postVideo': _extractRawVideoFromMessage(),
+      'authorName':
+      widget.message['forwerdMessage']?.toString() ?? 'Shared Post',
       'authorProfile': '',
       'likesCount': 0,
       'commentsCount': 0,
     };
   }
 
+  // ── Video field helpers ───────────────────────────────────────────────
 
+  bool _hasVideoKey(Map<String, dynamic> data) {
+    for (final k in ['postVideo', 'video', 'videos', 'videoUrl']) {
+      final v = data[k];
+      if (v != null &&
+          ((v is String && v.isNotEmpty) ||
+              (v is List && v.isNotEmpty))) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-// ── URL helpers ──────────────────────────────────────────────────────────
+  /// Pull raw video value from the top-level message map.
+  dynamic _extractRawVideoFromMessage() {
+    for (final k in ['postVideo', 'video', 'videos', 'videoUrl']) {
+      final v = widget.message[k];
+      if (v != null &&
+          ((v is String && v.isNotEmpty) ||
+              (v is List && v.isNotEmpty))) {
+        return _normalizeVideoField(v);
+      }
+    }
+    return null;
+  }
+
+  /// Normalises a raw video value to a List<String> with proper URLs.
+  dynamic _normalizeVideoField(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is String && raw.isNotEmpty) {
+      return [_normalizeSingleUrl(raw)];
+    }
+    if (raw is List) {
+      final result = raw
+          .where((e) => e != null && e.toString().isNotEmpty)
+          .map((e) => _normalizeSingleUrl(e.toString()))
+          .toList();
+      return result.isEmpty ? null : result;
+    }
+    return null;
+  }
+
+  // ── URL helpers ───────────────────────────────────────────────────────
   List<dynamic> _normalizeImages(List<dynamic> raw) {
     return raw.map((img) {
       final s = img.toString().trim();
@@ -453,8 +679,10 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   }
 
   String _normalizeSingleUrl(String s) {
-    if (s.startsWith('http://') || s.startsWith('https://') ||
-        s.startsWith('data:image/')) return s;
+    if (s.startsWith('http://') ||
+        s.startsWith('https://') ||
+        s.startsWith('data:image/') ||
+        s.startsWith('data:video/')) return s;
     return 'https://api.ixes.ai/$s';
   }
 
@@ -464,7 +692,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   bool _hasValidLinkMeta() {
     final meta = widget.message['linkMeta'];
     if (meta == null || meta is! Map) return false;
-    // Server sends linkMeta with all empty strings — reject that
     final url = meta['url']?.toString().trim() ?? '';
     final title = meta['title']?.toString().trim() ?? '';
     return url.isNotEmpty || title.isNotEmpty;
@@ -515,37 +742,28 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                 children: [
                   if (meta['title'] != null &&
                       meta['title'].toString().isNotEmpty)
-                    Text(
-                      meta['title'],
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: _isMe ? Colors.white : Colors.black,
-                        fontSize: 14,
-                      ),
-                    ),
+                    Text(meta['title'],
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _isMe ? Colors.white : Colors.black,
+                            fontSize: 14)),
                   const SizedBox(height: 4),
                   if (meta['description'] != null &&
                       meta['description'].toString().isNotEmpty)
-                    Text(
-                      meta['description'],
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _isMe ? Colors.white70 : Colors.black87,
-                        fontSize: 13,
-                      ),
-                    ),
+                    Text(meta['description'],
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            color: _isMe ? Colors.white70 : Colors.black87,
+                            fontSize: 13)),
                   const SizedBox(height: 6),
-                  Text(
-                    meta['url'] ?? '',
-                    style: TextStyle(
-                      color: _isMe
-                          ? Colors.lightBlueAccent
-                          : Colors.blue[700],
-                      decoration: TextDecoration.underline,
-                      fontSize: 12,
-                    ),
-                  ),
+                  Text(meta['url'] ?? '',
+                      style: TextStyle(
+                          color: _isMe
+                              ? Colors.lightBlueAccent
+                              : Colors.blue[700],
+                          decoration: TextDecoration.underline,
+                          fontSize: 12)),
                 ],
               ),
             ),
@@ -568,10 +786,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     final Map<String, dynamic> userProfile = {
       '_id': userId,
-      'profile': {
-        'name': name,
-        'profileImage': imageUrl ?? '',
-      },
+      'profile': {'name': name, 'profileImage': imageUrl ?? ''},
     };
 
     showModalBottomSheet(
@@ -591,9 +806,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2)),
             ),
             const SizedBox(height: 24),
             Container(
@@ -618,43 +832,32 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               child: CircleAvatar(
                 radius: 44,
                 backgroundColor: Colors.transparent,
-                backgroundImage: (imageUrl != null &&
-                    imageUrl.isNotEmpty &&
-                    imageUrl != 'null')
+                backgroundImage:
+                (imageUrl != null && imageUrl.isNotEmpty && imageUrl != 'null')
                     ? _imageProvider(imageUrl)
                     : null,
-                child: (imageUrl == null ||
-                    imageUrl.isEmpty ||
-                    imageUrl == 'null')
+                child: (imageUrl == null || imageUrl.isEmpty || imageUrl == 'null')
                     ? Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold))
                     : null,
               ),
             ),
             const SizedBox(height: 14),
-            Text(
-              name,
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF1A1D2E),
-              ),
-            ),
+            Text(name,
+                style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF1A1D2E))),
             const SizedBox(height: 6),
-            Text(
-              'Group Member',
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.grey[500],
-                fontWeight: FontWeight.w400,
-              ),
-            ),
+            Text('Group Member',
+                style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.grey[500],
+                    fontWeight: FontWeight.w400)),
             const SizedBox(height: 32),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -666,15 +869,12 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ChatDetailScreen(
-                          userId: userId,
-                          chatTitle: name,
-                          userProfile: userProfile,
-                        ),
-                      ),
-                    );
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => ChatDetailScreen(
+                                userId: userId,
+                                chatTitle: name,
+                                userProfile: userProfile)));
                   },
                 ),
                 _buildProfileAction(
@@ -695,10 +895,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     if (voiceCallProvider.callState ==
                         VoiceCallState.calling) {
                       Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => const VoiceCallingScreen()),
-                      );
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const VoiceCallingScreen()));
                     } else if (voiceCallProvider.errorMessage != null) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                         content: Text(voiceCallProvider.errorMessage!),
@@ -718,29 +917,24 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     showDialog(
                       context: context,
                       barrierDismissible: false,
-                      builder: (_) => const Center(
-                          child: CircularProgressIndicator()),
+                      builder: (_) =>
+                      const Center(child: CircularProgressIndicator()),
                     );
                     try {
                       final isBusy =
                       await videoCallProvider.checkUserBusy(userId);
                       if (mounted) Navigator.of(context).pop();
                       if (isBusy) {
-                        ScaffoldMessenger.of(context)
-                            .showSnackBar(SnackBar(
-                          content:
-                          Text('$name is currently in another call'),
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text('$name is currently in another call'),
                           backgroundColor: Colors.orange,
                         ));
                         return;
                       }
                       await videoCallProvider.initiateCall(
-                        receiverId: userId,
-                        receiverName: name,
-                      );
+                          receiverId: userId, receiverName: name);
                       if (videoCallProvider.errorMessage != null) {
-                        ScaffoldMessenger.of(context)
-                            .showSnackBar(SnackBar(
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
                           content: Text(videoCallProvider.errorMessage!),
                           backgroundColor: Colors.red,
                         ));
@@ -748,11 +942,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                         return;
                       }
                       if (mounted) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              builder: (_) => CallingScreen()),
-                        );
+                        Navigator.push(context,
+                            MaterialPageRoute(builder: (_) => CallingScreen()));
                       }
                     } catch (e) {
                       if (mounted) Navigator.of(context).pop();
@@ -789,27 +980,23 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
             decoration: BoxDecoration(
               color: color.withOpacity(0.10),
               shape: BoxShape.circle,
-              border:
-              Border.all(color: color.withOpacity(0.20), width: 1.5),
+              border: Border.all(color: color.withOpacity(0.20), width: 1.5),
             ),
             child: Icon(icon, color: color, size: 26),
           ),
           const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[700],
-            ),
-          ),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700])),
         ],
       ),
     );
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  SHARED POST (from cache only — single render path)
+  //  SHARED POST — with video support
   // ════════════════════════════════════════════════════════════════════════
   Widget _buildSharedPostFromCache() {
     final postData = _cachedPostData!;
@@ -822,12 +1009,15 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     final likesCount = postData['likesCount'] ?? 0;
     final commentsCount = postData['commentsCount'] ?? 0;
 
+    // ── Check for video ───────────────────────────────────────────────
+    final videoUrl = _extractVideoUrl(postData);
+    final hasVideo = videoUrl != null && videoUrl.isNotEmpty;
+
     return GestureDetector(
       onTap: () async {
         final shareType = postData['shareType']?.toString() ?? 'feed';
         final forwerdUrl = postData['forwerdUrl']?.toString() ?? '';
 
-        // ── non-feed: open in browser ──────────────────────────
         if (shareType != 'feed') {
           if (forwerdUrl.isNotEmpty) {
             final uri = Uri.parse(forwerdUrl);
@@ -835,26 +1025,21 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               await launchUrl(uri, mode: LaunchMode.externalApplication);
             }
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Link not available'),
-                backgroundColor: Colors.orange,
-              ),
-            );
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Link not available'),
+              backgroundColor: Colors.orange,
+            ));
           }
           return;
         }
 
-        // ── feed: navigate to post screen ──────────────────────
         if (postId.isEmpty ||
             postId.length != 24 ||
             !RegExp(r'^[a-f0-9]{24}$').hasMatch(postId)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Post link not available'),
-              backgroundColor: Colors.orange,
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Post link not available'),
+            backgroundColor: Colors.orange,
+          ));
           return;
         }
         Navigator.push(
@@ -893,23 +1078,22 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header ────────────────────────────────────────────
+            // ── Header ─────────────────────────────────────────────────
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: _isMe
-                    ? Colors.white.withOpacity(0.1)
-                    : Colors.grey[200],
+                color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
                 borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(10),
                     topRight: Radius.circular(10)),
               ),
               child: Builder(builder: (_) {
-                final shareType = postData['shareType']?.toString() ?? 'feed';
+                final shareType =
+                    postData['shareType']?.toString() ?? 'feed';
                 IconData shareIcon;
                 String shareLabel;
 
-                // ✅ Check shareType FIRST, before forwardedFrom
                 if (shareType == 'campaign') {
                   shareIcon = Icons.flag_rounded;
                   shareLabel = 'Shared Campaign';
@@ -920,7 +1104,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                   shareIcon = Icons.miscellaneous_services_rounded;
                   shareLabel = 'Shared Service';
                 } else {
-                  // Only for feed posts
                   final isForwardedFrom =
                       widget.message['forwardedFrom'] is Map &&
                           (widget.message['forwardedFrom'] as Map).isNotEmpty;
@@ -944,17 +1127,16 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               }),
             ),
 
-            // ── Author ────────────────────────────────────────────
+            // ── Author ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
               child: Row(children: [
                 CircleAvatar(
                   radius: 14,
-                  backgroundColor: _isMe
-                      ? Colors.white.withOpacity(0.3)
-                      : Colors.grey[300],
-                  backgroundImage:
-                  authorProfile.isNotEmpty && authorProfile != 'null'
+                  backgroundColor:
+                  _isMe ? Colors.white.withOpacity(0.3) : Colors.grey[300],
+                  backgroundImage: authorProfile.isNotEmpty &&
+                      authorProfile != 'null'
                       ? (authorProfile.startsWith('data:image/')
                       ? MemoryImage(
                       base64Decode(authorProfile.split(',')[1]))
@@ -984,7 +1166,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               ]),
             ),
 
-            // ── Post text ─────────────────────────────────────────
+            // ── Post text ───────────────────────────────────────────────
             if (postContent.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 2, 10, 6),
@@ -997,8 +1179,15 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     overflow: TextOverflow.ellipsis),
               ),
 
-            // ── Post image ────────────────────────────────────────
-            if (postImages.isNotEmpty)
+            // ── VIDEO (priority over image) ─────────────────────────────
+            if (hasVideo)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: _buildSharedPostVideo(),
+              )
+
+            // ── IMAGE (fallback) ────────────────────────────────────────
+            else if (postImages.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
                 child: ClipRRect(
@@ -1010,11 +1199,10 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                 ),
               ),
 
-            // ── Stats / Footer ────────────────────────────────────
+            // ── Footer ──────────────────────────────────────────────────
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               child: Row(children: [
-                // only show likes/comments for feed posts
                 if (postData['shareType'] == null ||
                     postData['shareType'] == 'feed') ...[
                   Icon(Icons.favorite,
@@ -1024,8 +1212,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                   Text('$likesCount',
                       style: TextStyle(
                           fontSize: 11,
-                          color:
-                          _isMe ? Colors.white70 : Colors.grey[600])),
+                          color: _isMe ? Colors.white70 : Colors.grey[600])),
                   const SizedBox(width: 12),
                   Icon(Icons.comment,
                       size: 13,
@@ -1034,16 +1221,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                   Text('$commentsCount',
                       style: TextStyle(
                           fontSize: 11,
-                          color:
-                          _isMe ? Colors.white70 : Colors.grey[600])),
+                          color: _isMe ? Colors.white70 : Colors.grey[600])),
                 ],
                 const Spacer(),
                 Text('Tap to view',
                     style: TextStyle(
                         fontSize: 11,
                         fontStyle: FontStyle.italic,
-                        color:
-                        _isMe ? Colors.white60 : Colors.blue[600])),
+                        color: _isMe ? Colors.white60 : Colors.blue[600])),
               ]),
             ),
           ],
@@ -1054,7 +1239,6 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
   Widget _buildPostImage(dynamic imageData) {
     String? imageUrl;
-
     if (imageData is String) {
       imageUrl = imageData.isNotEmpty ? imageData : null;
     } else if (imageData is Map) {
@@ -1066,9 +1250,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           ?.toString();
     }
 
-    if (imageUrl == null || imageUrl.isEmpty) {
-      return _buildBrokenImage();
-    }
+    if (imageUrl == null || imageUrl.isEmpty) return _buildBrokenImage();
 
     if (!imageUrl.startsWith('http://') &&
         !imageUrl.startsWith('https://') &&
@@ -1078,11 +1260,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     if (imageUrl.startsWith('data:image/')) {
       try {
-        return Image.memory(
-          base64Decode(imageUrl.split(',')[1]),
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _buildBrokenImage(),
-        );
+        return Image.memory(base64Decode(imageUrl.split(',')[1]),
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _buildBrokenImage());
       } catch (_) {
         return _buildBrokenImage();
       }
@@ -1092,10 +1272,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       imageUrl: imageUrl,
       fit: BoxFit.cover,
       placeholder: (_, __) => Container(
-        color: Colors.grey[200],
-        child: const Center(
-            child: CircularProgressIndicator(strokeWidth: 2)),
-      ),
+          color: Colors.grey[200],
+          child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2))),
       errorWidget: (_, __, ___) => _buildBrokenImage(),
     );
   }
@@ -1131,15 +1310,12 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               size: 13,
               color: _isMe ? Colors.white60 : Colors.grey[500]),
           const SizedBox(width: 4),
-          Text(
-            'Forwarded',
-            style: TextStyle(
-              fontSize: 11,
-              fontStyle: FontStyle.italic,
-              fontWeight: FontWeight.w500,
-              color: _isMe ? Colors.white60 : Colors.grey[500],
-            ),
-          ),
+          Text('Forwarded',
+              style: TextStyle(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w500,
+                  color: _isMe ? Colors.white60 : Colors.grey[500])),
         ],
       ),
     );
@@ -1176,15 +1352,13 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       onTap: () {
         Navigator.pop(context);
         Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                ForwardMessageScreen(message: widget.message),
-          ),
-        );
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    ForwardMessageScreen(message: widget.message)));
       },
     ));
-    // Copy Link — only for shared post / forwarded URL messages
+
     if (_isSharedPost &&
         _cachedPostData != null &&
         (_cachedPostData!['forwerdUrl'] ?? '').toString().isNotEmpty) {
@@ -1193,22 +1367,17 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         title: const Text('Copy Link'),
         onTap: () {
           Navigator.pop(context);
-          Clipboard.setData(
-            ClipboardData(
-              text: _cachedPostData!['forwerdUrl'].toString(),
-            ),
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Link copied to clipboard'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          Clipboard.setData(ClipboardData(
+              text: _cachedPostData!['forwerdUrl'].toString()));
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Link copied to clipboard'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ));
         },
       ));
     }
-    // ADD after the Forward ListTile:
+
     options.add(ListTile(
       leading: Icon(Icons.share, color: _purple),
       title: const Text('Share'),
@@ -1217,9 +1386,10 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         _shareMessage();
       },
     ));
-    // Copy Link — for link preview messages
+
     final _linkMeta = widget.message['linkMeta'];
-    final _linkUrl = (_linkMeta is Map) ? (_linkMeta['url'] ?? '').toString() : '';
+    final _linkUrl =
+    (_linkMeta is Map) ? (_linkMeta['url'] ?? '').toString() : '';
     if (_linkUrl.isNotEmpty) {
       options.add(ListTile(
         leading: Icon(Icons.link, color: _purple),
@@ -1227,13 +1397,11 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         onTap: () {
           Navigator.pop(context);
           Clipboard.setData(ClipboardData(text: _linkUrl));
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Link copied to clipboard'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Link copied to clipboard'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ));
         },
       ));
     }
@@ -1298,8 +1466,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   }
 
   void _showEditDialog() {
-    final ctrl =
-    TextEditingController(text: widget.message['text']);
+    final ctrl = TextEditingController(text: widget.message['text']);
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -1349,9 +1516,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(ok
-            ? 'Message edited successfully'
-            : 'Failed to edit message'),
+        content: Text(
+            ok ? 'Message edited successfully' : 'Failed to edit message'),
         backgroundColor: ok ? Colors.green : Colors.red,
         duration: const Duration(seconds: 2),
       ));
@@ -1377,8 +1543,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           ElevatedButton(
             onPressed: _handleDelete,
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white),
+                backgroundColor: Colors.red, foregroundColor: Colors.white),
             child: const Text('Delete'),
           ),
         ],
@@ -1430,8 +1595,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           backgroundColor: Colors.red));
       return;
     }
-    if (!fileUrl.startsWith('http://') &&
-        !fileUrl.startsWith('https://')) {
+    if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
       fileUrl = 'https://api.ixes.ai/$fileUrl';
     }
     final status = widget.message['status']?.toString();
@@ -1527,8 +1691,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
 
     var audioUrl = widget.message['audioUrl']?.toString() ?? '';
     if (audioUrl.isEmpty) return null;
-    if (!audioUrl.startsWith('http://') &&
-        !audioUrl.startsWith('https://')) {
+    if (!audioUrl.startsWith('http://') && !audioUrl.startsWith('https://')) {
       audioUrl = 'https://api.ixes.ai/$audioUrl';
     }
 
@@ -1587,8 +1750,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     } else {
       final nestedSender = replyMsg['senderId'];
       if (nestedSender is Map) {
-        final name =
-            nestedSender['profile']?['name']?.toString() ?? '';
+        final name = nestedSender['profile']?['name']?.toString() ?? '';
         if (name.isNotEmpty) replySender = name;
       }
     }
@@ -1614,32 +1776,24 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
             : Colors.black.withOpacity(0.08),
         borderRadius: BorderRadius.circular(8),
         border: Border(
-          left: BorderSide(
-              color: _isMe ? Colors.white : Colors.grey[800]!,
-              width: 2),
-        ),
+            left: BorderSide(
+                color: _isMe ? Colors.white : Colors.grey[800]!, width: 2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Replied to $replySender',
-            style: TextStyle(
-              color: _isMe ? Colors.white70 : Colors.grey[600],
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text('Replied to $replySender',
+              style: TextStyle(
+                  color: _isMe ? Colors.white70 : Colors.grey[600],
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600)),
           const SizedBox(height: 2),
-          Text(
-            preview,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _isMe ? Colors.white70 : Colors.grey[700],
-              fontSize: 12,
-            ),
-          ),
+          Text(preview,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: _isMe ? Colors.white70 : Colors.grey[700],
+                  fontSize: 12)),
         ],
       ),
     );
@@ -1675,8 +1829,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-                color:
-                _isMe ? Colors.white : Colors.grey[800],
+                color: _isMe ? Colors.white : Colors.grey[800],
                 shape: BoxShape.circle),
             child: _isLoadingAudio
                 ? Padding(
@@ -1724,9 +1877,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
-                        color: _isMe
-                            ? Colors.white70
-                            : Colors.grey[600])),
+                        color: _isMe ? Colors.white70 : Colors.grey[600])),
               ]),
         ),
         if (widget.message['status'] == 'sending') ...[
@@ -1765,10 +1916,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   Widget _buildFileBubble() {
     final fileUrl = widget.message['fileUrl']?.toString() ?? '';
     final fileName = widget.message['fileName']?.toString() ?? '';
-
     if (fileUrl.isEmpty && fileName.isEmpty) return const SizedBox.shrink();
     if (_isImageFile) return _buildChatMessageImage();
-
     final status = widget.message['status']?.toString();
     final fileType =
     FileViewerHelper.getFileType(fileUrl.isNotEmpty ? fileUrl : fileName);
@@ -1790,17 +1939,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
         imageWidget = _buildBrokenImage();
       }
     } else if (fileUrl.isNotEmpty) {
-      if (!fileUrl.startsWith('http://') &&
-          !fileUrl.startsWith('https://')) {
+      if (!fileUrl.startsWith('http://') && !fileUrl.startsWith('https://')) {
         fileUrl = 'https://api.ixes.ai/$fileUrl';
       }
       imageWidget = CachedNetworkImage(
         imageUrl: fileUrl,
         fit: BoxFit.cover,
         placeholder: (context, url) => Container(
-          color: _isMe
-              ? Colors.white.withOpacity(0.1)
-              : Colors.grey[200],
+          color: _isMe ? Colors.white.withOpacity(0.1) : Colors.grey[200],
           child: const Center(
               child: CircularProgressIndicator(strokeWidth: 2)),
         ),
@@ -1811,26 +1957,19 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     }
 
     return GestureDetector(
-      onTap:
-      widget.message['status'] == 'sending' ? null : _handleFileOpen,
+      onTap: widget.message['status'] == 'sending' ? null : _handleFileOpen,
       child: Container(
         constraints: const BoxConstraints(
-          maxHeight: 300,
-          maxWidth: 250,
-          minWidth: 150,
-          minHeight: 150,
-        ),
+            maxHeight: 300, maxWidth: 250, minWidth: 150, minHeight: 150),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(18).copyWith(
-            bottomRight:
-            _isMe ? const Radius.circular(4) : null,
+            bottomRight: _isMe ? const Radius.circular(4) : null,
             bottomLeft: !_isMe ? const Radius.circular(4) : null,
           ),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18).copyWith(
-            bottomRight:
-            _isMe ? const Radius.circular(4) : null,
+            bottomRight: _isMe ? const Radius.circular(4) : null,
             bottomLeft: !_isMe ? const Radius.circular(4) : null,
           ),
           child: Stack(
@@ -1846,10 +1985,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                         width: 32,
                         height: 32,
                         child: CircularProgressIndicator(
-                          strokeWidth: 3,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white),
-                        ),
+                            strokeWidth: 3,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white)),
                       ),
                     ),
                   ),
@@ -1892,23 +2030,19 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     Text('Uploading...',
                         style: TextStyle(
                             fontSize: 12,
-                            color: _isMe
-                                ? Colors.white70
-                                : Colors.grey[600]))
+                            color:
+                            _isMe ? Colors.white70 : Colors.grey[600]))
                   else if (status == 'failed')
                     Text('Failed to upload',
                         style: TextStyle(
                             fontSize: 12,
-                            color: _isMe
-                                ? Colors.white70
-                                : Colors.red[600]))
+                            color: _isMe ? Colors.white70 : Colors.red[600]))
                   else
                     Text('Tap to open',
                         style: TextStyle(
                             fontSize: 12,
-                            color: _isMe
-                                ? Colors.white70
-                                : Colors.grey[600])),
+                            color:
+                            _isMe ? Colors.white70 : Colors.grey[600])),
                 ]),
           ),
           if (status != 'sending' && status != 'failed') ...[
@@ -1943,8 +2077,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   Widget _buildStatusTick() {
     final status = widget.message['status']?.toString();
     final isOptimistic = widget.message['isOptimistic'] == true;
-    final readers =
-    List<String>.from(widget.message['readers'] ?? []);
+    final readers = List<String>.from(widget.message['readers'] ?? []);
 
     if (status == 'sending' || isOptimistic) {
       return SizedBox(
@@ -1964,17 +2097,14 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     final readByOthers = readers.length > 1;
     if (readByOthers) {
       return Row(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.done_all,
-            size: 13, color: Colors.lightBlueAccent),
+        const Icon(Icons.done_all, size: 13, color: Colors.lightBlueAccent),
         const SizedBox(width: 2),
         Text('${readers.length - 1}',
-            style: const TextStyle(
-                fontSize: 11, color: Colors.white60)),
+            style: const TextStyle(fontSize: 11, color: Colors.white60)),
       ]);
     }
     if (readers.isNotEmpty) {
-      return const Icon(Icons.done_all,
-          size: 13, color: Colors.white60);
+      return const Icon(Icons.done_all, size: 13, color: Colors.white60);
     }
     return const Icon(Icons.done, size: 13, color: Colors.white60);
   }
@@ -2042,8 +2172,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
           child: Icon(Icons.person, size: 16, color: Colors.grey[600]));
     }
     final profile = _senderMap!['profile'];
-    final imgProv =
-    _imageProvider(profile?['profileImage']?.toString());
+    final imgProv = _imageProvider(profile?['profileImage']?.toString());
     return CircleAvatar(
       radius: 16,
       backgroundColor: _colorForName(_senderName),
@@ -2064,7 +2193,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   // ════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
-    super.build(context); // required by AutomaticKeepAliveClientMixin
+    super.build(context);
 
     final text = widget.message['text']?.toString() ?? '';
     final timestamp = widget.message['createdAt']?.toString() ?? '';
@@ -2076,14 +2205,12 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Align(
-        alignment:
-        _isMe ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: _isMe ? Alignment.centerRight : Alignment.centerLeft,
         child: Row(
           mainAxisAlignment:
           _isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // ── Left avatar ──────────────────────────────────────────
             if (!_isMe) ...[
               SizedBox(
                 width: 36,
@@ -2100,20 +2227,16 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               const SizedBox(width: 6),
             ],
 
-            // ── Bubble ───────────────────────────────────────────────
             Flexible(
               child: GestureDetector(
                 onTap: !_isMe ? _showMemberProfile : null,
                 onLongPress: _showMessageOptions,
                 child: Container(
                   constraints: BoxConstraints(
-                      maxWidth:
-                      MediaQuery.of(context).size.width * 0.72),
+                      maxWidth: MediaQuery.of(context).size.width * 0.72),
                   padding: EdgeInsets.symmetric(
-                    horizontal:
-                    (_isFile && _isImageFile) ? 0 : 13,
-                    vertical:
-                    (_isFile && _isImageFile) ? 0 : 9,
+                    horizontal: (_isFile && _isImageFile) ? 0 : 13,
+                    vertical: (_isFile && _isImageFile) ? 0 : 9,
                   ),
                   decoration: BoxDecoration(
                     color: (_isFile && _isImageFile)
@@ -2122,10 +2245,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     borderRadius: BorderRadius.only(
                       topLeft: const Radius.circular(18),
                       topRight: const Radius.circular(18),
-                      bottomLeft:
-                      Radius.circular(_isMe ? 18 : 4),
-                      bottomRight:
-                      Radius.circular(_isMe ? 4 : 18),
+                      bottomLeft: Radius.circular(_isMe ? 18 : 4),
+                      bottomRight: Radius.circular(_isMe ? 4 : 18),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -2138,10 +2259,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Forwarded label (only for non-post forwards)
                       if (_isForwardedMsg) _buildForwardedLabel(),
 
-                      // Sender name
                       if (!_isMe && widget.showAvatar) ...[
                         Text(_senderName,
                             style: TextStyle(
@@ -2151,10 +2270,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                         const SizedBox(height: 3),
                       ],
 
-                      // Reply preview
                       if (hasReply) _buildReplyPreview(),
 
-                      // ── Content: single decision tree, no fallbacks ──
+                      // ── Content decision tree ──────────────────────
                       if (_isSharedPost && _cachedPostData != null)
                         _buildSharedPostFromCache()
                       else if (_isAudio)
@@ -2162,8 +2280,7 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                       else if (_isFile)
                           _buildFileBubble()
                         else if (text.isNotEmpty) ...[
-                            GroupClickableText(
-                                text: text, isMe: _isMe),
+                            GroupClickableText(text: text, isMe: _isMe),
                             if (_hasValidLinkMeta()) _buildLinkPreview(),
                           ],
 
@@ -2172,12 +2289,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                       // Time + status
                       Padding(
                         padding: EdgeInsets.only(
-                          bottom:
-                          (_isFile && _isImageFile) ? 4.0 : 0,
-                          right:
-                          (_isFile && _isImageFile) ? 8.0 : 0,
-                          left:
-                          (_isFile && _isImageFile) ? 8.0 : 0,
+                          bottom: (_isFile && _isImageFile) ? 4.0 : 0,
+                          right: (_isFile && _isImageFile) ? 8.0 : 0,
+                          left: (_isFile && _isImageFile) ? 8.0 : 0,
                         ),
                         child: Container(
                           padding: (_isFile && _isImageFile)
@@ -2186,10 +2300,8 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                               : EdgeInsets.zero,
                           decoration: (_isFile && _isImageFile)
                               ? BoxDecoration(
-                            color: Colors.black.withOpacity(0.45),
-                            borderRadius:
-                            BorderRadius.circular(10),
-                          )
+                              color: Colors.black.withOpacity(0.45),
+                              borderRadius: BorderRadius.circular(10))
                               : null,
                           child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -2208,15 +2320,13 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
                                   const SizedBox(width: 5),
                                   _buildStatusTick(),
                                 ],
-                                if (widget.message['isEdited'] ==
-                                    true) ...[
+                                if (widget.message['isEdited'] == true) ...[
                                   const SizedBox(width: 5),
                                   Text('edited',
                                       style: TextStyle(
                                           fontSize: 10,
                                           fontStyle: FontStyle.italic,
-                                          color: (_isFile &&
-                                              _isImageFile)
+                                          color: (_isFile && _isImageFile)
                                               ? Colors.white70
                                               : (_isMe
                                               ? Colors.white54
@@ -2250,8 +2360,7 @@ class GroupClickableText extends StatelessWidget {
       : super(key: key);
 
   @override
-  Widget build(BuildContext context) =>
-      RichText(text: _buildSpans());
+  Widget build(BuildContext context) => RichText(text: _buildSpans());
 
   TextSpan _buildSpans() {
     final urlPattern = RegExp(
@@ -2269,8 +2378,7 @@ class GroupClickableText extends StatelessWidget {
         spans.add(TextSpan(
           text: text.substring(pos, m.start),
           style: TextStyle(
-              color: isMe ? Colors.white : Colors.black87,
-              fontSize: 15),
+              color: isMe ? Colors.white : Colors.black87, fontSize: 15),
         ));
       }
       final url = m.group(0)!;
@@ -2280,13 +2388,11 @@ class GroupClickableText extends StatelessWidget {
           color: isMe ? Colors.lightBlueAccent : Colors.blue[800],
           fontSize: 15,
           decoration: TextDecoration.underline,
-          decorationColor:
-          isMe ? Colors.lightBlueAccent : Colors.blue[800],
+          decorationColor: isMe ? Colors.lightBlueAccent : Colors.blue[800],
           decorationThickness: 2,
           fontWeight: FontWeight.w600,
         ),
-        recognizer: TapGestureRecognizer()
-          ..onTap = () => _launchURL(url),
+        recognizer: TapGestureRecognizer()..onTap = () => _launchURL(url),
       ));
       pos = m.end;
     }
