@@ -20,6 +20,7 @@ import 'package:video_player/video_player.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../providers/personal_chat_provider.dart';
+import '../../api_service/user_api_service.dart';
 import '../home/feedpage/feed_screen.dart';
 import 'group_chat/forwarded_message_screen.dart';
 
@@ -100,6 +101,10 @@ class _MessageBubbleState extends State<MessageBubble> {
   bool _sharedVideoPlaying = false;
   bool _sharedVideoError = false;
 
+  // ── Enriched post data fetched from API when share omits video/images ──
+  Map<String, dynamic>? _enrichedPostData;
+  bool _isFetchingPost = false;
+
   bool _isNetworkImage(String imageUrl) {
     return imageUrl.startsWith('http://') || imageUrl.startsWith('https://');
   }
@@ -114,34 +119,166 @@ class _MessageBubbleState extends State<MessageBubble> {
       }
     }
 
-    // Pre-init shared post video if present
     if (widget.isSharedPost && widget.sharedPostData != null) {
-      final videoUrl = _extractSharedPostVideoUrl(widget.sharedPostData!);
-      if (videoUrl != null && videoUrl.isNotEmpty) {
-        _initSharedVideo(videoUrl);
+      final postData = widget.sharedPostData!;
+      final postId = postData['_id']?.toString() ?? '';
+      final images = postData['images'];
+      final hasImages = images is List && images.isNotEmpty;
+      final hasVideo = _extractSharedPostVideoUrl(postData) != null;
+
+      if (!hasImages && !hasVideo && postId.length == 24) {
+        // Backend share API stripped media — fetch the full post
+        WidgetsBinding.instance.addPostFrameCallback((_) => _fetchFullPost(postId));
+      } else {
+        final videoUrl = _extractSharedPostVideoUrl(postData);
+        if (videoUrl != null && videoUrl.isNotEmpty) {
+          _initSharedVideo(videoUrl);
+        }
       }
+    }
+  }
+
+  /// Fetch full post by ID using the app's authenticated API service.
+  /// This gets the complete post data (including postVideo) that the
+  /// share API strips out when creating the sharedPostData object.
+  Future<void> _fetchFullPost(String postId) async {
+    if (_isFetchingPost || !mounted) return;
+    setState(() => _isFetchingPost = true);
+    try {
+      // Uses UserAPI which calls ApiService.get() — auth token attached automatically
+      final response = await UserAPI().getPostById(postId);
+      if (!mounted) return;
+
+      if (response != null) {
+        // getPostById returns the full decoded JSON — unwrap the data field
+        final data = (response['data'] is Map
+            ? response['data']
+            : response['post'] is Map
+            ? response['post']
+            : response) as Map<String, dynamic>?;
+
+        if (data != null) {
+          final merged = Map<String, dynamic>.from(widget.sharedPostData!);
+
+          // Merge video fields from full post into our shared post data
+          for (final k in ['postVideo', 'video', 'videos', 'videoUrl',
+            'mediaVideo', 'postVideos', 'videoFile']) {
+            if (data[k] != null) merged[k] = data[k];
+          }
+
+          // Merge image fields if still empty
+          final existingImages = merged['images'];
+          if (existingImages is! List || existingImages.isEmpty) {
+            for (final k in ['images', 'image', 'media', 'attachments',
+              'postImages', 'photos']) {
+              if (data[k] != null) { merged['images'] = data[k]; break; }
+            }
+          }
+
+          setState(() => _enrichedPostData = merged);
+
+          final videoUrl = _extractSharedPostVideoUrl(merged);
+          debugPrint('🎬 ✅ Enriched post fetched. Video: $videoUrl');
+          debugPrint('🎬 ✅ Enriched keys: ${merged.keys.toList()}');
+
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            await _initSharedVideo(videoUrl);
+          }
+        }
+      } else {
+        debugPrint('🎬 ❌ fetchFullPost: getPostById returned null for $postId');
+      }
+    } catch (e) {
+      debugPrint('🎬 ❌ fetchFullPost error: $e');
+    } finally {
+      if (mounted) setState(() => _isFetchingPost = false);
     }
   }
 
   // ── Video helpers ─────────────────────────────────────────────────────
 
   /// Extracts the first usable video URL from a shared post map.
+  /// Logs ALL keys in the post data so you can see exactly what the backend sends.
   String? _extractSharedPostVideoUrl(Map<String, dynamic> postData) {
+    // ── DEBUG: print every key+value so we know what the backend sends ──
+    debugPrint('🎬 [VIDEO DEBUG] All keys in sharedPostData: ${postData.keys.toList()}');
+    for (final k in postData.keys) {
+      final v = postData[k];
+      if (v != null) {
+        final preview = v.toString().length > 120
+            ? '${v.toString().substring(0, 120)}...'
+            : v.toString();
+        debugPrint('🎬   [$k] (${v.runtimeType}) = $preview');
+      }
+    }
+
+    // ── Search every possible key the backend might use ──────────────
     for (final key in [
-      'postVideo',
+      'postVideo',       // most common in your feed_screen.dart
       'video',
       'videos',
       'videoUrl',
       'mediaVideo',
+      'postVideos',
+      'videoFile',
+      'videoFiles',
+      'media',           // sometimes media contains video
+      'attachments',
+      'videoLink',
+      'mp4',
+      'clip',
+      'clips',
     ]) {
       final v = postData[key];
+      if (v == null) continue;
+
+      // List of strings
       if (v is List && v.isNotEmpty) {
-        final first = v.first?.toString() ?? '';
-        if (first.isNotEmpty) return _normalizeUrl(first);
+        for (final item in v) {
+          if (item == null) continue;
+          final s = item.toString().trim();
+          // Accept if it looks like a video URL or has a video extension
+          if (s.isNotEmpty && _looksLikeVideo(s)) {
+            debugPrint('🎬 ✅ Found video under key "$key" (list): $s');
+            return _normalizeUrl(s);
+          }
+        }
+        // If no item passed the video check, still try the first non-empty item
+        // (backend might not use video extensions for blob URLs)
+        for (final item in v) {
+          if (item == null) continue;
+          final s = item.toString().trim();
+          if (s.isNotEmpty && !s.startsWith('data:image/')) {
+            debugPrint('🎬 ✅ Found video (fallback list) under key "$key": $s');
+            return _normalizeUrl(s);
+          }
+        }
       }
-      if (v is String && v.isNotEmpty) return _normalizeUrl(v);
+
+      // Plain string
+      if (v is String && v.isNotEmpty && !v.startsWith('data:image/')) {
+        debugPrint('🎬 ✅ Found video under key "$key" (string): $v');
+        return _normalizeUrl(v);
+      }
     }
+
+    debugPrint('🎬 ❌ No video found in sharedPostData');
     return null;
+  }
+
+  /// Returns true if a URL/path looks like a video file.
+  bool _looksLikeVideo(String s) {
+    final lower = s.toLowerCase();
+    return lower.contains('.mp4') ||
+        lower.contains('.mov') ||
+        lower.contains('.avi') ||
+        lower.contains('.mkv') ||
+        lower.contains('.webm') ||
+        lower.contains('.m4v') ||
+        lower.contains('.3gp') ||
+        lower.startsWith('data:video/') ||
+        lower.contains('/video/') ||
+        lower.contains('video');
   }
 
   String _normalizeUrl(String url) {
@@ -540,12 +677,9 @@ class _MessageBubbleState extends State<MessageBubble> {
       );
     }
 
-    final postData = widget.sharedPostData!;
+    // Use enriched post data (fetched from API) if available, else fall back to widget data
+    final postData = _enrichedPostData ?? widget.sharedPostData!;
     final shareType = postData['shareType']?.toString() ?? 'feed';
-
-    debugPrint('📌 _buildSharedPost() called');
-    debugPrint('📌 sharedPostData: $postData');
-    debugPrint('📌 shareType received: $shareType');
 
     final postId = postData['_id']?.toString() ?? '';
     final postContent = postData['text'] ?? '';
@@ -554,6 +688,36 @@ class _MessageBubbleState extends State<MessageBubble> {
     // ── VIDEO: extract first video URL from the post ──────────────────
     final videoUrl = _extractSharedPostVideoUrl(postData);
     final hasVideo = videoUrl != null && videoUrl.isNotEmpty;
+
+    // Show loading indicator while fetching full post data
+    if (_isFetchingPost && !hasVideo && postImages.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: widget.isMe ? Colors.white.withOpacity(0.15) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: widget.isMe ? Colors.white.withOpacity(0.3) : Colors.grey[300]!,
+          ),
+        ),
+        child: Row(children: [
+          SizedBox(
+            width: 18, height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                widget.isMe ? Colors.white70 : Colors.grey[600]!,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text('Loading post...',
+              style: TextStyle(
+                  color: widget.isMe ? Colors.white70 : Colors.grey[600],
+                  fontSize: 13)),
+        ]),
+      );
+    }
 
     final authorName = postData['authorName'] ?? 'Unknown';
     final authorProfile = postData['authorProfile'];
@@ -726,11 +890,22 @@ class _MessageBubbleState extends State<MessageBubble> {
               ),
 
             // ── VIDEO (shown when post has a video) ──────────────────
-            if (hasVideo)
+            if (hasVideo) ...[
+              // Lazy-init if initState missed it (e.g. data arrived late)
+              if (!_sharedVideoInitialized && !_sharedVideoError && videoUrl != null)
+                Builder(builder: (_) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!_sharedVideoInitialized && !_sharedVideoError && mounted) {
+                      _initSharedVideo(videoUrl);
+                    }
+                  });
+                  return const SizedBox.shrink();
+                }),
               Padding(
                 padding: const EdgeInsets.all(12),
                 child: _buildSharedPostVideo(),
-              )
+              ),
+            ]
 
             // ── IMAGE (shown when no video but images exist) ─────────
             else if (postImages.isNotEmpty)

@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../providers/group_provider.dart';
+import '../../../api_service/user_api_service.dart';
 import '../../../providers/video_call_provider.dart';
 import '../../../providers/voice_call_provider.dart';
 import '../../home/feedpage/feed_screen.dart';
@@ -73,6 +74,9 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   bool _sharedVideoPlaying = false;
   bool _sharedVideoError = false;
 
+  // ── Enriched post data fetched from API when share API omits video/images ──
+  bool _isFetchingPost = false;
+
   @override
   bool get wantKeepAlive => _isSharedPost || _isAudio;
 
@@ -96,12 +100,73 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
       if (ms is int && ms > 0) _duration = Duration(milliseconds: ms);
     }
 
-    // Pre-init shared post video
     if (_isSharedPost && _cachedPostData != null) {
-      final videoUrl = _extractVideoUrl(_cachedPostData!);
-      if (videoUrl != null && videoUrl.isNotEmpty) {
-        _initSharedVideo(videoUrl);
+      final postId = _cachedPostData!['_id']?.toString() ?? '';
+      final images = _cachedPostData!['images'];
+      final hasImages = images is List && images.isNotEmpty;
+      final hasVideo = _extractVideoUrl(_cachedPostData!) != null;
+
+      if (!hasImages && !hasVideo && postId.length == 24) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _fetchFullPost(postId));
+      } else {
+        final videoUrl = _extractVideoUrl(_cachedPostData!);
+        if (videoUrl != null && videoUrl.isNotEmpty) {
+          _initSharedVideo(videoUrl);
+        }
       }
+    }
+  }
+
+  /// Fetch full post by ID using the app's authenticated API service.
+  Future<void> _fetchFullPost(String postId) async {
+    if (_isFetchingPost || !mounted) return;
+    setState(() => _isFetchingPost = true);
+    try {
+      final response = await UserAPI().getPostById(postId);
+      if (!mounted) return;
+
+      if (response != null) {
+        final data = (response['data'] is Map
+            ? response['data']
+            : response['post'] is Map
+            ? response['post']
+            : response) as Map<String, dynamic>?;
+
+        if (data != null) {
+          final merged = Map<String, dynamic>.from(_cachedPostData!);
+
+          // Merge video fields
+          for (final k in ['postVideo', 'video', 'videos', 'videoUrl',
+            'mediaVideo', 'postVideos', 'videoFile']) {
+            if (data[k] != null) merged[k] = data[k];
+          }
+
+          // Merge image fields if still empty
+          final existingImages = merged['images'];
+          if (existingImages is! List || existingImages.isEmpty) {
+            for (final k in ['images', 'image', 'media', 'attachments',
+              'postImages', 'photos']) {
+              if (data[k] != null) { merged['images'] = data[k]; break; }
+            }
+          }
+
+          setState(() => _cachedPostData = merged);
+
+          final videoUrl = _extractVideoUrl(merged);
+          debugPrint('🎬 GROUP ✅ Enriched post. Video: $videoUrl');
+          debugPrint('🎬 GROUP ✅ Enriched keys: ${merged.keys.toList()}');
+
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            await _initSharedVideo(videoUrl);
+          }
+        }
+      } else {
+        debugPrint('🎬 GROUP ❌ fetchFullPost: null response for $postId');
+      }
+    } catch (e) {
+      debugPrint('🎬 GROUP ❌ fetchFullPost error: $e');
+    } finally {
+      if (mounted) setState(() => _isFetchingPost = false);
     }
   }
 
@@ -137,22 +202,80 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
   // ════════════════════════════════════════════════════════════════════════
 
   /// Extract first usable video URL from any post-data map.
+  /// Logs ALL keys so you can diagnose which key the backend actually uses.
   String? _extractVideoUrl(Map<String, dynamic> postData) {
+    debugPrint('🎬 [GROUP VIDEO DEBUG] Keys: ${postData.keys.toList()}');
+    for (final k in postData.keys) {
+      final v = postData[k];
+      if (v != null) {
+        final preview = v.toString().length > 120
+            ? '${v.toString().substring(0, 120)}...'
+            : v.toString();
+        debugPrint('🎬   [$k] (${v.runtimeType}) = $preview');
+      }
+    }
+
     for (final key in [
       'postVideo',
       'video',
       'videos',
       'videoUrl',
       'mediaVideo',
+      'postVideos',
+      'videoFile',
+      'videoFiles',
+      'media',
+      'attachments',
+      'videoLink',
+      'mp4',
+      'clip',
+      'clips',
     ]) {
       final v = postData[key];
+      if (v == null) continue;
+
       if (v is List && v.isNotEmpty) {
-        final first = v.first?.toString() ?? '';
-        if (first.isNotEmpty) return _normalizeSingleUrl(first);
+        for (final item in v) {
+          if (item == null) continue;
+          final s = item.toString().trim();
+          if (s.isNotEmpty && _looksLikeVideo(s)) {
+            debugPrint('🎬 ✅ GROUP: Found video under key "$key" (list): $s');
+            return _normalizeSingleUrl(s);
+          }
+        }
+        // Fallback: first non-image item
+        for (final item in v) {
+          if (item == null) continue;
+          final s = item.toString().trim();
+          if (s.isNotEmpty && !s.startsWith('data:image/')) {
+            debugPrint('🎬 ✅ GROUP: Found video (fallback) under key "$key": $s');
+            return _normalizeSingleUrl(s);
+          }
+        }
       }
-      if (v is String && v.isNotEmpty) return _normalizeSingleUrl(v);
+
+      if (v is String && v.isNotEmpty && !v.startsWith('data:image/')) {
+        debugPrint('🎬 ✅ GROUP: Found video under key "$key" (string): $v');
+        return _normalizeSingleUrl(v);
+      }
     }
+
+    debugPrint('🎬 ❌ GROUP: No video found');
     return null;
+  }
+
+  bool _looksLikeVideo(String s) {
+    final lower = s.toLowerCase();
+    return lower.contains('.mp4') ||
+        lower.contains('.mov') ||
+        lower.contains('.avi') ||
+        lower.contains('.mkv') ||
+        lower.contains('.webm') ||
+        lower.contains('.m4v') ||
+        lower.contains('.3gp') ||
+        lower.startsWith('data:video/') ||
+        lower.contains('/video/') ||
+        lower.contains('video');
   }
 
   Future<void> _initSharedVideo(String videoUrl) async {
@@ -1012,6 +1135,36 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
     // ── Check for video ───────────────────────────────────────────────
     final videoUrl = _extractVideoUrl(postData);
     final hasVideo = videoUrl != null && videoUrl.isNotEmpty;
+    final postImages2 = postData['images'];
+    final hasImages = postImages2 is List && postImages2.isNotEmpty;
+
+    // Show loader while fetching full post
+    if (_isFetchingPost && !hasVideo && !hasImages) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: _isMe ? Colors.white.withOpacity(0.15) : Colors.grey[100],
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: _isMe ? Colors.white.withOpacity(0.25) : Colors.grey[300]!),
+        ),
+        child: Row(children: [
+          SizedBox(
+            width: 16, height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  _isMe ? Colors.white70 : Colors.grey[600]!),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text('Loading post...',
+              style: TextStyle(
+                  fontSize: 13,
+                  color: _isMe ? Colors.white70 : Colors.grey[600])),
+        ]),
+      );
+    }
 
     return GestureDetector(
       onTap: () async {
@@ -1180,11 +1333,21 @@ class _GroupMessageBubbleState extends State<GroupMessageBubble>
               ),
 
             // ── VIDEO (priority over image) ─────────────────────────────
-            if (hasVideo)
+            if (hasVideo) ...[
+              if (!_sharedVideoInitialized && !_sharedVideoError && videoUrl != null)
+                Builder(builder: (_) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!_sharedVideoInitialized && !_sharedVideoError && mounted) {
+                      _initSharedVideo(videoUrl);
+                    }
+                  });
+                  return const SizedBox.shrink();
+                }),
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
                 child: _buildSharedPostVideo(),
-              )
+              ),
+            ]
 
             // ── IMAGE (fallback) ────────────────────────────────────────
             else if (postImages.isNotEmpty)
