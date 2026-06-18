@@ -238,11 +238,13 @@ class GroupChatService {
   // ════════════════════════════════════════════════════════════════════════
   // 4. GET GROUP MESSAGES
   // ════════════════════════════════════════════════════════════════════════
+// UPDATE: GroupChatService.getGroupMessages method
+
   Future<Map<String, dynamic>> getGroupMessages(String groupId,
       {int pageNo = 1, int limit = 30}) async {
     const l = 'getGroupMessages';
     try {
-      _logRequest('GET', '/api/chat/groupmessages/$groupId');
+      _logRequest('GET', '/api/chat/groupmessages/$groupId?pageNo=$pageNo&limit=$limit');
 
       final res = await ApiService.get(
           '/api/chat/groupmessages/$groupId?pageNo=$pageNo&limit=$limit');
@@ -252,15 +254,23 @@ class GroupChatService {
       if (res.statusCode == 200) {
         final d = jsonDecode(res.body);
         final msgs = d['data'] ?? [];
-        print('📨 [$l] ${(msgs as List).length} messages for $groupId');
-        return {'error': false, 'message': 'OK', 'data': msgs};
+        final pagination = d['pagination'] as Map<String, dynamic>? ?? {};
+
+        print('📨 [$l] page $pageNo: ${(msgs as List).length} messages | '
+            'hasMore: ${pagination['hasMore']}');
+
+        return {
+          'error': false,
+          'message': 'OK',
+          'data': msgs,
+          'pagination': pagination,
+        };
       }
       return _apiError(res, l);
     } on SocketException { return _noInternet(l); }
     on TimeoutException  { return _timeout(l); }
     catch (e) { _logError(l, e); return _exception(e); }
   }
-
   // ════════════════════════════════════════════════════════════════════════
   // 5. SEND TEXT MESSAGE
   // ════════════════════════════════════════════════════════════════════════

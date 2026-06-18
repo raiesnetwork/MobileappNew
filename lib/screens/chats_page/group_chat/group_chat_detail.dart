@@ -780,12 +780,55 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
       body: Column(
         children: [
           Expanded(child: _buildMessagesList()),
+          // ✅ ADD: Show status when loading older messages
+          Consumer<GroupChatProvider>(
+            builder: (_, provider, __) {
+              if (provider.isLoadingMoreGroupMessages) {
+                return Container(
+                  padding:
+                  const EdgeInsets.symmetric(vertical: 8),
+                  alignment: Alignment.center,
+                  child: Row(
+                    mainAxisAlignment:
+                    MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child:
+                        CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor:
+                          const AlwaysStoppedAnimation(
+                            Color(0xFF6C5CE7),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Loading older messages...',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            },
+          ),
           if (_isRecording) _buildRecordingIndicator(),
           _buildInputBar(),
         ],
       ),
     );
   }
+
+
+
 
   AppBar _buildAppBar() {
     return AppBar(
@@ -999,60 +1042,118 @@ class _GroupChatDetailPageState extends State<GroupChatDetailPage> {
           onRefresh: () async =>
               provider.fetchGroupMessages(widget.groupId),
           color: const Color(0xFF6C5CE7),
-          child: ListView.builder(
+          // ✅ ADD SCROLLBAR
+          child: Scrollbar(
             controller: _scrollController,
-            reverse: true,
-            shrinkWrap: messages.length < 15,
-            padding: const EdgeInsets.symmetric(
-                horizontal: 10, vertical: 10),
-            physics: const AlwaysScrollableScrollPhysics(),
-            itemCount: messages.length,
-            itemBuilder: (context, index) {
-              final msg = messages[index];
+            thumbVisibility: true,
+            thickness: 8,
+            radius: const Radius.circular(4),
+            child: ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              shrinkWrap: messages.length < 15,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 10),
+              physics: const AlwaysScrollableScrollPhysics(),
+              // ✅ CHANGE itemCount - add 1 if hasMore
+              itemCount: messages.length +
+                  (provider.groupMessageHasMore(widget.groupId)
+                      ? 1
+                      : 0),
+              itemBuilder: (context, index) {
+                // ✅ ADD: Loading indicator when loading more messages
+                if (index == messages.length &&
+                    provider.groupMessageHasMore(widget.groupId)) {
+                  return Container(
+                    padding:
+                    const EdgeInsets.symmetric(vertical: 16),
+                    alignment: Alignment.center,
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor:
+                        const AlwaysStoppedAnimation(
+                          Color(0xFF6C5CE7),
+                        ),
+                      ),
+                    ),
+                  );
+                }
 
-              // ── Stable key prevents Flutter reusing widget state
-              //    across different messages (fixes text→post bug)
-              final msgKey = ValueKey(msg['_id'] ?? index);
+                final msg = messages[index];
 
-              final msgTime = DateTime.parse(
-                  msg['createdAt'] ??
-                      DateTime.now().toIso8601String())
-                  .toLocal();
-              DateTime? olderTime;
-              for (int j = index + 1; j < messages.length; j++) {
-                olderTime = DateTime.parse(
-                    messages[j]['createdAt'] ??
+                // ── Stable key prevents Flutter reusing widget state
+                final msgKey = ValueKey(msg['_id'] ?? index);
+
+                final msgTime = DateTime.parse(
+                    msg['createdAt'] ??
                         DateTime.now().toIso8601String())
                     .toLocal();
-                break;
-              }
-              final showDateDiv = olderTime == null ||
-                  !_sameDay(msgTime.toIso8601String(),
-                      olderTime.toIso8601String());
+                DateTime? olderTime;
+                for (int j = index + 1;
+                j < messages.length;
+                j++) {
+                  olderTime = DateTime.parse(
+                      messages[j]['createdAt'] ??
+                          DateTime.now().toIso8601String())
+                      .toLocal();
+                  break;
+                }
+                final showDateDiv = olderTime == null ||
+                    !_sameDay(msgTime.toIso8601String(),
+                        olderTime.toIso8601String());
 
-              return Column(
-                key: msgKey,
-                children: [
-                  if (showDateDiv)
-                    _buildDateDivider(msgTime.toIso8601String()),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: GroupMessageBubble(
-                      // ── ValueKey here is the critical fix:
-                      //    ensures each message ID maps to exactly
-                      //    one widget instance, preventing state
-                      //    from leaking between bubbles on scroll
-                      key: ValueKey(msg['_id'] ?? index),
-                      message: msg,
-                      currentUserId: _currentUserId,
-                      groupId: widget.groupId,
-                      showAvatar: true,
-                      onReply: _setReplyMessage,
+                // ✅ ADD: Scroll detection to load older messages
+                WidgetsBinding.instance
+                    .addPostFrameCallback((_) {
+                  try {
+                    if (_scrollController.hasClients) {
+                      final extentBefore =
+                          _scrollController.position
+                              .extentBefore;
+                      final hasMore = provider
+                          .groupMessageHasMore(widget.groupId);
+                      final isLoading = provider
+                          .isLoadingMoreGroupMessages;
+
+                      if (extentBefore < 100 &&
+                          hasMore &&
+                          !isLoading) {
+                        print(
+                            '📜 [Group] Scrolled near top — loading older');
+                        provider.loadOlderGroupMessages(
+                            widget.groupId);
+                      }
+                    }
+                  } catch (e) {
+                    print('⚠️ Scroll error: $e');
+                  }
+                });
+
+                return Column(
+                  key: msgKey,
+                  children: [
+                    if (showDateDiv)
+                      _buildDateDivider(
+                          msgTime.toIso8601String()),
+                    Padding(
+                      padding:
+                      const EdgeInsets.only(bottom: 4),
+                      child: GroupMessageBubble(
+                        key: ValueKey(msg['_id'] ?? index),
+                        message: msg,
+                        currentUserId: _currentUserId,
+                        groupId: widget.groupId,
+                        showAvatar: true,
+                        onReply: _setReplyMessage,
+                      ),
                     ),
-                  ),
-                ],
-              );
-            },
+                  ],
+                );
+              },
+            ),
           ),
         );
       },

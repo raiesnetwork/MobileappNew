@@ -597,29 +597,104 @@ class GroupChatProvider with ChangeNotifier {
   // ════════════════════════════════════════════════════════════════════════
   //  MESSAGES
   // ════════════════════════════════════════════════════════════════════════
+// ADD to GroupChatProvider class (after existing state fields):
+
+// ════════════════════════════════════════════════════════════════════════
+//  PAGINATION STATE PER GROUP
+// ════════════════════════════════════════════════════════════════════════
+  final Map<String, int> _messagePageMap = {};      // groupId -> currentPage
+  final Map<String, int> _messageTotalPagesMap = {}; // groupId -> totalPages
+  final Map<String, bool> _messageHasMoreMap = {};   // groupId -> hasMore
+  bool _isLoadingMoreGroupMessages = false;
+
+  int getGroupMessagePage(String groupId) =>
+      _messagePageMap[groupId] ?? 1;
+
+  int getGroupMessageTotalPages(String groupId) =>
+      _messageTotalPagesMap[groupId] ?? 1;
+
+  bool groupMessageHasMore(String groupId) =>
+      _messageHasMoreMap[groupId] ?? false;
+
+  bool get isLoadingMoreGroupMessages => _isLoadingMoreGroupMessages;
+
+// ════════════════════════════════════════════════════════════════════════
+//  REPLACE fetchGroupMessages with pagination support
+// ════════════════════════════════════════════════════════════════════════
+
   Future<void> fetchGroupMessages(String groupId, {int pageNo = 1}) async {
     print('🔄 [Provider] fetchGroupMessages $groupId page=$pageNo');
-    _isLoadingMessages = true;
-    _messagesError     = null;
-    _currentGroupId    = groupId;
+
+    if (pageNo == 1) {
+      _isLoadingMessages = true;
+      _messagesError = null;
+    } else {
+      _isLoadingMoreGroupMessages = true;
+    }
+
+    _currentGroupId = groupId;
     _notify();
 
     try {
-      final r = await _svc.getGroupMessages(groupId, pageNo: pageNo);
+      // ✅ Pass pageNo and limit (30 messages per page for groups)
+      final r = await _svc.getGroupMessages(groupId, pageNo: pageNo, limit: 30);
+
       if (!r['error']) {
-        _groupMessages[groupId] =
+        final fetchedMsgs =
         List<Map<String, dynamic>>.from(r['data'] ?? []);
+
+        // ✅ Extract pagination info
+        final pagination = r['pagination'] as Map<String, dynamic>? ?? {};
+        _messagePageMap[groupId] = (pagination['currentPage'] as int?) ?? pageNo;
+        _messageTotalPagesMap[groupId] = (pagination['totalPages'] as int?) ?? 1;
+        _messageHasMoreMap[groupId] = (pagination['hasMore'] as bool?) ?? false;
+
+        print('✅ Page $pageNo: Fetched ${fetchedMsgs.length} messages | '
+            'Total pages: ${_messageTotalPagesMap[groupId]} | '
+            'hasMore: ${_messageHasMoreMap[groupId]}');
+
+        if (pageNo == 1) {
+          // ← First page: replace all
+          _groupMessages[groupId] = fetchedMsgs;
+        } else {
+          // ← Load more: prepend older messages to top
+          _groupMessages[groupId] ??= [];
+          _groupMessages[groupId]!.insertAll(0, fetchedMsgs);
+          print('➕ Loaded older messages. Total in group: '
+              '${_groupMessages[groupId]!.length}');
+        }
       } else {
-        _messagesError          = r['message'];
+        _messagesError = r['message'];
         _groupMessages[groupId] = [];
       }
     } catch (e) {
-      _messagesError          = 'Exception: $e';
+      _messagesError = 'Exception: $e';
       _groupMessages[groupId] = [];
       print('💥 fetchGroupMessages: $e');
     }
 
-    _isLoadingMessages = false; _notify();
+    _isLoadingMessages = false;
+    _isLoadingMoreGroupMessages = false;
+    _notify();
+  }
+
+// ════════════════════════════════════════════════════════════════════════
+//  LOAD OLDER GROUP MESSAGES (call when scrolling up)
+// ════════════════════════════════════════════════════════════════════════
+
+  Future<void> loadOlderGroupMessages(String groupId) async {
+    if (_isDisposed) return;
+
+    // ✅ Don't load if already at end or already loading
+    if (!groupMessageHasMore(groupId) || _isLoadingMoreGroupMessages) {
+      print('⚠️ [Group] No more messages or already loading');
+      return;
+    }
+
+    final nextPage = getGroupMessagePage(groupId) + 1;
+    print('🔄 [Group] Loading page $nextPage...');
+
+    await fetchGroupMessages(groupId, pageNo: nextPage);
   }
 
   Future<void> refreshCurrentGroupMessages() async {

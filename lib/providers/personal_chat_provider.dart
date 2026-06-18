@@ -409,18 +409,40 @@
       _safeNotifyListeners();
     }
 
-    Future<void> fetchConversation(String userId) async {
+    // ADD these to PersonalChatProvider class (after existing message-related fields):
+
+// ════════════════════════════════════════════════════════════════════════
+//  PAGINATION STATE
+// ════════════════════════════════════════════════════════════════════════
+    int _messagePageNo = 1;
+    int _messageTotalPages = 1;
+    bool _messageHasMore = false;
+    bool _isLoadingMoreMessages = false;
+
+    int get messagePageNo => _messagePageNo;
+    int get messageTotalPages => _messageTotalPages;
+    bool get messageHasMore => _messageHasMore;
+    bool get isLoadingMoreMessages => _isLoadingMoreMessages;
+
+// ════════════════════════════════════════════════════════════════════════
+//  REPLACE fetchConversation with pagination support
+// ════════════════════════════════════════════════════════════════════════
+
+    Future<void> fetchConversation(String userId, {int pageNo = 1}) async {
       if (_isDisposed) return;
 
       final isNewConversation = _currentReceiverId != userId;
       if (isNewConversation) {
         _messages = [];
         _currentReceiverId = userId;
+        _messagePageNo = 1;
       }
 
-      // ← Don't show loading spinner if we already have messages (resume case)
-      if (_messages.isEmpty) {
+      if (_messages.isEmpty && pageNo == 1) {
         _isConversationLoading = true;
+        _safeNotifyListeners();
+      } else if (pageNo > 1) {
+        _isLoadingMoreMessages = true;
         _safeNotifyListeners();
       }
 
@@ -431,46 +453,117 @@
           _chatService.joinConversation(_currentUserId!, userId);
         }
 
-        final result = await _chatService.getMessages(userId: userId);
+        final result = await _chatService.getMessages(
+          userId: userId,
+          pageNo: pageNo,
+          limit: 10,
+        );
 
-        if (result['error'] == false && result['data'] != null) {
-          final data = result['data'];
-          _userData = data['userData'] ?? {};
-          final rawMessages = data['messages'] as List<dynamic>? ?? [];
-          final fetched = rawMessages
-              .map((m) => _processMessage(m as Map<String, dynamic>))
-              .toList();
+        print('🔍 Result error: ${result['error']}');
+        print('🔍 Data type: ${result['data'].runtimeType}');
 
-          // Keep only optimistic messages not yet confirmed by server
-          final fetchedIds = fetched.map((m) => m['_id'].toString()).toSet();
+        // ❌ CHECK FOR ERROR FIRST
+        if (result['error'] == true) {
+          _error = result['message'] ?? 'Failed to fetch';
+          _isConversationLoading = false;
+          _isLoadingMoreMessages = false;
+          _safeNotifyListeners();
+          return;
+        }
+
+        // ✅ STEP 1: Extract the nested data object
+        // Backend sends: { data: { messages: [...], userData: {...} }, pagination: {...} }
+        Map<String, dynamic>? dataObj;
+        List<dynamic> rawMessages = [];
+
+        if (result['data'] is Map<String, dynamic>) {
+          dataObj = result['data'] as Map<String, dynamic>;
+
+          // ✅ STEP 2: Get messages from nested structure
+          if (dataObj!['messages'] is List) {
+            rawMessages = dataObj['messages'] as List<dynamic>;
+          }
+
+          // ✅ STEP 3: Get user data
+          if (dataObj['userData'] is Map<String, dynamic>) {
+            _userData = dataObj['userData'] as Map<String, dynamic>;
+          }
+        }
+
+        print('📨 Extracted ${rawMessages.length} messages');
+
+        // ✅ STEP 4: Process each message
+        final fetched = rawMessages.map((m) {
+          if (m is Map<String, dynamic>) {
+            return _processMessage(m);
+          }
+          return <String, dynamic>{};
+        }).toList();
+
+        // ✅ STEP 5: Extract pagination
+        final pagination = result['pagination'] as Map<String, dynamic>? ?? {};
+        _messagePageNo = (pagination['currentPage'] as int?) ?? pageNo;
+        _messageTotalPages = (pagination['totalPages'] as int?) ?? 1;
+        _messageHasMore = (pagination['hasMore'] as bool?) ?? false;
+
+        print('✅ Page $pageNo: ${fetched.length} messages | '
+            'Pages: $_messageTotalPages | hasMore: $_messageHasMore');
+
+        // ✅ STEP 6: Update messages list
+        if (pageNo == 1) {
+          // First page: replace all
           final optimisticOnly = _messages.where(
                 (m) => m['isOptimistic'] == true &&
-                !fetchedIds.contains(m['_id'].toString()),
+                fetched.every((f) => f['_id'] != m['_id']),
           ).toList();
-
-          // Merge: server messages + pending optimistic only
           _messages = [...fetched, ...optimisticOnly];
-
-          // Sort only by createdAt — stable, no reordering tricks
-          _messages.sort((a, b) {
-            try {
-              return DateTime.parse(a['createdAt'])
-                  .compareTo(DateTime.parse(b['createdAt']));
-            } catch (_) {
-              return 0;
-            }
-          });
-
-          print('✅ Loaded ${_messages.length} messages (${optimisticOnly.length} optimistic pending)');
         } else {
-          _error = result['message'] ?? 'Failed to fetch conversation';
+          // Load more: prepend older
+          _messages = [...fetched, ..._messages];
+          print('➕ Total messages now: ${_messages.length}');
         }
-      } catch (e) {
-        _error = 'Error fetching conversation: $e';
+
+        // ✅ STEP 7: Sort by date
+        _messages.sort((a, b) {
+          try {
+            final aDate = DateTime.parse(a['createdAt'].toString());
+            final bDate = DateTime.parse(b['createdAt'].toString());
+            return aDate.compareTo(bDate);
+          } catch (e) {
+            return 0;
+          }
+        });
+
+        _error = null;
+
+      } catch (e, st) {
+        print('💥 CATCH ERROR: $e');
+        print('📍 Stack: $st');
+        _error = 'Error: $e';
       } finally {
         _isConversationLoading = false;
+        _isLoadingMoreMessages = false;
         _safeNotifyListeners();
       }
+    }
+
+// ════════════════════════════════════════════════════════════════════════
+//  LOAD OLDER MESSAGES (call when scrolling up)
+// ════════════════════════════════════════════════════════════════════════
+
+    Future<void> loadOlderMessages(String userId) async {
+      if (_isDisposed) return;
+
+      // ✅ Don't load if already at the end or already loading
+      if (!_messageHasMore || _isLoadingMoreMessages) {
+        print('⚠️ No more messages or already loading');
+        return;
+      }
+
+      final nextPage = _messagePageNo + 1;
+      print('🔄 Loading page $nextPage...');
+
+      await fetchConversation(userId, pageNo: nextPage);
     }
 
     void leaveConversation() {

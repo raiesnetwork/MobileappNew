@@ -883,28 +883,230 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   child: RefreshIndicator(
                     onRefresh: () async =>
                         provider.fetchConversation(widget.userId),
-                    color:
-                    Theme.of(context).colorScheme.primary,
+                    color: Theme.of(context).colorScheme.primary,
                     backgroundColor: Colors.white,
-                    child: ListView.builder(
+                    // ✅ ADD SCROLLBAR
+                    child: Scrollbar(
                       controller: _scrollController,
-                      reverse: true,
-                      shrinkWrap: messages.length < 15,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      itemCount: messages.length,
-                      physics:
-                      const AlwaysScrollableScrollPhysics(),
-                      itemBuilder: (context, index) {
-                        final message = messages[index];
+                      thumbVisibility: true,
+                      thickness: 8,
+                      radius: const Radius.circular(4),
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        reverse: true,
+                        shrinkWrap: messages.length < 15,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        // ✅ CHANGE itemCount
+                        itemCount: messages.length +
+                            (provider.messageHasMore ? 1 : 0),
+                        physics:
+                        const AlwaysScrollableScrollPhysics(),
+                        itemBuilder: (context, index) {
+                          // ✅ ADD: Loading indicator at top
+                          if (index == messages.length &&
+                              provider.messageHasMore) {
+                            return Container(
+                              padding:
+                              const EdgeInsets.symmetric(vertical: 16),
+                              alignment: Alignment.center,
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation(
+                                    Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
 
-                        if (message['isDelete'] == true) {
-                          return const SizedBox.shrink();
-                        }
+                          final message = messages[index];
 
-                        // ✅ CALL BUBBLE — render for call type messages
-                        if (message['isCall'] == true ||
-                            message['type'] == 'call') {
+                          if (message['isDelete'] == true) {
+                            return const SizedBox.shrink();
+                          }
+
+                          bool _isLoadingDebounced = false;
+
+// Inside itemBuilder, replace the WidgetsBinding code with:
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            try {
+                              if (_scrollController.hasClients && !_isLoadingDebounced) {
+                                final extentBefore = _scrollController.position.extentBefore;
+                                if (extentBefore < 100) {
+                                  _isLoadingDebounced = true; // ← BLOCK UNTIL REQUEST COMPLETES
+                                  provider.loadOlderMessages(widget.userId).then((_) {
+                                    _isLoadingDebounced = false; // ← UNBLOCK WHEN DONE
+                                  });
+                                }
+                              }
+                            } catch (e) {
+                              print('⚠️ Scroll error: $e');
+                            }
+                          });
+
+                          // ... rest of your existing message building code stays the same ...
+                          // (isCall check, meeting message, forwarded, etc.)
+
+                          if (message['isCall'] == true ||
+                              message['type'] == 'call') {
+                            final isMe = message['senderId'] ==
+                                provider.currentUserId;
+                            final msgTime = DateTime.parse(
+                                message['createdAt'])
+                                .toLocal();
+
+                            DateTime? olderTime;
+                            for (int j = index + 1;
+                            j < messages.length;
+                            j++) {
+                              if (messages[j]['isDelete'] !=
+                                  true) {
+                                olderTime = DateTime.parse(
+                                    messages[j]['createdAt'])
+                                    .toLocal();
+                                break;
+                              }
+                            }
+                            final showDateDiv = olderTime == null ||
+                                !_sameDay(msgTime, olderTime);
+
+                            return Column(
+                              children: [
+                                if (showDateDiv)
+                                  _buildDateDivider(msgTime),
+                                Padding(
+                                  padding:
+                                  const EdgeInsets.only(
+                                      bottom: 8),
+                                  child: CallBubble(
+                                    call: message,
+                                    isMe: isMe,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          final msgContent =
+                              message['text']?.toString() ?? '';
+                          final isMeetingMsg =
+                          msgContent.trimLeft().startsWith('📅');
+
+                          final existingUrl =
+                          (message['linkMeta']?['url'] ?? '')
+                              .toString()
+                              .trim();
+                          Map<String, dynamic>? resolvedLinkMeta =
+                          existingUrl.isNotEmpty
+                              ? message['linkMeta']
+                              : null;
+
+                          if (isMeetingMsg &&
+                              resolvedLinkMeta == null) {
+                            final urlMatch = RegExp(
+                              r'https?://[^\s\n\r]+',
+                              caseSensitive: false,
+                            ).firstMatch(msgContent);
+                            if (urlMatch != null) {
+                              final url = urlMatch
+                                  .group(0)
+                                  ?.replaceAll(
+                                  RegExp(r'[.,;:!?\s]+$'),
+                                  '') ??
+                                  '';
+                              if (url.isNotEmpty) {
+                                resolvedLinkMeta = {
+                                  'url': url,
+                                  'title': '',
+                                  'description': '',
+                                  'image': ''
+                                };
+                              }
+                            }
+                          }
+
+                          final forwerdUrl =
+                          (message['forwerdUrl'] ?? '')
+                              .toString();
+
+                          final isCampaignForward =
+                              (message['forwerdMessage'] ?? '')
+                                  .toString()
+                                  .isNotEmpty &&
+                                  (message['image'] ?? '')
+                                      .toString()
+                                      .isNotEmpty &&
+                                  message['isAudio'] != true &&
+                                  message['isFile'] != true &&
+                                  !forwerdUrl
+                                      .contains('/feeds/') &&
+                                  !forwerdUrl.contains(
+                                      '/feedpage/');
+
+                          final isSharedCard = isCampaignForward ||
+                              (message['forwerd'] == true &&
+                                  (message['forwerdUrl'] !=
+                                      null &&
+                                      (message['forwerdUrl']
+                                          ?.toString() ??
+                                          '')
+                                          .isNotEmpty) &&
+                                  message['isAudio'] !=
+                                      true &&
+                                  message['isFile'] != true);
+
+                          Map<String, dynamic>?
+                          resolvedPost;
+                          if (isCampaignForward) {
+                            String shareType = 'campaign';
+
+                            debugPrint(
+                                '🔍 ===== CAMPAIGN DETECTED =====');
+                            debugPrint(
+                                '🔍 Initial shareType: $shareType');
+
+                            if (forwerdUrl.contains(
+                                '/community/') &&
+                                forwerdUrl.contains(
+                                    '/announcements')) {
+                              shareType = 'announcement';
+                              debugPrint(
+                                  '🔍 Detected as ANNOUNCEMENT');
+                            } else if (forwerdUrl
+                                .contains('/services/')) {
+                              shareType = 'service';
+                              debugPrint(
+                                  '🔍 Detected as SERVICE');
+                            } else {
+                              debugPrint(
+                                  '🔍 Keeping as CAMPAIGN');
+                            }
+
+                            resolvedPost = {
+                              '_id': '',
+                              'shareType': shareType,
+                              'text': message['text'] ?? '',
+                              'images': [(message['image'] ??
+                                  '')],
+                              'authorName':
+                              message['forwerdMessage'] ??
+                                  'Forwarded',
+                              'authorProfile': '',
+                              'forwerdUrl': forwerdUrl,
+                              'likesCount': 0,
+                              'commentsCount': 0,
+                              'isOriginalShared': true,
+                              'isForwarded': false,
+                            };
+                          } else {
+                            resolvedPost =
+                                _resolveSharedPostData(message);
+                          }
+
                           final isMe = message['senderId'] ==
                               provider.currentUserId;
                           final msgTime = DateTime.parse(
@@ -926,187 +1128,80 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           final showDateDiv = olderTime == null ||
                               !_sameDay(msgTime, olderTime);
 
+                          Map<String, dynamic>?
+                          repliedMessage;
+                          if (message['replyTo'] != null) {
+                            repliedMessage = _getMessageById(
+                                message['replyTo']);
+                          }
+
+                          debugPrint(
+                              '🔍 MSG: id=${message['_id']}, '
+                                  'senderId=${message['senderId']}, '
+                                  'receiverId=${message['receiverId']}, '
+                                  'isMe=$isMe, '
+                                  'widgetUserId=${widget.userId}');
+                          debugPrint(
+                              '📦 Forwarded msg: ${jsonEncode(message)}');
+
                           return Column(
                             children: [
                               if (showDateDiv)
                                 _buildDateDivider(msgTime),
                               Padding(
-                                padding: const EdgeInsets.only(
+                                padding:
+                                const EdgeInsets.only(
                                     bottom: 8),
-                                child: CallBubble(
-                                  call: message,
+                                child: MessageBubble(
+                                  replyTo:
+                                  message['replyTo'],
+                                  replyToMessage:
+                                  repliedMessage,
+                                  onReply: (msg) =>
+                                      _setReplyMessage(msg),
+                                  content: message['text'],
                                   isMe: isMe,
+                                  timestamp: DateTime.parse(
+                                      message['createdAt']),
+                                  status: message['status'],
+                                  linkMeta:
+                                  message['linkMeta'],
+                                  isFile: message['isFile'] ??
+                                      false,
+                                  fileUrl:
+                                  message['fileUrl'],
+                                  fileName:
+                                  message['fileName'],
+                                  fileType:
+                                  message['fileType'],
+                                  localFilePath: message[
+                                  'localFilePath'],
+                                  isOptimistic: message[
+                                  'isOptimistic'] ??
+                                      false,
+                                  readBy: message['readBy'] ??
+                                      false,
+                                  messageId:
+                                  message['_id'] ?? '',
+                                  receiverId: isMe
+                                      ? message['receiverId']
+                                      : message['senderId'],
+                                  isAudio: message['isAudio'] ??
+                                      false,
+                                  audioUrl:
+                                  message['audioUrl'],
+                                  isSharedPost: isSharedCard,
+                                  isForwarded:
+                                  message['forwerd'] ==
+                                      true,
+                                  sharedPostData:
+                                  resolvedPost,
                                 ),
                               ),
                             ],
                           );
-                        }
-                        // Detect meeting message and inject linkMeta
-                        final msgContent = message['text']?.toString() ?? '';
-                        final isMeetingMsg = msgContent.trimLeft().startsWith('📅');
-
-                        final existingUrl = (message['linkMeta']?['url'] ?? '').toString().trim();
-                        Map<String, dynamic>? resolvedLinkMeta = existingUrl.isNotEmpty
-                            ? message['linkMeta']
-                            : null;
-
-                        if (isMeetingMsg && resolvedLinkMeta == null) {
-                          final urlMatch = RegExp(
-                            r'https?://[^\s\n\r]+',
-                            caseSensitive: false,
-                          ).firstMatch(msgContent);
-                          if (urlMatch != null) {
-                            final url = urlMatch.group(0)?.replaceAll(RegExp(r'[.,;:!?\s]+$'), '') ?? '';
-                            if (url.isNotEmpty) {
-                              resolvedLinkMeta = {'url': url, 'title': '', 'description': '', 'image': ''};
-                            }
-                          }
-                        }
-
-
-                        // ── Regular message ──────────────────
-// ✅ Detect forwarded campaign by forwerdMessage + image present
-                        final forwerdUrl = (message['forwerdUrl'] ?? '').toString();
-
-
-
-                        final isCampaignForward =
-                            (message['forwerdMessage'] ?? '').toString().isNotEmpty &&
-                                (message['image'] ?? '').toString().isNotEmpty &&
-                                message['isAudio'] != true &&
-                                message['isFile'] != true &&
-                                !forwerdUrl.contains('/feeds/') &&
-                                !forwerdUrl.contains('/feedpage/');
-
-
-                        final isSharedCard = isCampaignForward ||
-                            (message['forwerd'] == true &&
-                                (message['forwerdUrl'] != null &&
-                                    (message['forwerdUrl']?.toString() ?? '').isNotEmpty) &&
-                                message['isAudio'] != true &&
-                                message['isFile'] != true);
-
-
-                        Map<String, dynamic>? resolvedPost;
-                        if (isCampaignForward) {
-                          // Detect shareType from URL
-                          String shareType = 'campaign';
-
-                          debugPrint('🔍 ===== CAMPAIGN DETECTED =====');
-                          debugPrint('🔍 Initial shareType: $shareType');
-
-                          if (forwerdUrl.contains('/community/') && forwerdUrl.contains('/announcements')) {
-                            shareType = 'announcement';
-                            debugPrint('🔍 Detected as ANNOUNCEMENT');
-                          } else if (forwerdUrl.contains('/services/')) {
-                            shareType = 'service';
-                            debugPrint('🔍 Detected as SERVICE');
-                          } else {
-                            debugPrint('🔍 Keeping as CAMPAIGN');
-                          }
-
-                          resolvedPost = {
-                            '_id': '',
-                            'shareType': shareType,
-                            'text': message['text'] ?? '',
-                            'images': [(message['image'] ?? '')],
-                            'authorName': message['forwerdMessage'] ?? 'Forwarded',
-                            'authorProfile': '',
-                            'forwerdUrl': forwerdUrl,
-                            'likesCount': 0,
-                            'commentsCount': 0,
-                            'isOriginalShared': true,  // ✅ ADD THIS
-                            'isForwarded': false,       // ✅ ADD THIS
-                          };
-
-
-                        } else {
-                          resolvedPost = _resolveSharedPostData(message);
-                        }
-
-                        final isMe = message['senderId'] ==
-                            provider.currentUserId;
-                        final msgTime = DateTime.parse(
-                            message['createdAt'])
-                            .toLocal();
-
-                        DateTime? olderTime;
-                        for (int j = index + 1;
-                        j < messages.length;
-                        j++) {
-                          if (messages[j]['isDelete'] != true) {
-                            olderTime = DateTime.parse(
-                                messages[j]['createdAt'])
-                                .toLocal();
-                            break;
-                          }
-                        }
-                        final showDateDiv = olderTime == null ||
-                            !_sameDay(msgTime, olderTime);
-
-                        Map<String, dynamic>? repliedMessage;
-                        if (message['replyTo'] != null) {
-                          repliedMessage = _getMessageById(
-                              message['replyTo']);
-                        }
-                        // Temporary debug - add before MessageBubble(...)
-                        debugPrint('🔍 MSG: id=${message['_id']}, '
-                            'senderId=${message['senderId']}, '
-                            'receiverId=${message['receiverId']}, '
-                            'isMe=$isMe, '
-                            'widgetUserId=${widget.userId}');
-                        debugPrint('📦 Forwarded msg: ${jsonEncode(message)}');
-
-                        return Column(
-                          children: [
-                            if (showDateDiv)
-                              _buildDateDivider(msgTime),
-
-                            Padding(
-                              padding:
-                              const EdgeInsets.only(bottom: 8),
-                              child: MessageBubble(
-
-                                replyTo: message['replyTo'],
-                                replyToMessage: repliedMessage,
-                                onReply: (msg) =>
-                                    _setReplyMessage(msg),
-                                content: message['text'],
-                                isMe: isMe,
-                                timestamp: DateTime.parse(
-                                    message['createdAt']),
-                                status: message['status'],
-                                linkMeta: message['linkMeta'],
-
-                                isFile:
-                                message['isFile'] ?? false,
-                                fileUrl: message['fileUrl'],
-                                fileName: message['fileName'],
-                                fileType: message['fileType'],
-                                localFilePath:
-                                message['localFilePath'],
-                                isOptimistic:
-                                message['isOptimistic'] ??
-                                    false,
-                                readBy:
-                                message['readBy'] ?? false,
-                                messageId:
-                                message['_id'] ?? '',
-                                receiverId: isMe
-                                    ? message['receiverId']
-                                    : message['senderId'],
-                                isAudio:
-                                message['isAudio'] ?? false,
-                                audioUrl: message['audioUrl'],
-                                isSharedPost: isSharedCard,
-                                isForwarded: message['forwerd'] == true,
-                                sharedPostData: resolvedPost,
-
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                        },
+                      ),
                     ),
                   ),
                 ),

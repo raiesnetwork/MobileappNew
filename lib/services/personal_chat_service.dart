@@ -165,27 +165,69 @@ class PersonalChatService {
   //  GET MESSAGES
   // ════════════════════════════════════════════════════════════════════════
 
-  Future<Map<String, dynamic>> getMessages({required String userId}) async {
+  // UPDATE for PersonalChatService.getMessages — Replace the existing method with:
+
+  Future<Map<String, dynamic>> getMessages({
+    required String userId,
+    int pageNo = 1,
+    int limit = 10,
+  }) async {
     try {
-      final response = await ApiService.get('/api/chat/message/$userId');
+      final endpoint = '/api/chat/message/$userId?pageNo=$pageNo&limit=$limit';
+
+      print('📡 [FETCH] Calling: $endpoint');
+      final response = await ApiService.get(endpoint);
       ApiService.checkResponse(response);
 
-      print('📡 Response Status: ${response.statusCode}');
-      print('📦 Response Body: ${response.body}');
+      print('📡 [FETCH] Status: ${response.statusCode}');
 
       final decoded = _safeJsonDecode(response);
-      if (response.statusCode == 200) {
+
+      if (response.statusCode == 200 && decoded['error'] == false) {
+        // ✅ Extract nested structure correctly
+        final dataObj = decoded['data'] as Map<String, dynamic>? ?? {};
+        final messagesList = (dataObj['messages'] is List)
+            ? dataObj['messages'] as List<dynamic>
+            : [];
+        final userDataObj =
+        (dataObj['userData'] is Map<String, dynamic>)
+            ? dataObj['userData'] as Map<String, dynamic>
+            : {};
+
+        final pagination = decoded['pagination'] as Map<String, dynamic>? ?? {};
+
+        print('✅ [FETCH] Got ${messagesList.length} messages');
+        print('📊 [FETCH] Pagination: ${pagination['currentPage']}/${pagination['totalPages']}');
+
+        // ✅ Return the NESTED structure
         return {
-          'error': decoded['error'] ?? false,
-          'message': 'Messages fetched successfully',
-          'data': decoded['data'],
+          'error': false,
+          'message': 'OK',
+          'data': {
+            'messages': messagesList,
+            'userData': userDataObj,
+          },
+          'pagination': pagination,
         };
       } else {
-        return {'error': true, 'message': decoded['message'] ?? 'Failed to fetch messages', 'data': null};
+        print(
+            '❌ [FETCH] Error: ${decoded['message'] ?? "Unknown error"}');
+        return {
+          'error': true,
+          'message': decoded['message'] ?? 'Failed to fetch messages',
+          'data': null,
+          'pagination': {}
+        };
       }
-    } catch (e) {
-      print('💥 Exception occurred while fetching messages: $e');
-      return {'error': true, 'message': 'Error fetching messages: ${e.toString()}', 'data': null};
+    } catch (e, st) {
+      print('💥 [FETCH] Exception: $e');
+      print('📍 [FETCH] Stack: $st');
+      return {
+        'error': true,
+        'message': e.toString(),
+        'data': null,
+        'pagination': {}
+      };
     }
   }
 

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../services/notification_service.dart';
 
 class NotificationProvider with ChangeNotifier {
@@ -11,144 +10,119 @@ class NotificationProvider with ChangeNotifier {
   bool _isLoading = false;
   String? _error;
   StreamSubscription? _notificationSubscription;
-
-  // Client-side tracking of read notifications (persisted locally)
   Set<String> _readNotificationIds = {};
+
+  // Debounce timer — prevents rapid successive notifyListeners calls
+  Timer? _notifyDebounce;
 
   List<Map<String, dynamic>> get notifications => _notifications;
   bool get isLoading => _isLoading;
   String? get error => _error;
 
-  // ✅ Helper to extract chatId from notification (handles nested structure)
+  void _scheduleNotify() {
+    _notifyDebounce?.cancel();
+    _notifyDebounce = Timer(const Duration(milliseconds: 50), () {
+      notifyListeners();
+    });
+  }
+
   String? _extractChatId(Map<String, dynamic> notification) {
     if (notification['relatedData'] != null) {
       final relatedData = notification['relatedData'] as Map<String, dynamic>;
-      if (relatedData['chatId'] != null) {
-        return relatedData['chatId'].toString();
-      }
+      if (relatedData['chatId'] != null) return relatedData['chatId'].toString();
     }
     return notification['chatId']?.toString() ??
         notification['communityId']?.toString() ??
         notification['referenceId']?.toString();
   }
 
-  // ✅ Helper to extract communityId from notification
   String? _extractCommunityId(Map<String, dynamic> notification) {
     if (notification['relatedData'] != null) {
       final relatedData = notification['relatedData'] as Map<String, dynamic>;
-      if (relatedData['communityId'] != null) {
-        return relatedData['communityId'].toString();
-      }
+      if (relatedData['communityId'] != null) return relatedData['communityId'].toString();
     }
     return notification['communityId']?.toString() ??
         notification['referenceId']?.toString() ??
         notification['_id']?.toString();
   }
 
-  // ✅ Check if notification is read (client-side tracking)
   bool _isNotificationRead(Map<String, dynamic> notification) {
     final id = notification['_id']?.toString();
     if (id == null) return false;
-
-    // Check both backend status and client-side tracking
     final backendRead = notification['read'] == true || notification['status'] == 'read';
     final clientRead = _readNotificationIds.contains(id);
-
     return backendRead || clientRead;
   }
 
-  // ✅ Get unread count by type
   int getUnreadCountByType(String type) {
-    return _notifications.where((n) {
-      return n['type'] == type && !_isNotificationRead(n);
-    }).length;
+    return _notifications.where((n) => n['type'] == type && !_isNotificationRead(n)).length;
   }
 
-  // ✅ Get unread count for multiple types
   int getUnreadCountForTypes(List<String> types) {
-    return _notifications.where((n) {
-      return types.contains(n['type']) && !_isNotificationRead(n);
-    }).length;
+    return _notifications.where((n) => types.contains(n['type']) && !_isNotificationRead(n)).length;
   }
 
-  // ✅ Total unread count
   int get totalUnreadCount {
     return _notifications.where((n) => !_isNotificationRead(n)).length;
   }
 
-  // ✅ Get notifications by type
   List<Map<String, dynamic>> getNotificationsByType(String type) {
     return _notifications.where((n) => n['type'] == type).toList();
   }
 
-  // ✅ Load read notification IDs from local storage
   Future<void> _loadReadNotifications() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('user_id');
       if (userId == null) return;
-
-      String key = 'read_notifications_$userId';
-      List<String>? stored = prefs.getStringList(key);
-
-      if (stored != null) {
-        _readNotificationIds = stored.toSet();
-        print('📂 Loaded ${_readNotificationIds.length} read notifications from storage');
-      }
+      List<String>? stored = prefs.getStringList('read_notifications_$userId');
+      if (stored != null) _readNotificationIds = stored.toSet();
     } catch (e) {
-      print('💥 Error loading read notifications: $e');
+      debugPrint('Error loading read notifications: $e');
     }
   }
 
-  // ✅ Save read notification IDs to local storage
   Future<void> _saveReadNotifications() async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('user_id');
       if (userId == null) return;
-
-      String key = 'read_notifications_$userId';
-      await prefs.setStringList(key, _readNotificationIds.toList());
-      print('💾 Saved ${_readNotificationIds.length} read notifications to storage');
+      await prefs.setStringList('read_notifications_$userId', _readNotificationIds.toList());
     } catch (e) {
-      print('💥 Error saving read notifications: $e');
+      debugPrint('Error saving read notifications: $e');
     }
   }
 
-  // ✅ Initialize notifications
   Future<void> initializeNotifications() async {
     await _loadReadNotifications();
     await _notificationService.initializeSocket();
     await loadNotifications();
 
-    // Listen for real-time notifications
     _notificationSubscription = _notificationService.onNotification.listen(
           (notification) {
-        print('📬 New notification received in provider: ${notification['type']}');
-        // Add to local list at the beginning
         _notifications.insert(0, notification);
-        notifyListeners();
+        _scheduleNotify(); // debounced — won't spam rebuilds
       },
-      onError: (error) {
-        print('💥 Notification stream error: $error');
-      },
+      onError: (error) => debugPrint('Notification stream error: $error'),
     );
   }
 
-  // ✅ Load all notifications
   Future<void> loadNotifications() async {
+    // Don't re-enter if already loading
+    if (_isLoading) return;
+
     _isLoading = true;
     _error = null;
-    notifyListeners();
+    notifyListeners(); // intentional immediate notify — loading state changed
 
     try {
       final result = await _notificationService.fetchNotifications();
       if (result != null) {
         _notifications = result;
-        print('📦 Loaded ${_notifications.length} notifications');
-
-        // Clean up read IDs for notifications that no longer exist
-        final currentIds = _notifications.map((n) => n['_id']?.toString()).whereType<String>().toSet();
+        final currentIds = _notifications
+            .map((n) => n['_id']?.toString())
+            .whereType<String>()
+            .toSet();
         _readNotificationIds.removeWhere((id) => !currentIds.contains(id));
         await _saveReadNotifications();
       } else {
@@ -159,224 +133,129 @@ class NotificationProvider with ChangeNotifier {
     }
 
     _isLoading = false;
-    notifyListeners();
+    notifyListeners(); // intentional immediate notify — loading done
   }
 
-  // ✅ Mark all notifications of specific types as read (CLIENT-SIDE ONLY)
-  Future<void> markTypesAsRead(List<String> types) async {
-    try {
-      print('🔔 Marking types as read (client-side): $types');
+  /// Marks notifications of given types as read.
+  /// Returns true if anything actually changed (so callers know whether a
+  /// rebuild is needed).
+  Future<bool> markTypesAsRead(List<String> types) async {
+    final toMark = _notifications
+        .where((n) => types.contains(n['type']) && !_isNotificationRead(n))
+        .toList();
 
-      // Get all notifications that need to be marked as read
-      final notificationsToMark = _notifications
-          .where((n) => types.contains(n['type']) && !_isNotificationRead(n))
-          .toList();
+    if (toMark.isEmpty) return false; // nothing changed — no notify
 
-      if (notificationsToMark.isEmpty) {
-        print('✅ No unread notifications to mark for types: $types');
-        return;
-      }
-
-      print('📝 Found ${notificationsToMark.length} notifications to mark as read');
-
-      // Mark all as read in client-side tracking
-      for (var notification in notificationsToMark) {
-        final id = notification['_id']?.toString();
-        if (id != null) {
-          _readNotificationIds.add(id);
-        }
-      }
-
-      // Save to local storage
-      await _saveReadNotifications();
-
-      // Update UI
-      notifyListeners();
-      print('✅ Marked ${notificationsToMark.length} notifications as read (client-side)');
-
-      // Optional: Try to sync with backend using Socket.IO (non-blocking)
-      _syncWithBackendAsync(notificationsToMark);
-
-    } catch (e) {
-      print('💥 Error marking types as read: $e');
+    for (var n in toMark) {
+      final id = n['_id']?.toString();
+      if (id != null) _readNotificationIds.add(id);
     }
+
+    await _saveReadNotifications();
+    _scheduleNotify(); // debounced — collapses rapid consecutive calls
+
+    // Background sync — fire and forget
+    _syncWithBackendAsync(toMark);
+
+    return true;
   }
 
-  // ✅ Background sync with backend (doesn't block UI)
   void _syncWithBackendAsync(List<Map<String, dynamic>> notifications) async {
     try {
       SharedPreferences prefs = await SharedPreferences.getInstance();
       String? userId = prefs.getString('user_id');
       if (userId == null) return;
-
-      print('🔄 Syncing with backend (non-blocking)...');
-
       for (var notif in notifications) {
         final chatId = _extractChatId(notif);
         final type = notif['type'];
-
         if (chatId != null && type != null) {
-          // Use Socket.IO to mark as read
-          _notificationService.markChatAsActive(
-            userId: userId,
-            type: type,
-            chatId: chatId,
-          );
-
-          // Small delay between socket emissions
+          _notificationService.markChatAsActive(userId: userId, type: type, chatId: chatId);
           await Future.delayed(const Duration(milliseconds: 100));
         }
       }
-
-      print('✅ Backend sync completed (background)');
     } catch (e) {
-      print('⚠️ Backend sync failed (non-critical): $e');
+      debugPrint('Backend sync failed (non-critical): $e');
     }
   }
 
-  // ✅ Mark notifications as read
-  Future<bool> markAsRead({
-    required String type,
-    required String communityId,
-  }) async {
-    try {
-      // Find matching notifications and mark them
-      bool hasChanges = false;
-      for (var notification in _notifications) {
-        if (notification['type'] == type &&
-            _extractCommunityId(notification) == communityId) {
-          final id = notification['_id']?.toString();
-          if (id != null) {
-            _readNotificationIds.add(id);
-            hasChanges = true;
-          }
+  Future<bool> markAsRead({required String type, required String communityId}) async {
+    bool hasChanges = false;
+    for (var notification in _notifications) {
+      if (notification['type'] == type && _extractCommunityId(notification) == communityId) {
+        final id = notification['_id']?.toString();
+        if (id != null && !_readNotificationIds.contains(id)) {
+          _readNotificationIds.add(id);
+          hasChanges = true;
         }
       }
-
-      if (hasChanges) {
-        await _saveReadNotifications();
-        notifyListeners();
-      }
-
-      return true;
-    } catch (e) {
-      print('💥 Error marking as read: $e');
-      return false;
     }
+    if (hasChanges) {
+      await _saveReadNotifications();
+      _scheduleNotify();
+    }
+    return true;
   }
 
-  // ✅ Mark chat notifications as read when opening a chat
-  Future<bool> markChatAsRead({
-    required String chatId,
-    required String type,
-  }) async {
-    try {
-      // Find matching notifications and mark them
-      bool hasChanges = false;
-      for (var notification in _notifications) {
-        final notifChatId = _extractChatId(notification);
-
-        if (notifChatId == chatId && notification['type'] == type) {
-          final id = notification['_id']?.toString();
-          if (id != null) {
-            _readNotificationIds.add(id);
-            hasChanges = true;
-          }
+  Future<bool> markChatAsRead({required String chatId, required String type}) async {
+    bool hasChanges = false;
+    for (var notification in _notifications) {
+      final notifChatId = _extractChatId(notification);
+      if (notifChatId == chatId && notification['type'] == type) {
+        final id = notification['_id']?.toString();
+        if (id != null && !_readNotificationIds.contains(id)) {
+          _readNotificationIds.add(id);
+          hasChanges = true;
         }
       }
-
-      if (hasChanges) {
-        await _saveReadNotifications();
-        notifyListeners();
-      }
-
-      return true;
-    } catch (e) {
-      print('💥 Error marking chat as read: $e');
-      return false;
     }
+    if (hasChanges) {
+      await _saveReadNotifications();
+      _scheduleNotify();
+    }
+    return true;
   }
 
-  // ✅ Clear specific notifications
-  Future<bool> clearNotifications({
-    required String type,
-    required String communityId,
-  }) async {
+  Future<bool> clearNotifications({required String type, required String communityId}) async {
     try {
-      // Remove from read tracking
       final toRemove = _notifications
           .where((n) => n['type'] == type && _extractCommunityId(n) == communityId)
           .map((n) => n['_id']?.toString())
           .whereType<String>()
           .toList();
 
-      for (var id in toRemove) {
-        _readNotificationIds.remove(id);
-      }
-
-      // Remove from local state
-      _notifications.removeWhere((notification) =>
-      notification['type'] == type &&
-          _extractCommunityId(notification) == communityId);
+      for (var id in toRemove) _readNotificationIds.remove(id);
+      _notifications.removeWhere(
+              (n) => n['type'] == type && _extractCommunityId(n) == communityId);
 
       await _saveReadNotifications();
-      notifyListeners();
-
-      // Try to sync with backend (non-blocking)
+      _scheduleNotify();
       _notificationService.clearNotifications(type: type, communityId: communityId);
-
       return true;
     } catch (e) {
-      print('💥 Error clearing notifications: $e');
       return false;
     }
   }
 
-  // ✅ Mark chat as active (suppress real-time notifications)
-  void activateChat({
-    required String userId,
-    required String type,
-    required String chatId,
-  }) {
-    _notificationService.markChatAsActive(
-      userId: userId,
-      type: type,
-      chatId: chatId,
-    );
-
-    // Also mark existing notifications as read
+  void activateChat({required String userId, required String type, required String chatId}) {
+    _notificationService.markChatAsActive(userId: userId, type: type, chatId: chatId);
     markChatAsRead(chatId: chatId, type: type);
   }
 
-  // ✅ Mark chat as inactive
-  void deactivateChat({
-    required String userId,
-    required String type,
-    required String chatId,
-  }) {
-    _notificationService.markChatAsInactive(
-      userId: userId,
-      type: type,
-      chatId: chatId,
-    );
+  void deactivateChat({required String userId, required String type, required String chatId}) {
+    _notificationService.markChatAsInactive(userId: userId, type: type, chatId: chatId);
   }
 
-  // ✅ Clear all notifications
   void clearAll(String userId) async {
-    // Clear client-side tracking
     _readNotificationIds.clear();
-    await _saveReadNotifications();
-
-    // Clear local state
     _notifications.clear();
-    notifyListeners();
-
-    // Sync with backend
+    await _saveReadNotifications();
+    _scheduleNotify();
     _notificationService.clearAllNotifications(userId);
   }
 
   @override
   void dispose() {
+    _notifyDebounce?.cancel();
     _notificationSubscription?.cancel();
     _notificationService.dispose();
     super.dispose();
