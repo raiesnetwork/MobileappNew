@@ -7,24 +7,101 @@ import 'package:intl/intl.dart';
 import 'package:ixes.app/screens/BottomNaviagation.dart';
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
 import '../../api_service/user_api_service.dart';
+import '../announcement_page/announcement_screen.dart';
 import '../campaigns_page/campaigns_info screen.dart';
 import '../chats_page/group_chat/group_chat_detail.dart';
 import '../services_page/service_details.dart';
 
-// ── Notification type buckets (single source of truth) ──────────────────────
+
+// ── Notification type buckets ────────────────────────────────────────────────
+
 const _postTypes = [
-  'post', 'like', 'comment', 'PostLike', 'PostComment',
-  'PostShare', 'Post', 'Announcement',
+  'post', 'like', 'comment', 'PostLike', 'PostComment', 'PostShare', 'Post',
+  // 'Announcement' removed — handled separately below
 ];
+const _announcementTypes = ['Announcement'];
 const _chatTypes = [
   'chat', 'message', 'directMessage', 'ChatMessage', 'Conversation',
 ];
 const _communityTypes = ['community', 'GroupRequest'];
 const _serviceReqTypes = ['ServiceReq', 'assignedServiceReq'];
 const _dashTypes = [
-  'campaign', 'Service', 'Invoice', 'StoreSubscription',
-  'SubDomain', 'AddProduct',
+  'campaign', 'Service', 'Invoice', 'StoreSubscription', 'SubDomain', 'AddProduct',
 ];
+
+// ── Helpers (pure functions — defined once, outside widget tree) ─────────────
+
+IconData _iconFor(String type) {
+  if (_announcementTypes.contains(type)) return Icons.campaign_outlined;
+  if (_postTypes.contains(type)) return Icons.article_outlined;
+  if (_chatTypes.contains(type) || type == 'GroupChat') return Icons.chat_bubble_outline;
+  if (_communityTypes.contains(type)) return Icons.group_outlined;
+  if (_serviceReqTypes.contains(type)) return Icons.support_agent_outlined;
+  if (_dashTypes.contains(type)) return Icons.dashboard_outlined;
+  return Icons.notifications_outlined;
+}
+
+Color _colorFor(String type, bool unread) {
+  if (!unread) return const Color(0xFFBDBDBD);
+  if (_announcementTypes.contains(type)) return const Color(0xFF4CAF50);
+  if (_postTypes.contains(type)) return const Color(0xFFFF9800);
+  if (_chatTypes.contains(type) || type == 'GroupChat') return const Color(0xFF9C27B0);
+  if (_communityTypes.contains(type)) return const Color(0xFFFF4081);
+  if (_serviceReqTypes.contains(type)) return const Color(0xFF00BCD4);
+  if (_dashTypes.contains(type)) return const Color(0xFF2196F3);
+  return const Color(0xFF2196F3);
+}
+
+String _labelFor(String type) {
+  const labels = {
+    'Announcement': 'Announcement',
+    'post': 'Post', 'Post': 'Post',
+    'like': 'Like', 'PostLike': 'Like',
+    'comment': 'Comment', 'PostComment': 'Comment',
+    'PostShare': 'Share',
+    'chat': 'Chat', 'message': 'Message', 'directMessage': 'Direct Message',
+    'ChatMessage': 'Message', 'Conversation': 'Chat',
+    'GroupChat': 'Group Chat',
+    'community': 'Community', 'GroupRequest': 'Group Request',
+    'ServiceReq': 'Service Request', 'assignedServiceReq': 'Assigned Request',
+    'campaign': 'Campaign',
+    'Service': 'Service',
+    'Invoice': 'Invoice',
+    'StoreSubscription': 'Subscription',
+    'SubDomain': 'Sub Domain',
+    'AddProduct': 'Product',
+  };
+  return labels[type] ?? type;
+}
+
+String _formatDate(String raw) {
+  try {
+    final dt = DateTime.parse(raw).toLocal();
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return DateFormat('dd MMM yyyy • hh:mm a').format(dt);
+  } catch (_) {
+    return raw;
+  }
+}
+
+List<Map<String, dynamic>> _sorted(List<Map<String, dynamic>> list) {
+  final copy = List<Map<String, dynamic>>.from(list);
+  copy.sort((a, b) {
+    try {
+      return DateTime.parse(b['createdAt'] ?? '')
+          .compareTo(DateTime.parse(a['createdAt'] ?? ''));
+    } catch (_) {
+      return 0;
+    }
+  });
+  return copy;
+}
+
+// ── Widget ───────────────────────────────────────────────────────────────────
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -34,24 +111,33 @@ class NotificationScreen extends StatefulWidget {
 }
 
 class _NotificationScreenState extends State<NotificationScreen> {
+  // Cache sorted list to avoid re-sorting on every build
+  List<Map<String, dynamic>> _cachedItems = [];
+  int _cachedLength = -1;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<NotificationProvider>(context, listen: false)
-          .loadNotifications();
+      if (mounted) {
+        Provider.of<NotificationProvider>(context, listen: false)
+            .loadNotifications();
+      }
     });
   }
 
-  Future<void> _refresh() =>
-      Provider.of<NotificationProvider>(context, listen: false)
-          .loadNotifications();
+  Future<void> _refresh() async {
+    if (!mounted) return;
+    await Provider.of<NotificationProvider>(context, listen: false)
+        .loadNotifications();
+  }
 
   // ── Navigation helpers ───────────────────────────────────────────────────
 
-  /// Pop this screen then switch to [tab] in MainScreen.
   void _goToTab(int tab, {String? postId}) {
+    if (!mounted) return;
     Navigator.pop(context);
+
     void go() {
       final state = mainScreenKey.currentState;
       if (state == null || !state.mounted) {
@@ -60,13 +146,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
       }
       state.navigateToTab(tab, postId: postId);
     }
+
     go();
   }
 
-  /// Pop this screen then push [screen] on top — back button returns to
-  /// whichever tab was active (does NOT change _currentIndex).
   void _popAndPush(Widget screen) {
+    if (!mounted) return;
     Navigator.pop(context);
+
     void push() {
       final ctx = mainScreenKey.currentContext;
       if (ctx == null) {
@@ -75,18 +162,33 @@ class _NotificationScreenState extends State<NotificationScreen> {
       }
       Navigator.push(ctx, MaterialPageRoute(builder: (_) => screen));
     }
+
     push();
   }
 
-  // ── Main navigation dispatcher ───────────────────────────────────────────
+  // ── Navigation dispatcher ────────────────────────────────────────────────
 
   Future<void> _onNotificationTapped(Map<String, dynamic> n) async {
+    if (!mounted) return;
+
     final type = (n['type'] ?? '') as String;
     final related = n['relatedData'] as Map<String, dynamic>?;
 
-    // Mark this type as read immediately
     Provider.of<NotificationProvider>(context, listen: false)
         .markTypesAsRead([type]);
+
+    // ── ANNOUNCEMENT ──────────────────────────────────────────────────────
+    if (_announcementTypes.contains(type)) {
+      final communityId = related?['communityId']?.toString() ??
+          n['communityId']?.toString() ??
+          n['referenceId']?.toString();
+      if (communityId != null && communityId.isNotEmpty) {
+        _popAndPush(AnnouncementScreen(communityId: communityId));
+      } else {
+        _goToTab(0);
+      }
+      return;
+    }
 
     // ── POST ──────────────────────────────────────────────────────────────
     if (_postTypes.contains(type)) {
@@ -100,7 +202,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return;
       }
 
-      // Check post still exists before navigating
       final response = await UserAPI().getPostById(postId);
       if (!mounted) return;
 
@@ -121,6 +222,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
               title: const Text('Post Not Found'),
               content: const Text(
                   'This post no longer exists or may have been removed.'),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
@@ -145,18 +248,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
       final groupId = related?['groupId']?.toString() ??
           n['referenceId']?.toString();
 
-      // Try to extract group name from the message string
       final msg = n['message']?.toString() ?? '';
       String groupName = 'Group Chat';
       final q = RegExp(r'"([^"]+)"').firstMatch(msg);
       if (q != null) {
         groupName = q.group(1) ?? groupName;
       } else {
-        final m = RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(msg);
+        final m =
+        RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(msg);
         if (m != null) groupName = m.group(1)?.trim() ?? groupName;
       }
 
+      if (!mounted) return;
       Navigator.pop(context);
+
       void go() {
         final state = mainScreenKey.currentState;
         if (state == null || !state.mounted) {
@@ -181,6 +286,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           });
         }
       }
+
       go();
       return;
     }
@@ -234,7 +340,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       return;
     }
 
-    // ── DASHBOARD types ───────────────────────────────────────────────────
+    // ── DASHBOARD ─────────────────────────────────────────────────────────
     if (_dashTypes.contains(type)) {
       _goToTab(4);
       return;
@@ -242,28 +348,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── DEFAULT ───────────────────────────────────────────────────────────
     _goToTab(0);
-  }
-
-  // ── Icon / colour helpers ────────────────────────────────────────────────
-
-  IconData _iconFor(String type) {
-    if (_postTypes.contains(type)) return Icons.article;
-    if (_chatTypes.contains(type) || type == 'GroupChat') return Icons.chat_bubble;
-    if (_communityTypes.contains(type)) return Icons.group;
-    if (_serviceReqTypes.contains(type)) return Icons.support_agent_outlined;
-    if (_dashTypes.contains(type)) return Icons.dashboard;
-    return Icons.notifications;
-  }
-
-  Color _colorFor(String type, bool unread) {
-    if (!unread) return Colors.grey.shade400;
-    if (_postTypes.contains(type)) return const Color(0xFFFF9800);
-    if (_chatTypes.contains(type) || type == 'GroupChat')
-      return const Color(0xFF9C27B0);
-    if (_communityTypes.contains(type)) return const Color(0xFFFF4081);
-    if (_serviceReqTypes.contains(type)) return const Color(0xFF00BCD4);
-    if (_dashTypes.contains(type)) return const Color(0xFF2196F3);
-    return Colors.blue;
   }
 
   // ── Clear all ────────────────────────────────────────────────────────────
@@ -290,17 +374,17 @@ class _NotificationScreenState extends State<NotificationScreen> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('user_id');
-      if (userId == null) return;
+      if (userId == null || !mounted) return;
 
-      if (!mounted) return;
       Provider.of<NotificationProvider>(context, listen: false)
           .clearAll(userId);
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('All notifications cleared'),
@@ -312,40 +396,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error clearing notifications: $e'),
+          content: Text('Failed to clear notifications'),
           backgroundColor: Colors.red,
         ),
       );
     }
-  }
-
-  // ── Date formatter ───────────────────────────────────────────────────────
-
-  String _formatDate(String raw) {
-    try {
-      final dt = DateTime.parse(raw).toLocal();
-      final diff = DateTime.now().difference(dt);
-      if (diff.inMinutes < 1) return 'Just now';
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      if (diff.inDays < 7) return '${diff.inDays}d ago';
-      return DateFormat('dd MMM yyyy • hh:mm a').format(dt);
-    } catch (_) {
-      return raw;
-    }
-  }
-
-  List<Map<String, dynamic>> _sorted(List<Map<String, dynamic>> list) {
-    final copy = List<Map<String, dynamic>>.from(list);
-    copy.sort((a, b) {
-      try {
-        return DateTime.parse(b['createdAt'] ?? '')
-            .compareTo(DateTime.parse(a['createdAt'] ?? ''));
-      } catch (_) {
-        return 0;
-      }
-    });
-    return copy;
   }
 
   // ── Build ────────────────────────────────────────────────────────────────
@@ -353,165 +408,269 @@ class _NotificationScreenState extends State<NotificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF5F6FA),
       appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Notifications'),
+        title: const Text(
+          'Notifications',
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18),
+        ),
         centerTitle: true,
         actions: [
           Consumer<NotificationProvider>(
-            builder: (_, p, __) => p.notifications.isEmpty
-                ? const SizedBox.shrink()
-                : TextButton.icon(
-              onPressed: _clearAll,
-              icon: const Icon(Icons.clear_all, size: 18),
-              label: const Text('Clear All'),
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
-            ),
+            builder: (_, p, __) {
+              if (p.notifications.isEmpty) return const SizedBox.shrink();
+              return TextButton.icon(
+                onPressed: _clearAll,
+                icon: const Icon(Icons.clear_all, size: 18),
+                label: const Text('Clear All'),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
+              );
+            },
           ),
         ],
       ),
       body: Consumer<NotificationProvider>(
         builder: (_, provider, __) {
-          if (provider.isLoading) {
+          // ── Loading ──────────────────────────────────────────────────────
+          if (provider.isLoading && provider.notifications.isEmpty) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (provider.error != null) {
-            return Center(child: Text(provider.error!));
-          }
-
-          if (provider.notifications.isEmpty) {
+          // ── Error ────────────────────────────────────────────────────────
+          if (provider.error != null && provider.notifications.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.notifications_off_outlined,
-                      size: 80, color: Colors.grey.shade400),
+                  Icon(Icons.cloud_off_outlined,
+                      size: 64, color: Colors.grey.shade400),
                   const SizedBox(height: 16),
                   Text(
-                    'No notifications found.',
-                    style:
-                    TextStyle(fontSize: 16, color: Colors.grey.shade600),
+                    'Could not load notifications',
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: _refresh,
+                    child: const Text('Try again'),
                   ),
                 ],
               ),
             );
           }
 
-          final items = _sorted(provider.notifications);
+          // ── Empty ────────────────────────────────────────────────────────
+          if (provider.notifications.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.notifications_off_outlined,
+                      size: 72, color: Colors.grey.shade300),
+                  const SizedBox(height: 16),
+                  Text(
+                    'All caught up!',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'No notifications right now.',
+                    style: TextStyle(
+                        fontSize: 14, color: Colors.grey.shade400),
+                  ),
+                ],
+              ),
+            );
+          }
 
+          // ── Cache sorted list only when data changes ─────────────────────
+          if (_cachedLength != provider.notifications.length) {
+            _cachedItems = _sorted(provider.notifications);
+            _cachedLength = provider.notifications.length;
+          }
+
+          // ── List ─────────────────────────────────────────────────────────
           return RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
-              padding: const EdgeInsets.all(12),
-              itemCount: items.length,
-              itemBuilder: (_, i) {
-                final item = items[i];
-                final type = (item['type'] ?? '') as String;
-                final message = (item['message'] ?? 'No message') as String;
-                final unread = item['read'] == false;
-                final color = _colorFor(type, unread);
-
-                return GestureDetector(
-                  onTap: () => _onNotificationTapped(item),
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color: unread ? Colors.blue.shade50 : Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: unread
-                          ? Border.all(color: Colors.blue.shade200)
-                          : null,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 5,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      leading: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: unread
-                              ? color.withOpacity(0.15)
-                              : Colors.grey.shade100,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(_iconFor(type), color: color, size: 24),
-                      ),
-                      title: Text(
-                        message,
-                        style: TextStyle(
-                          fontWeight:
-                          unread ? FontWeight.w600 : FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                      ),
-                      subtitle: Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Row(
-                          children: [
-                            Flexible(
-                              flex: 0,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: color.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Text(
-                                  type,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: color,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _formatDate(item['createdAt'] ?? ''),
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade600),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      trailing: unread
-                          ? Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: color,
-                          shape: BoxShape.circle,
-                        ),
-                      )
-                          : const Icon(Icons.chevron_right,
-                          color: Colors.grey, size: 18),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                  ),
-                );
-              },
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              itemCount: _cachedItems.length,
+              // RepaintBoundary prevents one tile rebuilding the whole list
+              itemBuilder: (_, i) => RepaintBoundary(
+                child: _NotificationTile(
+                  key: ValueKey(_cachedItems[i]['_id'] ?? i),
+                  item: _cachedItems[i],
+                  onTap: () => _onNotificationTapped(_cachedItems[i]),
+                ),
+              ),
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Extracted tile widget (stable, no closures capturing build context) ───────
+
+class _NotificationTile extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final VoidCallback onTap;
+
+  const _NotificationTile({
+    super.key,
+    required this.item,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final type = (item['type'] ?? '') as String;
+    final message = (item['message'] ?? 'No message') as String;
+    final unread = item['read'] == false;
+    final color = _colorFor(type, unread);
+    final icon = _iconFor(type);
+    final label = _labelFor(type);
+    final dateStr = _formatDate(item['createdAt'] ?? '');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: unread ? Colors.white : const Color(0xFFF9F9FB),
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: unread ? color.withOpacity(0.35) : Colors.transparent,
+                width: 1.2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.04),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Icon bubble ──────────────────────────────────────────
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(unread ? 0.12 : 0.07),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: color, size: 22),
+                ),
+                const SizedBox(width: 12),
+
+                // ── Content ──────────────────────────────────────────────
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Message
+                      Text(
+                        message,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight:
+                          unread ? FontWeight.w600 : FontWeight.w400,
+                          color: unread
+                              ? const Color(0xFF1A1A2E)
+                              : Colors.grey.shade600,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+
+                      // Label chip + date
+                      Row(
+                        children: [
+                          _TypeChip(label: label, color: color, unread: unread),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              dateStr,
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey.shade500),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Unread dot or chevron ─────────────────────────────────
+                const SizedBox(width: 8),
+                if (unread)
+                  Container(
+                    margin: const EdgeInsets.only(top: 2),
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                        color: color, shape: BoxShape.circle),
+                  )
+                else
+                  const Icon(Icons.chevron_right,
+                      color: Color(0xFFCCCCCC), size: 18),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Type label chip ───────────────────────────────────────────────────────────
+
+class _TypeChip extends StatelessWidget {
+  final String label;
+  final Color color;
+  final bool unread;
+
+  const _TypeChip(
+      {required this.label, required this.color, required this.unread});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(unread ? 0.1 : 0.06),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          color: unread ? color : Colors.grey.shade500,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }

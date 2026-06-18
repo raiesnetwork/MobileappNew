@@ -334,6 +334,82 @@ class VoiceCallProvider extends ChangeNotifier {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  //  ✅ NEW: Ensure socket ready when FCM call arrives
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _ensureSocketReadyForIncomingCall() async {
+    debugPrint('🔌 [VOICE FCM] Ensuring socket ready for incoming call...');
+
+    // If listeners not set up yet, set them up now
+    if (!_listenersSetUp) {
+      debugPrint('👂 [VOICE FCM] Setting up listeners for first time');
+      _setupListeners();
+    }
+
+    // If socket not connected, connect it
+    if (!_service.isConnected) {
+      debugPrint('🔌 [VOICE FCM] Socket not connected — connecting...');
+      _service.connectSocket();
+      _service.connect();
+
+      // Wait for connection with timeout
+      const maxWait = Duration(seconds: 5);
+      final deadline = DateTime.now().add(maxWait);
+      while (!_service.isConnected) {
+        if (DateTime.now().isAfter(deadline)) {
+          debugPrint('⏰ [VOICE FCM] Connection timeout — proceeding anyway');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    // Register the user
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      _service.registerUser(_currentUserId!);
+      debugPrint('📝 [VOICE FCM] User registered: $_currentUserId');
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    debugPrint('✅ [VOICE FCM] Socket ready for incoming call');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ✅ NEW: Ensure socket ready before initiating a call
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _ensureSocketReadyBeforeCall() async {
+    debugPrint('🔌 [VOICE] Ensuring socket ready before call...');
+
+    if (!_listenersSetUp) {
+      debugPrint('👂 [VOICE] Setting up listeners for first time');
+      _setupListeners();
+    }
+
+    if (!_service.isConnected) {
+      debugPrint('🔌 [VOICE] Socket not connected — connecting...');
+      _service.connectSocket();
+      _service.connect();
+
+      const maxWait = Duration(seconds: 5);
+      final deadline = DateTime.now().add(maxWait);
+      while (!_service.isConnected) {
+        if (DateTime.now().isAfter(deadline)) {
+          debugPrint('⏰ [VOICE] Connection timeout — proceeding anyway');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      _service.registerUser(_currentUserId!);
+      debugPrint('📝 [VOICE] User registered: $_currentUserId');
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    debugPrint('✅ [VOICE] Socket ready for call');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   //  CALL ACTIONS
   // ════════════════════════════════════════════════════════════════════════
 
@@ -390,6 +466,9 @@ class VoiceCallProvider extends ChangeNotifier {
       return;
     }
     _isInitiating = true;
+
+    // ✅ NEW: Ensure socket is ready BEFORE sending the call
+    await _ensureSocketReadyBeforeCall();
 
     final bool recentlyEnded = _lastEndTime != null &&
         DateTime.now().difference(_lastEndTime!).inSeconds < 4;
@@ -679,6 +758,10 @@ class VoiceCallProvider extends ChangeNotifier {
     if (!acceptedViaCallKit) _callState = VoiceCallState.ringing;
     debugPrint('📲 FCM voice call set — room: $roomName | caller: $callerName | '
         'acceptedViaCallKit=$acceptedViaCallKit');
+
+    // ✅ NEW: Ensure socket is connected and listeners are active
+    _ensureSocketReadyForIncomingCall();
+
     notifyListeners();
   }
 

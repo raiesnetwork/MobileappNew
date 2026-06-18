@@ -305,6 +305,82 @@ class VideoCallProvider extends ChangeNotifier {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  //  ✅ NEW: Ensure socket ready when FCM call arrives
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _ensureSocketReadyForIncomingCall() async {
+    debugPrint('🔌 [VIDEO FCM] Ensuring socket ready for incoming call...');
+
+    // If listeners not set up yet, set them up now
+    if (!_listenersSetUp) {
+      debugPrint('👂 [VIDEO FCM] Setting up listeners for first time');
+      _setupListeners();
+    }
+
+    // If socket not connected, connect it
+    if (!_service.isConnected) {
+      debugPrint('🔌 [VIDEO FCM] Socket not connected — connecting...');
+      _service.connectSocket();
+      _service.connect();
+
+      // Wait for connection with timeout
+      const maxWait = Duration(seconds: 5);
+      final deadline = DateTime.now().add(maxWait);
+      while (!_service.isConnected) {
+        if (DateTime.now().isAfter(deadline)) {
+          debugPrint('⏰ [VIDEO FCM] Connection timeout — proceeding anyway');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    // Register the user
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      _service.registerUser(_currentUserId!);
+      debugPrint('📝 [VIDEO FCM] User registered: $_currentUserId');
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    debugPrint('✅ [VIDEO FCM] Socket ready for incoming call');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ✅ NEW: Ensure socket ready before initiating a call
+  // ════════════════════════════════════════════════════════════════════════
+  Future<void> _ensureSocketReadyBeforeCall() async {
+    debugPrint('🔌 [VIDEO] Ensuring socket ready before call...');
+
+    if (!_listenersSetUp) {
+      debugPrint('👂 [VIDEO] Setting up listeners for first time');
+      _setupListeners();
+    }
+
+    if (!_service.isConnected) {
+      debugPrint('🔌 [VIDEO] Socket not connected — connecting...');
+      _service.connectSocket();
+      _service.connect();
+
+      const maxWait = Duration(seconds: 5);
+      final deadline = DateTime.now().add(maxWait);
+      while (!_service.isConnected) {
+        if (DateTime.now().isAfter(deadline)) {
+          debugPrint('⏰ [VIDEO] Connection timeout — proceeding anyway');
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      _service.registerUser(_currentUserId!);
+      debugPrint('📝 [VIDEO] User registered: $_currentUserId');
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    debugPrint('✅ [VIDEO] Socket ready for call');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   //  CALL ACTIONS
   // ════════════════════════════════════════════════════════════════════════
 
@@ -355,6 +431,9 @@ class VideoCallProvider extends ChangeNotifier {
       return;
     }
     _isInitiating = true;
+
+    // ✅ NEW: Ensure socket is ready BEFORE sending the call
+    await _ensureSocketReadyBeforeCall();
 
     final bool recentlyEnded = _lastEndTime != null &&
         DateTime.now().difference(_lastEndTime!).inSeconds < 4;
@@ -617,6 +696,10 @@ class VideoCallProvider extends ChangeNotifier {
     if (!acceptedViaCallKit) _callState = CallState.ringing;
     debugPrint('📲 FCM call set — room: $roomName | caller: $callerName | '
         'acceptedViaCallKit=$acceptedViaCallKit');
+
+    // ✅ NEW: Ensure socket is connected and listeners are active
+    _ensureSocketReadyForIncomingCall();
+
     notifyListeners();
   }
 

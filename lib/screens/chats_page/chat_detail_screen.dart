@@ -1551,6 +1551,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       receiverId: receiverId,
       receiverName: receiverName,
       isConference: false,
+
     );
 
     if (!mounted) return;

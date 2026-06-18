@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../constants/constants.dart';
 import '../../providers/campaign_provider.dart';
 
@@ -59,6 +60,41 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
         isLoading = false;
       });
       if (campaign != null) _animController.forward();
+    }
+  }
+
+  // ✅ NEW: Open campaign in web view
+  Future<void> _openCampaignInWeb() async {
+    try {
+      if (campaign == null || campaign!['_id'] == null) return;
+
+      final campaignId = campaign!['_id'].toString();
+      final url = Uri.parse('https://ixes.ai/campaign/$campaignId');
+
+      debugPrint('🌐 Opening campaign in web: $url');
+
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not open URL'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening campaign URL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -220,6 +256,23 @@ class _CampaignDetailsScreenState extends State<CampaignDetailsScreen>
           ),
         ),
       ),
+      // ✅ NEW: Add View More button on the right
+      actions: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: GestureDetector(
+            onTap: _openCampaignInWeb,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.35),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.open_in_new,
+                  size: 18, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
       flexibleSpace: FlexibleSpaceBar(
         background: Stack(
           fit: StackFit.expand,
