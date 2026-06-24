@@ -42,8 +42,17 @@ class _BookingScreenState extends State<BookingScreen>
   bool _isProcessing = false;
   Map<String, dynamic>? _appliedCoupon;
 
-  late AnimationController _fadeCtrl;
-  late Animation<double> _fadeAnim;
+  // FIX: initialized inline (lazily on first access) instead of inside
+  // initState(). Hot reload does NOT re-run initState() on an already-live
+  // State object, so `late` fields only assigned there would stay
+  // uninitialized after a hot reload that touches this class, throwing
+  // LateInitializationError. A `late final ... = expression` field
+  // initializer runs on first use regardless of initState, so it survives
+  // hot reload.
+  late final AnimationController _fadeCtrl = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 600));
+  late final Animation<double> _fadeAnim =
+  CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
 
   final List<String> _availableTimeSlots = [
     '09:00 AM', '10:00 AM', '11:00 AM', '12:00 PM',
@@ -55,10 +64,6 @@ class _BookingScreenState extends State<BookingScreen>
   void initState() {
     super.initState();
     _initRazorpay();
-    _fadeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 600));
-    _fadeAnim =
-        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
 

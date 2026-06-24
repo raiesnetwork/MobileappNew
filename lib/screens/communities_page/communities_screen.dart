@@ -27,12 +27,13 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
+    // ✅ Always fetch fresh data on screen entry (not just "if not loaded")
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final provider = Provider.of<CommunityProvider>(context, listen: false);
-      if (provider.communities['message'] == 'Not loaded') {
-        provider.fetchCommunities(page: _currentPage);
-      }
+      // Reset to page 1 and fetch fresh
+      _currentPage = 1;
+      provider.fetchCommunities(page: _currentPage);
     });
   }
 
@@ -50,7 +51,28 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
       setState(() {
         _searchQuery = _searchController.text.trim().toLowerCase();
       });
+
+      // ✅ When search is active, load ALL pages to search across all communities
+      if (_searchQuery.isNotEmpty) {
+        _loadAllPagesForSearch();
+      }
     });
+  }
+
+  // ✅ NEW METHOD: Load all pages when searching
+  Future<void> _loadAllPagesForSearch() async {
+    final provider = Provider.of<CommunityProvider>(context, listen: false);
+    final totalPages = provider.communities['totalPages'] ?? 1;
+
+    print('🔍 Loading all $totalPages pages for search...');
+
+    // Load all remaining pages
+    for (int page = _currentPage + 1; page <= totalPages; page++) {
+      if (!mounted) return;
+      await provider.fetchCommunities(page: page);
+    }
+
+    print('✅ All pages loaded for search');
   }
 
   void _clearSearch() {
@@ -58,14 +80,15 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
     _searchFocusNode.unfocus();
     setState(() {
       _searchQuery = '';
+      _currentPage = 1;  // ✅ Reset to page 1 when clearing search
     });
   }
 
-  Future<void> _loadMoreCommunities() async {
-    if (_isLoadingMore || _searchQuery.isNotEmpty) return;
+  void _loadMoreCommunities() async {
+    if (_isLoadingMore) return;  // ← Keep only this check
 
     final provider = Provider.of<CommunityProvider>(context, listen: false);
-    if (provider.isLoading) return; // ✅ don't load more while join is in progress
+    if (provider.isLoading) return;
 
     setState(() => _isLoadingMore = true);
     _currentPage++;
@@ -188,7 +211,6 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
 
     print('🔍 isPrivate: $isPrivate | community: ${community['name']}');
     print('🔍 isPrivate raw value: ${community['isPrivate']} | type: ${community['isPrivate'].runtimeType}');
-
 
     final result = await provider.joinCommunity(community['_id'] as String);
 
@@ -475,12 +497,10 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
               },
               child: NotificationListener<ScrollNotification>(
                 onNotification: (scrollInfo) {
-                  if (scrollInfo.metrics.pixels >=
-                      scrollInfo.metrics.maxScrollExtent - 100 &&
+                  if (scrollInfo.metrics.pixels >= scrollInfo.metrics.maxScrollExtent - 100 &&
                       !_isLoadingMore &&
-                      !provider.isLoading &&        // ✅ don't load more if provider is loading
-                      _currentPage < totalPages &&
-                      _searchQuery.isEmpty) {
+                      !provider.isLoading &&
+                      _currentPage < totalPages) {
                     _loadMoreCommunities();
                   }
                   return false;

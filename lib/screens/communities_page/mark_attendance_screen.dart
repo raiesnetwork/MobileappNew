@@ -5,6 +5,68 @@ import 'package:provider/provider.dart';
 import '../../providers/attendance_provider.dart';
 import 'attendance_history.dart';
 
+// ── Cached location (persists across screen visits this session) ───────────
+double?   _cachedLatitude;
+double?   _cachedLongitude;
+String?   _cachedAddress;
+DateTime? _cachedAt;
+const Duration _locationCacheTTL = Duration(minutes: 10);
+
+bool get _hasFreshCachedLocation {
+  if (_cachedAt == null || _cachedLatitude == null) return false;
+  return DateTime.now().difference(_cachedAt!) < _locationCacheTTL;
+}
+
+/// Call this once, early — e.g. right after login in main.dart's
+/// _requestLocationPermission() — to warm the cache in the background.
+/// By the time the user actually opens MarkAttendanceScreen, the location
+/// is already sitting here ready to go, so the screen opens instantly
+/// with no "Fetching location…" spinner and no permission dialog.
+///
+/// This is silent and non-blocking on failure: if permission isn't granted
+/// yet, GPS is off, or anything else goes wrong, it just returns quietly.
+/// MarkAttendanceScreen's own dialogs still handle those cases properly
+/// when the user actually visits the screen.
+Future<void> prefetchAttendanceLocation() async {
+  try {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    final perm = await Geolocator.checkPermission();
+    if (perm != LocationPermission.always &&
+        perm != LocationPermission.whileInUse) {
+      return; // not granted yet — don't prompt from here, just skip silently
+    }
+
+    final pos = await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.medium,
+      timeLimit: const Duration(seconds: 10),
+    );
+
+    String addr =
+        '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
+    try {
+      final marks = await placemarkFromCoordinates(pos.latitude, pos.longitude);
+      final p = marks.first;
+      final parts = [
+        p.subLocality ?? '',
+        p.locality ?? '',
+        p.administrativeArea ?? '',
+      ].where((s) => s.isNotEmpty).toList();
+      if (parts.isNotEmpty) addr = parts.join(', ');
+    } catch (_) {}
+
+    _cachedLatitude  = pos.latitude;
+    _cachedLongitude = pos.longitude;
+    _cachedAddress   = addr;
+    _cachedAt        = DateTime.now();
+
+    debugPrint('📍 [ATTENDANCE] Location prefetched and cached: $addr');
+  } catch (e) {
+    debugPrint('⚠️ [ATTENDANCE] Prefetch failed (will fetch normally on screen open): $e');
+  }
+}
+
 // ── Design tokens ────────────────────────────────────────────────────────────
 const _accent   = Color(0xFF6C5CE7);
 const _bg       = Color(0xFFF7F7FB);
@@ -46,9 +108,18 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
   void initState() {
     super.initState();
     _loadTodayAttendance();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showLocationPermissionDialog();
-    });
+
+    if (_hasFreshCachedLocation) {
+      // Already have a recent fix — use it instantly, no dialog, no fetch
+      _latitude        = _cachedLatitude!;
+      _longitude       = _cachedLongitude!;
+      _address         = _cachedAddress!;
+      _locationFetched = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showLocationPermissionDialog();
+      });
+    }
   }
 
   @override
@@ -178,18 +249,79 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
     );
   }
 
+  // ── Show Location Fetching Dialog (Full Screen) ────────────────────────────
+  void _showLocationFetchingDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Center(
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              decoration: BoxDecoration(
+                color: _surface,
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Animated spinner (smaller)
+                  SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: _accent,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Fetching Location',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: _dark,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Just a moment…',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: _muted,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ── Location ─────────────────────────────────────────────────────────────
   Future<void> _fetchLocation() async {
     if (!mounted) return;
-    setState(() {
-      _locationLoading = true;
-      _address = 'Fetching location…';
-    });
+
+    // Show full-screen loading dialog
+    _showLocationFetchingDialog();
+    setState(() => _locationLoading = true);
 
     try {
       // ── Step 1: Check if GPS/Location service is ON ──────────────────────
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
+        if (mounted) Navigator.pop(context); // Dismiss loading dialog
         if (!mounted) return;
         setState(() { _address = 'Turn on device location'; _locationLoading = false; });
         // Ask user to enable location service
@@ -201,6 +333,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
       var perm = await Geolocator.checkPermission();
 
       if (perm == LocationPermission.deniedForever) {
+        if (mounted) Navigator.pop(context); // Dismiss loading dialog
         if (!mounted) return;
         setState(() { _address = 'Location permission blocked'; _locationLoading = false; });
         _showOpenSettingsDialog();
@@ -213,12 +346,14 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
       }
 
       if (perm == LocationPermission.denied) {
+        if (mounted) Navigator.pop(context); // Dismiss loading dialog
         if (!mounted) return;
         setState(() { _address = 'Location permission denied'; _locationLoading = false; });
         return;
       }
 
       if (perm == LocationPermission.deniedForever) {
+        if (mounted) Navigator.pop(context); // Dismiss loading dialog
         if (!mounted) return;
         setState(() { _address = 'Location permission blocked'; _locationLoading = false; });
         _showOpenSettingsDialog();
@@ -227,7 +362,9 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
 
       // ── Step 3: Get coordinates ──────────────────────────────────────────
       final pos = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high);
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 10),
+      );
 
       // ── Step 4: Reverse geocode ──────────────────────────────────────────
       String addr = '${pos.latitude.toStringAsFixed(4)}, ${pos.longitude.toStringAsFixed(4)}';
@@ -242,7 +379,15 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         if (parts.isNotEmpty) addr = parts.join(', ');
       } catch (_) {}
 
+      // Save to cache so future screen visits (and other entry points)
+      // can skip re-fetching for a while
+      _cachedLatitude  = pos.latitude;
+      _cachedLongitude = pos.longitude;
+      _cachedAddress   = addr;
+      _cachedAt        = DateTime.now();
+
       if (mounted) {
+        Navigator.pop(context); // Dismiss loading dialog
         setState(() {
           _latitude        = pos.latitude;
           _longitude       = pos.longitude;
@@ -252,7 +397,10 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() { _address = 'Could not get location'; _locationLoading = false; });
+      if (mounted) {
+        Navigator.pop(context); // Dismiss loading dialog
+        setState(() { _address = 'Could not get location'; _locationLoading = false; });
+      }
     }
   }
 
@@ -622,7 +770,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
         // ── Location row ─────────────────────────────────────────────────
         _LocationRow(
           address:  _address,
-          isLoading: _locationLoading,
+          isLoading: false, // Always false now — loading handled by dialog
           onRefresh: _locationFetched ? _fetchLocation : _showLocationPermissionDialog,
         ),
         const SizedBox(height: 28),
@@ -670,7 +818,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
           width: double.infinity,
           height: 54,
           child: ElevatedButton(
-            onPressed: (provider.isMarking || _locationLoading) ? null : _markAttendance,
+            onPressed: provider.isMarking ? null : _markAttendance,
             style: ElevatedButton.styleFrom(
               backgroundColor: _accent,
               disabledBackgroundColor: _muted.withOpacity(0.15),
@@ -679,7 +827,7 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16)),
             ),
-            child: (provider.isMarking || _locationLoading)
+            child: provider.isMarking
                 ? const SizedBox(
                 width: 22, height: 22,
                 child: CircularProgressIndicator(

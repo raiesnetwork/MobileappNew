@@ -518,30 +518,30 @@ class _LoginScreenState extends State<LoginScreen>
                     ]),
                     const SizedBox(height: 15),
 
-                    // Change Language button
-                    GestureDetector(
-                      onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) =>
-                          const LanguageSelectionScreen(
-                              isFromSettings: true))),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10,
-                            horizontal: 16),
-                        decoration: BoxDecoration(color: _C.surfaceHi,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: _C.border)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          const Icon(Icons.language_rounded, color: _C.accent,
-                              size: 16),
-                          const SizedBox(width: 8),
-                          Text(t.changeLanguage,
-                              style: const TextStyle(color: _C.accent,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500)),
-                        ]),
-                      ),
-                    ),
-                    SizedBox(height: 2.h),
+                    // // Change Language button
+                    // GestureDetector(
+                    //   onTap: () => Navigator.of(context).push(
+                    //       MaterialPageRoute(builder: (_) =>
+                    //       const LanguageSelectionScreen(
+                    //           isFromSettings: true))),
+                    //   child: Container(
+                    //     padding: const EdgeInsets.symmetric(vertical: 10,
+                    //         horizontal: 16),
+                    //     decoration: BoxDecoration(color: _C.surfaceHi,
+                    //         borderRadius: BorderRadius.circular(10),
+                    //         border: Border.all(color: _C.border)),
+                    //     child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    //       const Icon(Icons.language_rounded, color: _C.accent,
+                    //           size: 16),
+                    //       const SizedBox(width: 8),
+                    //       Text(t.changeLanguage,
+                    //           style: const TextStyle(color: _C.accent,
+                    //               fontSize: 13,
+                    //               fontWeight: FontWeight.w500)),
+                    //     ]),
+                    //   ),
+                    // ),
+                    // SizedBox(height: 2.h),
                   ],
                 ),
               ),

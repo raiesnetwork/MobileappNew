@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ixes.app/constants/imageConstant.dart';
 import 'package:ixes.app/providers/auth_provider.dart';
-import 'package:ixes.app/screens/auth/launguage_selection_page.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -51,19 +50,13 @@ class _SplashScreenState extends State<SplashScreen>
     if (!mounted || _navigated) return;
     _navigated = true;
 
-    final prefs = await SharedPreferences.getInstance();
-    final language = prefs.getString('app_language');
-
     Widget next;
     if (authProvider.isAuthenticated) {
       next = const MainScreen(initialIndex: 0);
       debugPrint('🌐 [SPLASH] → MainScreen (authenticated)');
-    } else if (language == null) {
-      next = const LanguageSelectionScreen();
-      debugPrint('🌐 [SPLASH] → LanguageSelectionScreen (first launch)');
     } else {
       next = const LoginScreen();
-      debugPrint('🌐 [SPLASH] → LoginScreen (returning user)');
+      debugPrint('🌐 [SPLASH] → LoginScreen');
     }
 
     if (!mounted) return;

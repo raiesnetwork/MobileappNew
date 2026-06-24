@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:ixes.app/providers/attendance_provider.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
@@ -31,7 +32,6 @@ import 'package:ixes.app/providers/service_provider.dart';
 import 'package:ixes.app/providers/service_request_provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
-import 'package:ixes.app/screens/auth/launguage_selection_page.dart';
 import 'package:ixes.app/screens/chats_page/chat_detail_screen.dart';
 import 'package:ixes.app/screens/chats_page/group_chat/group_chat_detail.dart';
 import 'package:ixes.app/screens/video_call/video_call.dart';
@@ -181,10 +181,6 @@ Future<void> _showCallkitIncoming({
   ));
   debugPrint('✅ [CALLKIT] UI shown | caller=$callerName | room=$roomName');
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// FCM background handler (app is KILLED — runs in separate isolate)
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FCM background handler (app is KILLED — runs in separate isolate)
@@ -826,14 +822,12 @@ void main() async {
     final prefs    = await SharedPreferences.getInstance();
     final token    = prefs.getString('auth_token');
     final userId   = prefs.getString('user_id');
-    final language = prefs.getString('app_language');
 
     debugPrint('🔐 authToken=${token != null} | userId=$userId');
 
     runApp(IxesApp(
       initialToken:  token,
       initialUserId: userId,
-      showLanguage:  false,
     ));
   }, (error, stack) {
     final msg = error.toString();
@@ -852,13 +846,11 @@ void main() async {
 class IxesApp extends StatelessWidget {
   final String? initialToken;
   final String? initialUserId;
-  final bool    showLanguage;
 
   const IxesApp({
     super.key,
     this.initialToken,
     this.initialUserId,
-    this.showLanguage = false,
   });
 
   @override
@@ -891,7 +883,6 @@ class IxesApp extends StatelessWidget {
         child: AppWithLifecycleObserver(
           initialToken:  initialToken,
           initialUserId: initialUserId,
-          showLanguage:  showLanguage,
         ),
       ),
     );
@@ -991,13 +982,11 @@ class _CallConnectingSplash extends StatelessWidget {
 class AppWithLifecycleObserver extends StatefulWidget {
   final String? initialToken;
   final String? initialUserId;
-  final bool    showLanguage;
 
   const AppWithLifecycleObserver({
     super.key,
     this.initialToken,
     this.initialUserId,
-    this.showLanguage = false,
   });
 
   @override
@@ -1488,6 +1477,8 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         : 'User_${mobile.substring(mobile.length - 4)}';
 
     await ctx.read<PersonalChatProvider>().initialize();
+    await _requestLocationPermission();
+
 
     final sock = SocketService().socket;
     if (sock != null) {
@@ -1627,6 +1618,30 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         ),
       );
     });
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
+// Location permission — requested after login, before attendance is needed
+// ─────────────────────────────────────────────────────────────────────────────
+
+  Future<void> _requestLocationPermission() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('⚠️ [LOCATION] Device location services are off');
+        await Geolocator.openLocationSettings();   // ← uncommented
+        return;
+      }
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.deniedForever) {
+        debugPrint('⚠️ [LOCATION] Permanently denied — user must enable in Settings');
+      }
+      debugPrint('📍 [LOCATION] Permission status: $perm');
+    } catch (e) {
+      debugPrint('❌ [LOCATION] Request failed: $e');
+    }
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
