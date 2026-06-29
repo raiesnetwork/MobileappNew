@@ -274,8 +274,9 @@ class _MarkAttendanceScreenState extends State<MarkAttendanceScreen> {
                 children: [
                   // Animated spinner (smaller)
                   SizedBox(
-                    width: 48,
-                    height: 48,
+                    width:28
+                    ,
+                    height: 30,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.5,
                       color: _accent,

@@ -749,7 +749,69 @@ Future<void> _initFCM() async {
           callerName: d['callerName'] ?? 'Unknown',
           callType:   type,
         );
+        return; // ✅ ADD THIS LINE
       }
+
+      // ✅ NEW: HANDLE CALL ENDED (User A ended the call)
+      if (type == 'call_ended') {
+        final callType = d['callType'] ?? '';
+        final callerName = d['callerName'] ?? 'Unknown';
+
+        debugPrint('📴 [FCM FG] CALL ENDED | type=$callType | caller=$callerName');
+
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null) {
+          try {
+            if (callType == 'video_call') {
+              ctx.read<VideoCallProvider>().cancelIncomingCall();
+              debugPrint('✅ [FCM FG] Video call cancelled via FCM');
+            } else if (callType == 'voice_call') {
+              ctx.read<VoiceCallProvider>().cancelIncomingCall();
+              debugPrint('✅ [FCM FG] Voice call cancelled via FCM');
+            }
+          } catch (e) {
+            debugPrint('⚠️ [FCM FG] Error handling call_ended: $e');
+          }
+        }
+        return;
+      }
+
+      // ✅ NEW: HANDLE CALL REJECTED (User B rejected the call)
+      if (type == 'call_rejected') {
+        final callType = d['callType'] ?? '';
+        final receiverName = d['receiverName'] ?? 'Unknown';
+
+        debugPrint('❌ [FCM FG] CALL REJECTED | type=$callType | rejectedBy=$receiverName');
+
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null) {
+          try {
+
+            if (callType == 'video_call') {
+              final provider = ctx.read<VideoCallProvider>();
+              provider.clearMessages();
+              provider.resetCallState();
+              debugPrint('✅ [FCM FG] Video call rejected via FCM');
+            } else if (callType == 'voice_call') {
+              final provider = ctx.read<VoiceCallProvider>();
+              provider.clearMessages();
+              provider.resetCallState();
+              debugPrint('✅ [FCM FG] Voice call rejected via FCM');
+            }
+          } catch (e) {
+            debugPrint('⚠️ [FCM FG] Error handling call_rejected: $e');
+          }
+        }
+        return;
+      }
+
+      // ✅ NEW: Filter empty payloads
+      if (d.isEmpty) {
+        debugPrint('⚠️ [FCM FG] Empty payload received — ignoring');
+        return;
+      }
+
+      debugPrint('ℹ️ [FCM FG] Unhandled type=$type — skipping');
       // chat & GroupChat foreground: handled by socket — no action needed
     });
   } catch (e) {

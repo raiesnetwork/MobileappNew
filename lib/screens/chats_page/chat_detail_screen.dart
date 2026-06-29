@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 import 'dart:typed_data';
 
@@ -22,9 +20,7 @@ import '../../providers/voice_call_provider.dart';
 import '../video_call/video_call_initiate_.dart';
 import '../voice_call/outgoing_voice_call.dart';
 import './message_bubble_screen.dart';
-
-import './call_bubble.dart';    
-      // ✅ NEW
+import './call_bubble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/notification_provider.dart';
 import 'call_history.dart';
@@ -62,6 +58,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String? _userId;
   late NotificationProvider _notificationProvider;
 
+  bool _isLoadingMoreMessages = false;
+  DateTime _lastLoadTime = DateTime.now();
+  bool _shouldAllowScrollLoad = false;
+
   FlutterSoundRecorder? _recorder;
   bool _isRecording = false;
   bool _isRecorderInitialized = false;
@@ -69,7 +69,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Duration _recordingDuration = Duration.zero;
   final ImagePicker _imagePicker = ImagePicker();
   Timer? _recordingTimer;
-
 
   late PersonalChatProvider _chatProvider;
   Map<String, dynamic>? _replyingToMessage;
@@ -81,12 +80,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   void initState() {
     super.initState();
     _initializeRecorder();
-    _messageController.addListener(() {  // ✅ ADD
+
+    _scrollController.addListener(_onScroll);
+
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        setState(() => _shouldAllowScrollLoad = true);
+        debugPrint('✅ [INIT] Scroll loading enabled after startup');
+      }
+    });
+
+    _messageController.addListener(() {
       final typing = _messageController.text.isNotEmpty;
       if (typing != _isTyping) {
         setState(() => _isTyping = typing);
       }
     });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _chatProvider = context.read<PersonalChatProvider>();
       context.read<VideoCallProvider>().setChatProvider(_chatProvider);
@@ -100,7 +110,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       await _initializeChatNotifications();
       _chatProvider.clearUnreadCount(widget.userId);
 
-      // ← Only fetch fresh if this is a new conversation or empty
       final alreadyLoaded = _chatProvider.currentReceiverId == widget.userId &&
           _chatProvider.messages.isNotEmpty;
 
@@ -114,6 +123,68 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
       _scrollToBottom();
     });
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+
+    try {
+      final provider = context.read<PersonalChatProvider>();
+
+      if (!_shouldAllowScrollLoad) return;
+      if (_isLoadingMoreMessages) return;
+      if (provider.isLoadingMoreMessages) return;
+      if (!provider.messageHasMore) return;
+
+      final now = DateTime.now();
+      if (now.difference(_lastLoadTime).inMilliseconds < 1000) return;
+
+      // In reverse:true ListView, extentAfter = distance from visual top
+      final distanceFromTop = _scrollController.position.extentAfter;
+      debugPrint('📏 [SCROLL] Distance from top: ${distanceFromTop.toStringAsFixed(0)}px');
+
+      if (distanceFromTop > 200) return;
+
+      debugPrint('✅ [SCROLL] Loading page ${provider.messagePageNo + 1}');
+      _lastLoadTime = now;
+      _loadOlderMessages();
+
+    } catch (e) {
+      debugPrint('💥 [SCROLL] Error: $e');
+    }
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_isLoadingMoreMessages) return;
+
+    setState(() => _isLoadingMoreMessages = true);
+    final provider = context.read<PersonalChatProvider>();
+
+    final double previousExtent = _scrollController.position.maxScrollExtent;
+
+    try {
+      final nextPage = provider.messagePageNo + 1;
+      debugPrint('🔄 [LOAD] Loading page $nextPage...');
+
+      await provider.loadOlderMessages(widget.userId);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollController.hasClients) {
+          final newExtent = _scrollController.position.maxScrollExtent;
+          final diff = newExtent - previousExtent;
+          _scrollController.jumpTo(_scrollController.offset + diff);
+        }
+      });
+
+      debugPrint('✅ [LOAD] Page ${provider.messagePageNo} done | hasMore: ${provider.messageHasMore}');
+
+    } catch (e) {
+      debugPrint('💥 [LOAD] Error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingMoreMessages = false);
+      }
+    }
   }
 
   Future<void> _startRinging() async {
@@ -158,15 +229,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           child: Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
               color: Colors.grey[200],
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(label,
-                style:
-                TextStyle(fontSize: 12, color: Colors.grey[600])),
+                style: TextStyle(fontSize: 12, color: Colors.grey[600])),
           ),
         ),
         Expanded(child: Divider(color: Colors.grey[300])),
@@ -209,21 +278,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   String _readableSize(int bytes) {
     if (bytes < 1024) return '${bytes}B';
-    if (bytes < 1024 * 1024)
-      return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(2)}MB';
   }
 
   Future<File> _compressImage(File imageFile) async {
     final ext = p.extension(imageFile.path).toLowerCase();
-    final format =
-    ext == '.png' ? CompressFormat.png : CompressFormat.jpeg;
+    final format = ext == '.png' ? CompressFormat.png : CompressFormat.jpeg;
     final tmpDir = await getTemporaryDirectory();
     final outExt = ext == '.png' ? 'png' : 'jpg';
 
     for (final quality in [80, 60, 40, 25]) {
-      final Uint8List? result =
-      await FlutterImageCompress.compressWithFile(
+      final Uint8List? result = await FlutterImageCompress.compressWithFile(
         imageFile.absolute.path,
         quality: quality,
         format: format,
@@ -231,8 +297,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
       if (result == null) break;
 
-      final outPath = p.join(tmpDir.path,
-          'img_${DateTime.now().millisecondsSinceEpoch}.$outExt');
+      final outPath = p.join(
+          tmpDir.path, 'img_${DateTime.now().millisecondsSinceEpoch}.$outExt');
       final outFile = File(outPath)..writeAsBytesSync(result);
 
       if (result.length <= _maxImageBytes || quality == 25) return outFile;
@@ -253,7 +319,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<File> _compressFile(File file) async {
-    final origSize = await file.length();
     final File result;
     if (_isImageFile(file.path)) {
       result = await _compressImage(file);
@@ -305,8 +370,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (!_isRecorderInitialized || _recorder == null) return;
     try {
       final dir = await getTemporaryDirectory();
-      final fileName =
-          'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final fileName = 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
       _recordingPath = '${dir.path}/$fileName';
       await _recorder!
           .startRecorder(toFile: _recordingPath, codec: Codec.aacMP4);
@@ -368,8 +432,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               Text('Voice message recorded',
                   style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
-              Text(
-                  'Duration: ${_formatDuration(_recordingDuration)}'),
+              Text('Duration: ${_formatDuration(_recordingDuration)}'),
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -390,8 +453,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       Navigator.pop(context);
                       _sendVoiceMessage();
                     },
-                    icon:
-                    const Icon(Icons.send, color: Colors.white),
+                    icon: const Icon(Icons.send, color: Colors.white),
                     label: const Text('Send'),
                     style: ElevatedButton.styleFrom(
                         backgroundColor:
@@ -408,8 +470,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _sendVoiceMessage() async {
-    if (_recordingPath == null ||
-        !File(_recordingPath!).existsSync()) return;
+    if (_recordingPath == null || !File(_recordingPath!).existsSync()) return;
 
     final provider = context.read<PersonalChatProvider>();
     final receiverId = widget.userProfile['_id'];
@@ -495,15 +556,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       backgroundColor: Colors.black,
       builder: (context) => SafeArea(
         child: Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom),
+          padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Column(
             children: [
               Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.close,
-                        color: Colors.white, size: 28),
+                    icon: const Icon(Icons.close, color: Colors.white, size: 28),
                     onPressed: () {
                       _messageController.clear();
                       Navigator.pop(context);
@@ -517,28 +577,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 16, vertical: 12),
+                padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 color: Colors.black,
                 child: Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: _messageController,
-                        style:
-                        const TextStyle(color: Colors.white),
+                        style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText: "Add a caption...",
-                          hintStyle:
-                          TextStyle(color: Colors.grey[400]),
+                          hintStyle: TextStyle(color: Colors.grey[400]),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(24),
                             borderSide: BorderSide.none,
                           ),
                           filled: true,
                           fillColor: Colors.grey[900],
-                          contentPadding:
-                          const EdgeInsets.symmetric(
+                          contentPadding: const EdgeInsets.symmetric(
                               horizontal: 20, vertical: 10),
                         ),
                       ),
@@ -558,8 +615,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           color: Primary,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.send,
-                            color: Colors.white),
+                        child: const Icon(Icons.send, color: Colors.white),
                       ),
                     )
                   ],
@@ -616,8 +672,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red));
+              content: Text('Error: $e'), backgroundColor: Colors.red));
         }
       } finally {
         if (mounted) setState(() => _isSending = false);
@@ -649,8 +704,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red));
+              content: Text('Error: $e'), backgroundColor: Colors.red));
         }
       } finally {
         if (mounted) setState(() => _isSending = false);
@@ -676,10 +730,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return compressed;
   }
 
-  // ════════════════════════════════════════════════════════════════════════
-  //  BUILD
-  // ════════════════════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
     final profileImage = widget.userProfile['profile']['profileImage'];
@@ -695,11 +745,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               child: CircleAvatar(
                 radius: 18,
                 backgroundColor: Colors.transparent,
-                backgroundImage: profileImage != null &&
-                    profileImage.isNotEmpty
+                backgroundImage: profileImage != null && profileImage.isNotEmpty
                     ? (profileImage.startsWith('data:image/')
-                    ? MemoryImage(
-                    base64Decode(profileImage.split(',')[1]))
+                    ? MemoryImage(base64Decode(profileImage.split(',')[1]))
                     : NetworkImage(profileImage))
                     : null,
                 child: profileImage == null || profileImage.isEmpty
@@ -730,17 +778,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           ],
         ),
         actions: [
-
-
-
           Consumer<VoiceCallProvider>(
             builder: (context, voiceCallProvider, _) => IconButton(
               icon: Image.asset('assets/icons/call.png',
                   width: 18, height: 18, color: Colors.grey[800]),
               tooltip: 'Audio Call',
-              onPressed: voiceCallProvider.isConnected
-                  ? _initiateVoiceCall
-                  : null,
+              onPressed:
+              voiceCallProvider.isConnected ? _initiateVoiceCall : null,
             ),
           ),
           const SizedBox(width: 4),
@@ -749,9 +793,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               icon: Image.asset('assets/icons/video.png',
                   width: 24, height: 24, color: Colors.grey[800]),
               tooltip: 'Video Call',
-              onPressed: videoCallProvider.isConnected
-                  ? _handleVideoCall
-                  : null,
+              onPressed:
+              videoCallProvider.isConnected ? _handleVideoCall : null,
             ),
           ),
           const SizedBox(width: 8),
@@ -820,9 +863,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   Text(provider.error ?? 'Unknown error occurred',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 14,
-                          height: 1.4)),
+                          color: Colors.grey[600], fontSize: 14, height: 1.4)),
                   const SizedBox(height: 24),
                   ElevatedButton(
                     onPressed: () =>
@@ -837,8 +878,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           borderRadius: BorderRadius.circular(8)),
                     ),
                     child: const Text('Try Again',
-                        style:
-                        TextStyle(fontWeight: FontWeight.w600)),
+                        style: TextStyle(fontWeight: FontWeight.w600)),
                   ),
                 ]),
               ),
@@ -859,8 +899,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               color: Colors.grey[100],
                               shape: BoxShape.circle),
                           child: Icon(Icons.chat_bubble_outline,
-                              size: 64,
-                              color: Colors.grey[400]),
+                              size: 64, color: Colors.grey[400]),
                         ),
                         const SizedBox(height: 24),
                         Text('No messages yet',
@@ -878,271 +917,74 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 height: 1.4)),
                       ]),
                 )
-                    : Align(
-                  alignment: Alignment.topCenter,
-                  child: RefreshIndicator(
-                    onRefresh: () async =>
-                        provider.fetchConversation(widget.userId),
-                    color: Theme.of(context).colorScheme.primary,
-                    backgroundColor: Colors.white,
-                    // ✅ ADD SCROLLBAR
-                    child: Scrollbar(
+                // ✅ FIXED: Removed Align wrapper, shrinkWrap false, BouncingScrollPhysics
+                    : RefreshIndicator(
+                  onRefresh: () async =>
+                      provider.fetchConversation(widget.userId),
+                  color: Theme.of(context).colorScheme.primary,
+                  backgroundColor: Colors.white,
+                  child: Scrollbar(
+                    controller: _scrollController,
+                    thumbVisibility: true,
+                    thickness: 8,
+                    radius: const Radius.circular(4),
+                    child: ListView.builder(
                       controller: _scrollController,
-                      thumbVisibility: true,
-                      thickness: 8,
-                      radius: const Radius.circular(4),
-                      child: ListView.builder(
-                        controller: _scrollController,
-                        reverse: true,
-                        shrinkWrap: messages.length < 15,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        // ✅ CHANGE itemCount
-                        itemCount: messages.length +
-                            (provider.messageHasMore ? 1 : 0),
-                        physics:
-                        const AlwaysScrollableScrollPhysics(),
-                        itemBuilder: (context, index) {
-                          // ✅ ADD: Loading indicator at top
-                          if (index == messages.length &&
-                              provider.messageHasMore) {
-                            return Container(
-                              padding:
-                              const EdgeInsets.symmetric(vertical: 16),
-                              alignment: Alignment.center,
-                              child: SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation(
-                                    Theme.of(context).colorScheme.primary,
-                                  ),
+                      reverse: true,
+                      shrinkWrap: false,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      itemCount: messages.length +
+                          (provider.messageHasMore ? 1 : 0),
+                      physics: const BouncingScrollPhysics(),
+                      itemBuilder: (context, index) {
+                        // Loading indicator at visual top (end of reversed list)
+                        if (index == messages.length &&
+                            provider.messageHasMore) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 16),
+                            alignment: Alignment.center,
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation(
+                                  Theme.of(context).colorScheme.primary,
                                 ),
                               ),
-                            );
-                          }
+                            ),
+                          );
+                        }
 
-                          final message = messages[index];
+                        final message = messages[index];
 
-                          if (message['isDelete'] == true) {
-                            return const SizedBox.shrink();
-                          }
+                        if (message['isDelete'] == true) {
+                          return const SizedBox.shrink();
+                        }
 
-                          bool _isLoadingDebounced = false;
-
-// Inside itemBuilder, replace the WidgetsBinding code with:
-                          WidgetsBinding.instance.addPostFrameCallback((_) {
-                            try {
-                              if (_scrollController.hasClients && !_isLoadingDebounced) {
-                                final extentBefore = _scrollController.position.extentBefore;
-                                if (extentBefore < 100) {
-                                  _isLoadingDebounced = true; // ← BLOCK UNTIL REQUEST COMPLETES
-                                  provider.loadOlderMessages(widget.userId).then((_) {
-                                    _isLoadingDebounced = false; // ← UNBLOCK WHEN DONE
-                                  });
-                                }
-                              }
-                            } catch (e) {
-                              print('⚠️ Scroll error: $e');
-                            }
-                          });
-
-                          // ... rest of your existing message building code stays the same ...
-                          // (isCall check, meeting message, forwarded, etc.)
-
-                          if (message['isCall'] == true ||
-                              message['type'] == 'call') {
-                            final isMe = message['senderId'] ==
-                                provider.currentUserId;
-                            final msgTime = DateTime.parse(
-                                message['createdAt'])
-                                .toLocal();
-
-                            DateTime? olderTime;
-                            for (int j = index + 1;
-                            j < messages.length;
-                            j++) {
-                              if (messages[j]['isDelete'] !=
-                                  true) {
-                                olderTime = DateTime.parse(
-                                    messages[j]['createdAt'])
-                                    .toLocal();
-                                break;
-                              }
-                            }
-                            final showDateDiv = olderTime == null ||
-                                !_sameDay(msgTime, olderTime);
-
-                            return Column(
-                              children: [
-                                if (showDateDiv)
-                                  _buildDateDivider(msgTime),
-                                Padding(
-                                  padding:
-                                  const EdgeInsets.only(
-                                      bottom: 8),
-                                  child: CallBubble(
-                                    call: message,
-                                    isMe: isMe,
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-
-                          final msgContent =
-                              message['text']?.toString() ?? '';
-                          final isMeetingMsg =
-                          msgContent.trimLeft().startsWith('📅');
-
-                          final existingUrl =
-                          (message['linkMeta']?['url'] ?? '')
-                              .toString()
-                              .trim();
-                          Map<String, dynamic>? resolvedLinkMeta =
-                          existingUrl.isNotEmpty
-                              ? message['linkMeta']
-                              : null;
-
-                          if (isMeetingMsg &&
-                              resolvedLinkMeta == null) {
-                            final urlMatch = RegExp(
-                              r'https?://[^\s\n\r]+',
-                              caseSensitive: false,
-                            ).firstMatch(msgContent);
-                            if (urlMatch != null) {
-                              final url = urlMatch
-                                  .group(0)
-                                  ?.replaceAll(
-                                  RegExp(r'[.,;:!?\s]+$'),
-                                  '') ??
-                                  '';
-                              if (url.isNotEmpty) {
-                                resolvedLinkMeta = {
-                                  'url': url,
-                                  'title': '',
-                                  'description': '',
-                                  'image': ''
-                                };
-                              }
-                            }
-                          }
-
-                          final forwerdUrl =
-                          (message['forwerdUrl'] ?? '')
-                              .toString();
-
-                          final isCampaignForward =
-                              (message['forwerdMessage'] ?? '')
-                                  .toString()
-                                  .isNotEmpty &&
-                                  (message['image'] ?? '')
-                                      .toString()
-                                      .isNotEmpty &&
-                                  message['isAudio'] != true &&
-                                  message['isFile'] != true &&
-                                  !forwerdUrl
-                                      .contains('/feeds/') &&
-                                  !forwerdUrl.contains(
-                                      '/feedpage/');
-
-                          final isSharedCard = isCampaignForward ||
-                              (message['forwerd'] == true &&
-                                  (message['forwerdUrl'] !=
-                                      null &&
-                                      (message['forwerdUrl']
-                                          ?.toString() ??
-                                          '')
-                                          .isNotEmpty) &&
-                                  message['isAudio'] !=
-                                      true &&
-                                  message['isFile'] != true);
-
-                          Map<String, dynamic>?
-                          resolvedPost;
-                          if (isCampaignForward) {
-                            String shareType = 'campaign';
-
-                            debugPrint(
-                                '🔍 ===== CAMPAIGN DETECTED =====');
-                            debugPrint(
-                                '🔍 Initial shareType: $shareType');
-
-                            if (forwerdUrl.contains(
-                                '/community/') &&
-                                forwerdUrl.contains(
-                                    '/announcements')) {
-                              shareType = 'announcement';
-                              debugPrint(
-                                  '🔍 Detected as ANNOUNCEMENT');
-                            } else if (forwerdUrl
-                                .contains('/services/')) {
-                              shareType = 'service';
-                              debugPrint(
-                                  '🔍 Detected as SERVICE');
-                            } else {
-                              debugPrint(
-                                  '🔍 Keeping as CAMPAIGN');
-                            }
-
-                            resolvedPost = {
-                              '_id': '',
-                              'shareType': shareType,
-                              'text': message['text'] ?? '',
-                              'images': [(message['image'] ??
-                                  '')],
-                              'authorName':
-                              message['forwerdMessage'] ??
-                                  'Forwarded',
-                              'authorProfile': '',
-                              'forwerdUrl': forwerdUrl,
-                              'likesCount': 0,
-                              'commentsCount': 0,
-                              'isOriginalShared': true,
-                              'isForwarded': false,
-                            };
-                          } else {
-                            resolvedPost =
-                                _resolveSharedPostData(message);
-                          }
-
+                        if (message['isCall'] == true ||
+                            message['type'] == 'call') {
                           final isMe = message['senderId'] ==
                               provider.currentUserId;
-                          final msgTime = DateTime.parse(
-                              message['createdAt'])
+                          final msgTime =
+                          DateTime.parse(message['createdAt'])
                               .toLocal();
 
                           DateTime? olderTime;
                           for (int j = index + 1;
                           j < messages.length;
                           j++) {
-                            if (messages[j]['isDelete'] !=
-                                true) {
-                              olderTime = DateTime.parse(
-                                  messages[j]['createdAt'])
-                                  .toLocal();
+                            if (messages[j]['isDelete'] != true) {
+                              olderTime =
+                                  DateTime.parse(messages[j]['createdAt'])
+                                      .toLocal();
                               break;
                             }
                           }
                           final showDateDiv = olderTime == null ||
                               !_sameDay(msgTime, olderTime);
-
-                          Map<String, dynamic>?
-                          repliedMessage;
-                          if (message['replyTo'] != null) {
-                            repliedMessage = _getMessageById(
-                                message['replyTo']);
-                          }
-
-                          debugPrint(
-                              '🔍 MSG: id=${message['_id']}, '
-                                  'senderId=${message['senderId']}, '
-                                  'receiverId=${message['receiverId']}, '
-                                  'isMe=$isMe, '
-                                  'widgetUserId=${widget.userId}');
-                          debugPrint(
-                              '📦 Forwarded msg: ${jsonEncode(message)}');
 
                           return Column(
                             children: [
@@ -1150,70 +992,179 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 _buildDateDivider(msgTime),
                               Padding(
                                 padding:
-                                const EdgeInsets.only(
-                                    bottom: 8),
-                                child: MessageBubble(
-                                  replyTo:
-                                  message['replyTo'],
-                                  replyToMessage:
-                                  repliedMessage,
-                                  onReply: (msg) =>
-                                      _setReplyMessage(msg),
-                                  content: message['text'],
+                                const EdgeInsets.only(bottom: 8),
+                                child: CallBubble(
+                                  call: message,
                                   isMe: isMe,
-                                  timestamp: DateTime.parse(
-                                      message['createdAt']),
-                                  status: message['status'],
-                                  linkMeta:
-                                  message['linkMeta'],
-                                  isFile: message['isFile'] ??
-                                      false,
-                                  fileUrl:
-                                  message['fileUrl'],
-                                  fileName:
-                                  message['fileName'],
-                                  fileType:
-                                  message['fileType'],
-                                  localFilePath: message[
-                                  'localFilePath'],
-                                  isOptimistic: message[
-                                  'isOptimistic'] ??
-                                      false,
-                                  readBy: message['readBy'] ??
-                                      false,
-                                  messageId:
-                                  message['_id'] ?? '',
-                                  receiverId: isMe
-                                      ? message['receiverId']
-                                      : message['senderId'],
-                                  isAudio: message['isAudio'] ??
-                                      false,
-                                  audioUrl:
-                                  message['audioUrl'],
-                                  isSharedPost: isSharedCard,
-                                  isForwarded:
-                                  message['forwerd'] ==
-                                      true,
-                                  sharedPostData:
-                                  resolvedPost,
                                 ),
                               ),
                             ],
                           );
-                        },
-                      ),
+                        }
+
+                        final msgContent =
+                            message['text']?.toString() ?? '';
+                        final isMeetingMsg =
+                        msgContent.trimLeft().startsWith('📅');
+
+                        final existingUrl =
+                        (message['linkMeta']?['url'] ?? '')
+                            .toString()
+                            .trim();
+                        Map<String, dynamic>? resolvedLinkMeta =
+                        existingUrl.isNotEmpty
+                            ? message['linkMeta']
+                            : null;
+
+                        if (isMeetingMsg && resolvedLinkMeta == null) {
+                          final urlMatch = RegExp(
+                            r'https?://[^\s\n\r]+',
+                            caseSensitive: false,
+                          ).firstMatch(msgContent);
+                          if (urlMatch != null) {
+                            final url = urlMatch
+                                .group(0)
+                                ?.replaceAll(
+                                RegExp(r'[.,;:!?\s]+$'), '') ??
+                                '';
+                            if (url.isNotEmpty) {
+                              resolvedLinkMeta = {
+                                'url': url,
+                                'title': '',
+                                'description': '',
+                                'image': ''
+                              };
+                            }
+                          }
+                        }
+
+                        final forwerdUrl =
+                        (message['forwerdUrl'] ?? '').toString();
+
+                        final isCampaignForward =
+                            (message['forwerdMessage'] ?? '')
+                                .toString()
+                                .isNotEmpty &&
+                                (message['image'] ?? '')
+                                    .toString()
+                                    .isNotEmpty &&
+                                message['isAudio'] != true &&
+                                message['isFile'] != true &&
+                                !forwerdUrl.contains('/feeds/') &&
+                                !forwerdUrl.contains('/feedpage/');
+
+                        final isSharedCard = isCampaignForward ||
+                            (message['forwerd'] == true &&
+                                (message['forwerdUrl'] != null &&
+                                    (message['forwerdUrl']?.toString() ??
+                                        '')
+                                        .isNotEmpty) &&
+                                message['isAudio'] != true &&
+                                message['isFile'] != true);
+
+                        Map<String, dynamic>? resolvedPost;
+                        if (isCampaignForward) {
+                          String shareType = 'campaign';
+
+                          if (forwerdUrl.contains('/community/') &&
+                              forwerdUrl.contains('/announcements')) {
+                            shareType = 'announcement';
+                          } else if (forwerdUrl.contains('/services/')) {
+                            shareType = 'service';
+                          }
+
+                          resolvedPost = {
+                            '_id': '',
+                            'shareType': shareType,
+                            'text': message['text'] ?? '',
+                            'images': [(message['image'] ?? '')],
+                            'authorName':
+                            message['forwerdMessage'] ?? 'Forwarded',
+                            'authorProfile': '',
+                            'forwerdUrl': forwerdUrl,
+                            'likesCount': 0,
+                            'commentsCount': 0,
+                            'isOriginalShared': true,
+                            'isForwarded': false,
+                          };
+                        } else {
+                          resolvedPost = _resolveSharedPostData(message);
+                        }
+
+                        final isMe = message['senderId'] ==
+                            provider.currentUserId;
+                        final msgTime =
+                        DateTime.parse(message['createdAt'])
+                            .toLocal();
+
+                        DateTime? olderTime;
+                        for (int j = index + 1;
+                        j < messages.length;
+                        j++) {
+                          if (messages[j]['isDelete'] != true) {
+                            olderTime =
+                                DateTime.parse(messages[j]['createdAt'])
+                                    .toLocal();
+                            break;
+                          }
+                        }
+                        final showDateDiv = olderTime == null ||
+                            !_sameDay(msgTime, olderTime);
+
+                        Map<String, dynamic>? repliedMessage;
+                        if (message['replyTo'] != null) {
+                          repliedMessage =
+                              _getMessageById(message['replyTo']);
+                        }
+
+                        return Column(
+                          children: [
+                            if (showDateDiv) _buildDateDivider(msgTime),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 8),
+                              child: MessageBubble(
+                                replyTo: message['replyTo'],
+                                replyToMessage: repliedMessage,
+                                onReply: (msg) => _setReplyMessage(msg),
+                                content: message['text'],
+                                isMe: isMe,
+                                timestamp:
+                                DateTime.parse(message['createdAt']),
+                                status: message['status'],
+                                linkMeta: message['linkMeta'],
+                                isFile: message['isFile'] ?? false,
+                                fileUrl: message['fileUrl'],
+                                fileName: message['fileName'],
+                                fileType: message['fileType'],
+                                localFilePath: message['localFilePath'],
+                                isOptimistic:
+                                message['isOptimistic'] ?? false,
+                                readBy: message['readBy'] ?? false,
+                                messageId: message['_id'] ?? '',
+                                receiverId: isMe
+                                    ? message['receiverId']
+                                    : message['senderId'],
+                                isAudio: message['isAudio'] ?? false,
+                                audioUrl: message['audioUrl'],
+                                isSharedPost: isSharedCard,
+                                isForwarded: message['forwerd'] == true,
+                                sharedPostData: resolvedPost,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
               ),
-
               if (_isRecording)
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     color: Colors.red[50],
-                    border: Border(
-                        top: BorderSide(color: Colors.red[200]!)),
+                    border:
+                    Border(top: BorderSide(color: Colors.red[200]!)),
                   ),
                   child: Row(
                     children: [
@@ -1221,8 +1172,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           width: 12,
                           height: 12,
                           decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle)),
+                              color: Colors.red, shape: BoxShape.circle)),
                       const SizedBox(width: 12),
                       Text(
                           'Recording... ${_formatDuration(_recordingDuration)}',
@@ -1236,7 +1186,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ],
                   ),
                 ),
-
               _buildInputBar(provider),
             ],
           );
@@ -1245,22 +1194,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Map<String, dynamic>? _resolveSharedPostData(
-      Map<String, dynamic> message) {
-    // ✅ Priority 1: Real sharedPost object (ORIGINAL SHARED POST)
+  Map<String, dynamic>? _resolveSharedPostData(Map<String, dynamic> message) {
     if (message['sharedPost'] is Map &&
         message['sharedPost']['_id'] != null) {
       final post = Map<String, dynamic>.from(message['sharedPost']);
       final id = post['_id']?.toString() ?? '';
-      if (id.length == 24 &&
-          RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
+      if (id.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(id)) {
         post['isOriginalShared'] = true;
         post['isForwarded'] = false;
         return post;
       }
     }
 
-    // ✅ Priority 2: Check if FORWARDED (has forwardedFrom field)
     final hasForwardedFrom = message['forwardedFrom'] is Map &&
         (message['forwardedFrom'] as Map).isNotEmpty;
 
@@ -1274,31 +1219,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       String shareType = 'feed';
 
       if (forwerdUrl.isNotEmpty) {
-        // Check if FEED post
         if (forwerdUrl.contains('/feeds/') ||
             forwerdUrl.contains('/feedpage/')) {
           shareType = 'feed';
           final segments = forwerdUrl.split('/');
           for (final segment in segments.reversed) {
             final s = segment.trim();
-            if (s.length == 24 &&
-                RegExp(r'^[a-f0-9]{24}$').hasMatch(s)) {
+            if (s.length == 24 && RegExp(r'^[a-f0-9]{24}$').hasMatch(s)) {
               postId = s;
               break;
             }
           }
-        }
-        // Check for ANNOUNCEMENT
-        else if (forwerdUrl.contains('/community/') &&
+        } else if (forwerdUrl.contains('/community/') &&
             forwerdUrl.contains('/announcements')) {
           shareType = 'announcement';
-        }
-        // Check for CAMPAIGN
-        else if (forwerdUrl.contains('/campaign/')) {
+        } else if (forwerdUrl.contains('/campaign/')) {
           shareType = 'campaign';
-        }
-        // Check for SERVICE
-        else if (forwerdUrl.contains('/services/')) {
+        } else if (forwerdUrl.contains('/services/')) {
           shareType = 'service';
         }
       }
@@ -1313,8 +1250,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         'authorProfile': '',
         'likesCount': 0,
         'commentsCount': 0,
-        'isOriginalShared': !hasForwardedFrom, // ✅ TRUE if SHARED, FALSE if FORWARDED
-        'isForwarded': hasForwardedFrom, // ✅ TRUE only if has forwardedFrom
+        'isOriginalShared': !hasForwardedFrom,
+        'isForwarded': hasForwardedFrom,
       };
     }
 
@@ -1346,15 +1283,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   decoration: BoxDecoration(
                     color: Colors.grey[100],
                     borderRadius: BorderRadius.circular(8),
-                    border: Border(
-                        left: BorderSide(color: Primary, width: 3)),
+                    border: Border(left: BorderSide(color: Primary, width: 3)),
                   ),
                   child: Row(
                     children: [
                       Expanded(
                         child: Column(
-                          crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
@@ -1367,19 +1302,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             const SizedBox(height: 4),
                             Text(
                               _replyingToMessage!['text'] ??
-                                  (_replyingToMessage!['isFile'] ==
-                                      true
+                                  (_replyingToMessage!['isFile'] == true
                                       ? '📎 ${_replyingToMessage!['fileName']}'
-                                      : (_replyingToMessage![
-                                  'isAudio'] ==
-                                      true
+                                      : (_replyingToMessage!['isAudio'] == true
                                       ? '🎤 Voice message'
                                       : '')),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  color: Colors.grey[700],
-                                  fontSize: 13),
+                                  color: Colors.grey[700], fontSize: 13),
                             ),
                           ],
                         ),
@@ -1395,9 +1326,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ],
                   ),
                 ),
-
               if (_selectedFile != null) _buildFilePreviewChip(),
-
               Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -1411,29 +1340,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         children: [
                           Expanded(
                             child: TextField(
-                              key: const ValueKey(
-                                  'message_input_field'),
+                              key: const ValueKey('message_input_field'),
                               controller: _messageController,
                               decoration: InputDecoration(
                                 hintText: _selectedFile != null
                                     ? 'Add a caption...'
                                     : 'Type a message...',
-                                hintStyle: TextStyle(
-                                    color: Colors.grey[500]),
+                                hintStyle:
+                                TextStyle(color: Colors.grey[500]),
                                 border: InputBorder.none,
                                 enabledBorder: InputBorder.none,
                                 focusedBorder: InputBorder.none,
-                                contentPadding:
-                                const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 12),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 12),
                               ),
                               maxLines: null,
                               textCapitalization:
                               TextCapitalization.sentences,
                               style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey[800]),
+                                  fontSize: 16, color: Colors.grey[800]),
                               cursorColor: Primary,
                               enabled: !_isSending,
                               onSubmitted: (_) {
@@ -1459,10 +1384,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         minWidth: 36, minHeight: 36),
                                     icon: Icon(Icons.camera_alt,
                                         size: 20,
-                                        color: (_selectedFile == null && !_isSending)
+                                        color: (_selectedFile == null &&
+                                            !_isSending)
                                             ? Primary
                                             : Colors.grey[500]),
-                                    onPressed: (_selectedFile == null && !_isSending)
+                                    onPressed:
+                                    (_selectedFile == null && !_isSending)
                                         ? _capturePhoto
                                         : null,
                                   ),
@@ -1472,10 +1399,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         minWidth: 36, minHeight: 36),
                                     icon: Icon(Icons.attach_file,
                                         size: 20,
-                                        color: (_selectedFile == null && !_isSending)
+                                        color: (_selectedFile == null &&
+                                            !_isSending)
                                             ? Primary
                                             : Colors.grey[500]),
-                                    onPressed: (_selectedFile == null && !_isSending)
+                                    onPressed:
+                                    (_selectedFile == null && !_isSending)
                                         ? _pickFile
                                         : null,
                                   ),
@@ -1495,7 +1424,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                       child: SizedBox(
                                           width: 16,
                                           height: 16,
-                                          child: CircularProgressIndicator(
+                                          child:
+                                          CircularProgressIndicator(
                                               strokeWidth: 2,
                                               valueColor:
                                               AlwaysStoppedAnimation(
@@ -1506,8 +1436,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         minWidth: 36, minHeight: 36),
                                     icon: const Icon(Icons.send,
                                         size: 18, color: Colors.white),
-                                    onPressed:
-                                    _isSending ? null : _sendMessage,
+                                    onPressed: _isSending
+                                        ? null
+                                        : _sendMessage,
                                   ),
                                 ),
                               ],
@@ -1526,15 +1457,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(
                           minWidth: 44, minHeight: 44),
-                      icon: Icon(
-                          _isRecording ? Icons.stop : Icons.mic,
-                          size: 22,
-                          color: Colors.white),
+                      icon: Icon(_isRecording ? Icons.stop : Icons.mic,
+                          size: 22, color: Colors.white),
                       onPressed: _isSending
                           ? null
-                          : (_isRecording
-                          ? _stopRecording
-                          : _startRecording),
+                          : (_isRecording ? _stopRecording : _startRecording),
                     ),
                   ),
                 ],
@@ -1550,14 +1477,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return FutureBuilder<int>(
       future: _selectedFile!.length(),
       builder: (context, snap) {
-        final sizeStr =
-        snap.hasData ? _readableSize(snap.data!) : '...';
+        final sizeStr = snap.hasData ? _readableSize(snap.data!) : '...';
         final name = _selectedFile!.path.split('/').last;
         final isImg = _isImageFile(_selectedFile!.path);
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
-          padding: const EdgeInsets.symmetric(
-              horizontal: 12, vertical: 8),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             color: Colors.grey[100],
             borderRadius: BorderRadius.circular(8),
@@ -1581,19 +1507,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             fontWeight: FontWeight.w500)),
                     Text(sizeStr,
                         style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[500])),
+                            fontSize: 11, color: Colors.grey[500])),
                   ],
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.close,
-                    size: 18, color: Colors.grey[600]),
+                icon:
+                Icon(Icons.close, size: 18, color: Colors.grey[600]),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(
                     minWidth: 28, minHeight: 28),
-                onPressed: () =>
-                    setState(() => _selectedFile = null),
+                onPressed: () => setState(() => _selectedFile = null),
               ),
             ],
           ),
@@ -1646,7 +1570,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       receiverId: receiverId,
       receiverName: receiverName,
       isConference: false,
-
     );
 
     if (!mounted) return;
@@ -1655,8 +1578,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       await _startRinging();
       Navigator.push(
         context,
-        MaterialPageRoute(
-            builder: (_) => const VoiceCallingScreen()),
+        MaterialPageRoute(builder: (_) => const VoiceCallingScreen()),
       ).then((_) => _stopRinging());
     } else if (voiceCallProvider.errorMessage != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1690,6 +1612,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _chatProvider.onNewMessageReceived = null;
     _recordingTimer?.cancel();
     _stopRinging();
@@ -1703,12 +1626,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
 
     _leaveConversationOnce();
-
     _messageController.dispose();
     _scrollController.dispose();
     _recorder?.closeRecorder();
-    if (_recordingPath != null &&
-        File(_recordingPath!).existsSync()) {
+    if (_recordingPath != null && File(_recordingPath!).existsSync()) {
       try {
         File(_recordingPath!).deleteSync();
       } catch (_) {}

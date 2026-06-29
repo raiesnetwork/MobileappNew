@@ -33,7 +33,6 @@ class AttendanceProvider extends ChangeNotifier {
     required String address,
     String? remark,
   }) async {
-    // Guard: never mark twice in the same session
     if (hasMarkedToday) {
       return {
         'error': true,
@@ -60,15 +59,10 @@ class AttendanceProvider extends ChangeNotifier {
       if (response['error'] == false) {
         _successMessage = response['message'];
 
-        // ✅ KEY FIX: set _todayAttendance directly from the mark response
-        // so hasMarkedToday becomes true immediately — don't depend on
-        //
-        // dayAttendance API which may return null right after marking.
         final data = response['data'];
         if (data != null) {
           _todayAttendance = Map<String, dynamic>.from(data);
         } else {
-          // Fallback: construct a minimal record so hasMarkedToday is true
           _todayAttendance = {
             'status':    status,
             'remark':    remark ?? '',
@@ -83,7 +77,6 @@ class AttendanceProvider extends ChangeNotifier {
 
         notifyListeners();
 
-        // Also try to refresh from server in background (non-blocking)
         _refreshTodayInBackground(studentId: studentId, tenantId: tenantId);
 
         return {'error': false, 'message': _successMessage};
@@ -100,9 +93,6 @@ class AttendanceProvider extends ChangeNotifier {
     }
   }
 
-  /// Quietly refresh today's record from server in background.
-  /// If server returns a valid record it replaces the local one.
-  /// If it returns null we keep what we already have.
   Future<void> _refreshTodayInBackground({
     required String studentId,
     required String tenantId,
@@ -116,7 +106,6 @@ class AttendanceProvider extends ChangeNotifier {
         _todayAttendance = Map<String, dynamic>.from(response['data']);
         notifyListeners();
       }
-      // If data is null, keep the locally-set record — don't overwrite with null
     } catch (_) {}
   }
 
@@ -160,7 +149,15 @@ class AttendanceProvider extends ChangeNotifier {
     required String studentId,
     required String tenantId,
   }) async {
-    _todayAttendance = null; // reset without notifying
+    // FIX: do NOT reset _todayAttendance to null before the async call.
+    // The old code did `_todayAttendance = null` here which caused the
+    // "Already Marked" view to flash back to the form every time the
+    // screen was opened, because hasMarkedToday briefly became false
+    // while the network request was in flight.
+    //
+    // Instead: only update if the server returns a valid record.
+    // If we already have a local record (from markAttendance), keep it
+    // until the server confirms otherwise.
 
     try {
       final response = await _service.getTodayAttendance(
@@ -170,13 +167,19 @@ class AttendanceProvider extends ChangeNotifier {
 
       if (response['error'] == false) {
         if (response['data'] != null) {
+          // Server found a record — use it (may have more fields than local)
           _todayAttendance = Map<String, dynamic>.from(response['data']);
         } else {
-          _todayAttendance = null;
+          // Server says no record today — only clear if we don't already
+          // have a freshly-marked local record (avoid race with mark API)
+          if (!hasMarkedToday) {
+            _todayAttendance = null;
+          }
         }
       }
-      notifyListeners(); // only notify AFTER the async call completes
+      notifyListeners();
     } catch (e) {
+      // On error keep whatever we have — don't clear a valid local record
       notifyListeners();
     }
   }

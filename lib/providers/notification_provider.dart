@@ -12,7 +12,6 @@ class NotificationProvider with ChangeNotifier {
   StreamSubscription? _notificationSubscription;
   Set<String> _readNotificationIds = {};
 
-  // Debounce timer — prevents rapid successive notifyListeners calls
   Timer? _notifyDebounce;
 
   List<Map<String, dynamic>> get notifications => _notifications;
@@ -101,19 +100,18 @@ class NotificationProvider with ChangeNotifier {
     _notificationSubscription = _notificationService.onNotification.listen(
           (notification) {
         _notifications.insert(0, notification);
-        _scheduleNotify(); // debounced — won't spam rebuilds
+        _scheduleNotify();
       },
       onError: (error) => debugPrint('Notification stream error: $error'),
     );
   }
 
   Future<void> loadNotifications() async {
-    // Don't re-enter if already loading
     if (_isLoading) return;
 
     _isLoading = true;
     _error = null;
-    notifyListeners(); // intentional immediate notify — loading state changed
+    notifyListeners();
 
     try {
       final result = await _notificationService.fetchNotifications();
@@ -133,18 +131,15 @@ class NotificationProvider with ChangeNotifier {
     }
 
     _isLoading = false;
-    notifyListeners(); // intentional immediate notify — loading done
+    notifyListeners();
   }
 
-  /// Marks notifications of given types as read.
-  /// Returns true if anything actually changed (so callers know whether a
-  /// rebuild is needed).
   Future<bool> markTypesAsRead(List<String> types) async {
     final toMark = _notifications
         .where((n) => types.contains(n['type']) && !_isNotificationRead(n))
         .toList();
 
-    if (toMark.isEmpty) return false; // nothing changed — no notify
+    if (toMark.isEmpty) return false;
 
     for (var n in toMark) {
       final id = n['_id']?.toString();
@@ -152,9 +147,8 @@ class NotificationProvider with ChangeNotifier {
     }
 
     await _saveReadNotifications();
-    _scheduleNotify(); // debounced — collapses rapid consecutive calls
+    _scheduleNotify();
 
-    // Background sync — fire and forget
     _syncWithBackendAsync(toMark);
 
     return true;

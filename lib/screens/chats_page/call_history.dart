@@ -14,15 +14,11 @@ class CallHistoryScreen extends StatefulWidget {
 class _CallHistoryScreenState extends State<CallHistoryScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final ScrollController _scrollController = ScrollController();
-  int _currentPage = 1;
-  bool _isLoadingMore = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<PersonalChatProvider>().fetchCallHistory(pageNo: 1);
     });
@@ -31,35 +27,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
   @override
   void dispose() {
     _tabController.dispose();
-    _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
-      _loadMore();
-    }
-  }
-
-  Future<void> _loadMore() async {
-    if (_isLoadingMore) return;
-    final provider = context.read<PersonalChatProvider>();
-    final pagination = provider.callPagination;
-    final totalPages = pagination['totalPages'] ?? 1;
-    if (_currentPage >= totalPages) return;
-    setState(() => _isLoadingMore = true);
-    _currentPage++;
-    await provider.fetchCallHistory(pageNo: _currentPage);
-    setState(() => _isLoadingMore = false);
-  }
-
-  List<dynamic> _filterCalls(List<dynamic> calls, String filter) {
-    if (filter == 'all') return calls;
-    if (filter == 'missed') {
-      return calls.where((c) => c['status'] == 'missed').toList();
-    }
-    return calls;
   }
 
   @override
@@ -125,68 +93,138 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
           ),
         ),
       ),
-      body: Consumer<PersonalChatProvider>(
-        builder: (context, provider, _) {
-          if (provider.isCallHistoryLoading &&
-              provider.callHistory.isEmpty) {
-            return const Center(
-              child: CircularProgressIndicator(color: Primary),
-            );
-          }
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _buildCallList(
-                  _filterCalls(provider.callHistory, 'all'), provider),
-              _buildCallList(
-                  _filterCalls(provider.callHistory, 'missed'), provider),
-            ],
-          );
-        },
+      // FIX: Use separate widgets per tab so each has its own
+      // ScrollController and load-more state — they don't interfere.
+      body: TabBarView(
+        controller: _tabController,
+        children: const [
+          _CallListTab(filter: 'all'),
+          _CallListTab(filter: 'missed'),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildCallList(List<dynamic> calls, PersonalChatProvider provider) {
-    if (calls.isEmpty) {
-      return _buildEmptyState(_tabController.index == 0 ? 'all' : 'missed');
+// ── Per-tab widget with its own scroll + pagination state ─────────────────────
+
+class _CallListTab extends StatefulWidget {
+  final String filter; // 'all' or 'missed'
+  const _CallListTab({required this.filter});
+
+  @override
+  State<_CallListTab> createState() => _CallListTabState();
+}
+
+class _CallListTabState extends State<_CallListTab>
+    with AutomaticKeepAliveClientMixin {
+  // Keep alive so switching tabs doesn't destroy + re-create the list
+  @override
+  bool get wantKeepAlive => true;
+
+  final ScrollController _scrollController = ScrollController();
+  int  _currentPage   = 1;
+  bool _isLoadingMore = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMore();
     }
+  }
 
-    return RefreshIndicator(
-      color: Primary,
-      onRefresh: () async {
-        _currentPage = 1;
-        await provider.fetchCallHistory(pageNo: 1);
-      },
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        itemCount: calls.length + (_isLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index == calls.length) {
-            return const Padding(
-              padding: EdgeInsets.all(16),
-              child: Center(child: CircularProgressIndicator(color: Primary)),
-            );
-          }
+  Future<void> _loadMore() async {
+    if (_isLoadingMore) return;
+    final provider = context.read<PersonalChatProvider>();
+    final pagination = provider.callPagination;
+    final totalPages = pagination['totalPages'] ?? 1;
+    if (_currentPage >= totalPages) return;
 
-          final call = calls[index];
-          final createdAt = call['createdAt'] ?? '';
-          final showHeader = index == 0 ||
-              !_isSameDay(createdAt, calls[index - 1]['createdAt'] ?? '');
+    setState(() => _isLoadingMore = true);
+    _currentPage++;
+    await provider.fetchCallHistory(pageNo: _currentPage);
+    if (mounted) setState(() => _isLoadingMore = false);
+  }
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (showHeader) _buildDateHeader(createdAt),
-              _buildCallItem(call, provider.currentUserId),
-            ],
+  Future<void> _refresh(PersonalChatProvider provider) async {
+    _currentPage = 1;
+    await provider.fetchCallHistory(pageNo: 1);
+  }
+
+  List<dynamic> _filtered(List<dynamic> all) {
+    if (widget.filter == 'missed') {
+      return all.where((c) => c['status'] == 'missed').toList();
+    }
+    return all;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context); // required for AutomaticKeepAliveClientMixin
+
+    return Consumer<PersonalChatProvider>(
+      builder: (context, provider, _) {
+        // Show full-screen loader only on first load
+        if (provider.isCallHistoryLoading && provider.callHistory.isEmpty) {
+          return const Center(
+            child: CircularProgressIndicator(color: Primary),
           );
-        },
-      ),
+        }
+
+        final calls = _filtered(provider.callHistory);
+
+        if (calls.isEmpty) {
+          return _buildEmptyState();
+        }
+
+        return RefreshIndicator(
+          color: Primary,
+          onRefresh: () => _refresh(provider),
+          child: ListView.builder(
+            controller: _scrollController,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            itemCount: calls.length + (_isLoadingMore ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == calls.length) {
+                return const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Center(
+                      child: CircularProgressIndicator(color: Primary)),
+                );
+              }
+
+              final call = calls[index];
+              final createdAt = call['createdAt'] ?? '';
+              final showHeader = index == 0 ||
+                  !_isSameDay(createdAt, calls[index - 1]['createdAt'] ?? '');
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (showHeader) _buildDateHeader(createdAt),
+                  _buildCallItem(call, provider.currentUserId),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   bool _isSameDay(String a, String b) {
     try {
@@ -201,7 +239,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
   Widget _buildDateHeader(String timestamp) {
     String label = '';
     try {
-      final dt = DateTime.parse(timestamp).toLocal();
+      final dt  = DateTime.parse(timestamp).toLocal();
       final now = DateTime.now();
       final diff = DateTime(now.year, now.month, now.day)
           .difference(DateTime(dt.year, dt.month, dt.day))
@@ -211,7 +249,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
       } else if (diff == 1) {
         label = 'Yesterday';
       } else if (diff < 7) {
-        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday',
+          'Friday', 'Saturday', 'Sunday'];
         label = days[dt.weekday - 1];
       } else {
         label = '${dt.day} ${_monthName(dt.month)} ${dt.year}';
@@ -254,25 +293,21 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
     return months[month - 1];
   }
 
-  // ✅ FIX 1: Accept currentUserId and pick the OTHER party, not always the caller.
   Widget _buildCallItem(Map<String, dynamic> call, String? currentUserId) {
-    final status = call['status'] ?? 'unknown';
-    final type = call['type'] ?? 'voice';
-    final duration = call['duration'] ?? 0;
+    final status    = call['status'] ?? 'unknown';
+    final type      = call['type']   ?? 'voice';
+    final duration  = call['duration'] ?? 0;
     final createdAt = call['createdAt'] ?? '';
 
     final caller   = call['callerId']   as Map<String, dynamic>?;
     final receiver = call['receiverId'] as Map<String, dynamic>?;
 
-    // ✅ Pick the person who is NOT the current user.
-    // The backend always populates both sides, so `caller ?? receiver`
-    // would always pick the caller — including when you ARE the caller.
     final callerId   = caller?['_id']?.toString()   ?? caller?['id']?.toString()   ?? '';
     final receiverId = receiver?['_id']?.toString() ?? receiver?['id']?.toString() ?? '';
 
-    final Map<String, dynamic>? otherPerson = (callerId == currentUserId)
-        ? receiver   // I am the caller  → show the receiver
-        : caller;    // I am the receiver → show the caller
+    // Show the OTHER person — not the current user
+    final Map<String, dynamic>? otherPerson =
+    (callerId == currentUserId) ? receiver : caller;
 
     final name         = otherPerson?['profile']?['name']         ?? 'Unknown';
     final profileImage = otherPerson?['profile']?['profileImage'] ?? '';
@@ -306,7 +341,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
             padding: const EdgeInsets.all(14),
             child: Row(
               children: [
-                // Avatar with call type badge
+                // Avatar with call-type badge
                 Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -325,7 +360,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                         backgroundColor: Primary.withOpacity(0.08),
                         backgroundImage: profileImage.isNotEmpty
                             ? (profileImage.startsWith('data:image/')
-                            ? MemoryImage(base64Decode(profileImage.split(',')[1]))
+                            ? MemoryImage(
+                            base64Decode(profileImage.split(',')[1]))
                             : NetworkImage(profileImage) as ImageProvider)
                             : null,
                         child: profileImage.isEmpty
@@ -354,7 +390,9 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                           border: Border.all(color: Colors.white, width: 1.5),
                         ),
                         child: Icon(
-                          isVideo ? Icons.videocam_rounded : Icons.call_rounded,
+                          isVideo
+                              ? Icons.videocam_rounded
+                              : Icons.call_rounded,
                           size: 11,
                           color: Colors.white,
                         ),
@@ -364,7 +402,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                 ),
                 const SizedBox(width: 14),
 
-                // Info
+                // Name + status row
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,8 +436,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                           ),
                           const SizedBox(width: 6),
                           Container(
-                            width: 3,
-                            height: 3,
+                            width: 3, height: 3,
                             decoration: BoxDecoration(
                               color: Colors.grey[400],
                               shape: BoxShape.circle,
@@ -417,8 +454,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                           if (duration > 0) ...[
                             const SizedBox(width: 6),
                             Container(
-                              width: 3,
-                              height: 3,
+                              width: 3, height: 3,
                               decoration: BoxDecoration(
                                 color: Colors.grey[400],
                                 shape: BoxShape.circle,
@@ -440,7 +476,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                   ),
                 ),
 
-                // Time + call back button
+                // Time + call-back button
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -466,9 +502,12 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
-                          isVideo ? Icons.videocam_rounded : Icons.call_rounded,
+                          isVideo
+                              ? Icons.videocam_rounded
+                              : Icons.call_rounded,
                           size: 18,
-                          color: isVideo ? const Color(0xFF6C5CE7) : Primary,
+                          color:
+                          isVideo ? const Color(0xFF6C5CE7) : Primary,
                         ),
                       ),
                     ),
@@ -482,8 +521,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
     );
   }
 
-  Widget _buildEmptyState(String type) {
-    final isMissed = type == 'missed';
+  Widget _buildEmptyState() {
+    final isMissed = widget.filter == 'missed';
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -518,7 +557,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
             isMissed
                 ? 'All your missed calls will appear here'
                 : 'Your voice & video calls will appear here',
-            style: TextStyle(fontSize: 14, color: Colors.grey[500], height: 1.5),
+            style: TextStyle(
+                fontSize: 14, color: Colors.grey[500], height: 1.5),
             textAlign: TextAlign.center,
           ),
         ],
@@ -572,12 +612,12 @@ class _CallHistoryScreenState extends State<CallHistoryScreen>
   String _formatTime(String timestamp) {
     if (timestamp.isEmpty) return '';
     try {
-      final dt = DateTime.parse(timestamp).toLocal();
+      final dt  = DateTime.parse(timestamp).toLocal();
       final now = DateTime.now();
       final diff = now.difference(dt);
       if (diff.inDays == 0) {
-        final h = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
-        final m = dt.minute.toString().padLeft(2, '0');
+        final h      = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+        final m      = dt.minute.toString().padLeft(2, '0');
         final period = dt.hour >= 12 ? 'PM' : 'AM';
         return '$h:$m $period';
       } else if (diff.inDays == 1) {
