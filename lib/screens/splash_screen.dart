@@ -52,7 +52,7 @@ class _SplashScreenState extends State<SplashScreen>
 
     Widget next;
     if (authProvider.isAuthenticated) {
-      next = const MainScreen(initialIndex: 0);
+      next = MainScreen(key: mainScreenKey, initialIndex: 0);
       debugPrint('🌐 [SPLASH] → MainScreen (authenticated)');
     } else {
       next = const LoginScreen();

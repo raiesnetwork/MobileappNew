@@ -120,7 +120,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
               child: IncomingCallListener(
-                  child: const MainScreen(initialIndex: 0)),
+                  child: MainScreen(key: mainScreenKey, initialIndex: 0)),
             ),
           ),
               (route) => false,
@@ -320,7 +320,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
               child: IncomingCallListener(
-                  child: const MainScreen(initialIndex: 0)),
+                  child: MainScreen(key: mainScreenKey, initialIndex: 0)),
             ),
           ),
               (route) => false,
@@ -347,7 +347,7 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
               child: IncomingCallListener(
-                  child: const MainScreen(initialIndex: 0)),
+                  child: MainScreen(key: mainScreenKey, initialIndex: 0)),
             ),
           ),
               (route) => false,

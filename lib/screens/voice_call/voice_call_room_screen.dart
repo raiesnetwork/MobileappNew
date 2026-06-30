@@ -119,7 +119,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
               child: IncomingCallListener(
-                child: const MainScreen(initialIndex: 0),
+                child: MainScreen(key: mainScreenKey, initialIndex: 0),
               ),
             ),
           ),
@@ -302,7 +302,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
               child: IncomingCallListener(
-                child: const MainScreen(initialIndex: 0),
+                child: MainScreen(key: mainScreenKey, initialIndex: 0),
               ),
             ),
           ),
@@ -331,7 +331,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (_) => VoiceCallListener(
-              child: IncomingCallListener(child: const MainScreen(initialIndex: 0)),
+              child: IncomingCallListener(child: MainScreen(key: mainScreenKey, initialIndex: 0)),
             ),
           ),
               (route) => false,

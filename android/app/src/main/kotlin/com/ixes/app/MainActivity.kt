@@ -18,7 +18,9 @@ class MainActivity : FlutterActivity() {
     private val SCREEN_CHANNEL = "com.ixes.app/screen_share"
     private val CALL_CHANNEL   = "com.ixes.app/calls"
     private val CHAT_CHANNEL   = "com.ixes.app/chat"
-    private val CHAT_NOTIF_CHANNEL = "com.ixes.app/chat_notification"  // ← NEW CHANNEL
+    private val CHAT_NOTIF_CHANNEL = "com.ixes.app/chat_notification"  // ← CHAT NOTIFICATIONS
+    private val NOTIF_MANAGER_CHANNEL = "com.ixes.app/notification_manager"  // ✅ ADD THIS - NOTIFICATION REMOVAL
+    private val APP_LAUNCHER_CHANNEL = "com.ixes.app/app_launcher"     // ← APP LAUNCHER
     private val FGS_PERMISSION = "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     private val PERMISSION_REQUEST_CODE = 1001
 
@@ -54,7 +56,50 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { _, result -> result.notImplemented() }
 
         // ────────────────────────────────────────────────────────────────────────────
-        // ✅ NEW CHANNEL: Handle chat notifications from Flutter background handler
+        // ✅ NOTIFICATION MANAGER CHANNEL: Remove notifications by ID
+        // ────────────────────────────────────────────────────────────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NOTIF_MANAGER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "removeNotification" -> {
+                        try {
+                            val notificationId = call.argument<Int>("notificationId") ?: 0
+                            val notificationManager = getSystemService(NotificationManager::class.java)
+                            notificationManager.cancel(notificationId)
+
+                            Log.d("MainActivity", "✅ [CANCEL] Removed notification from tray | id=$notificationId")
+                            result.success(null)
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "❌ [CANCEL] Error: ${e.message}")
+                            result.error("NOTIF_ERROR", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // ✅ APP LAUNCHER CHANNEL: Launch app from DECLINE action
+        // ────────────────────────────────────────────────────────────────────────────
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, APP_LAUNCHER_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "launchApp" -> {
+                        try {
+                            launchAppInForeground()
+                            result.success(null)
+                            Log.d("MainActivity", "✅ [APP_LAUNCHER] launchApp() succeeded")
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "❌ [APP_LAUNCHER] Error: ${e.message}")
+                            result.error("LAUNCH_ERROR", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // ✅ CHAT NOTIFICATION CHANNEL: Handle chat notifications from Flutter background handler
         // ────────────────────────────────────────────────────────────────────────────
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHAT_NOTIF_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -104,6 +149,31 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         handleCallIntent(intent)
         handleChatIntent(intent)
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ✅ NEW: Launch app from DECLINE action
+    // ────────────────────────────────────────────────────────────────────────────
+
+    private fun launchAppInForeground() {
+        Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        Log.d("MainActivity", "🚀 [DECLINE] Launching app in foreground...")
+        Log.d("MainActivity", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        try {
+            startActivity(intent)
+            Log.d("MainActivity", "✅ [DECLINE] App launched successfully")
+        } catch (e: Exception) {
+            Log.e("MainActivity", "❌ [DECLINE] Failed to launch app: ${e.message}")
+        }
     }
 
     // ── Call handler ───────────────────────────────────────────────────────
@@ -272,7 +342,7 @@ class MainActivity : FlutterActivity() {
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // ✅ NEW: Show chat notification from Flutter MethodChannel
+    // ✅ Show chat notification from Flutter MethodChannel
     // ────────────────────────────────────────────────────────────────────────────
 
     private fun showChatNotificationFromChannel(

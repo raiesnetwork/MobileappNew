@@ -84,7 +84,7 @@ class _OTPScreenState extends State<OTPScreen>
       }
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-            builder: (_) => const MainScreen(initialIndex: 0)),
+            builder: (_) => MainScreen(key: mainScreenKey, initialIndex: 0)),
       );
     } else {
       _showSnack(authProvider.errorMessage, isError: true);

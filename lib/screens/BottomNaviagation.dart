@@ -74,18 +74,12 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
 
   // ── Public API used by NotificationScreen ─────────────────────────────────
 
-  /// Switches to [tab] and clears its notifications.
-  /// Called directly by NotificationScreen — does NOT trigger a Consumer
-  /// rebuild that would call this again.
   void navigateToTab(int tab, {String? postId}) {
     if (!mounted) return;
     setState(() {
       _currentIndex = tab;
       if (tab == 0 && postId != null) _pendingPostId = postId;
     });
-    // Mark this tab's notifications read. Because markTypesAsRead is a no-op
-    // (returns false, no notify) when nothing is unread, this cannot cause an
-    // infinite rebuild cycle.
     _doClear(tab);
   }
 
@@ -100,6 +94,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       context.read<NotificationProvider>().initializeNotifications().then((_) {
         if (!mounted) return;
         _isInitialized = true;
+        // FIX: Clear the active tab immediately. For all other tabs the badges
+        // will naturally show until the user visits them — that is correct
+        // behaviour. What we must NOT do is clear every tab on startup,
+        // because that would wipe unread counts the user hasn't seen yet.
         _doClear(_currentIndex);
       });
     });
@@ -110,8 +108,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed && _isInitialized && mounted) {
       context.read<NotificationProvider>().loadNotifications();
-      // No _doClear here — loadNotifications triggers a rebuild via
-      // notifyListeners, and we don't want to clear on every resume.
     }
   }
 
@@ -119,7 +115,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final args =
-        ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
     if (!_snackbarShown && args != null && args['showSnackbar'] == true) {
       _snackbarShown = true;
       if (args['goToTab'] != null) {
@@ -154,13 +150,11 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   // ── Tab switching (user taps bottom nav) ──────────────────────────────────
 
   void _onTabTapped(int index) {
-    if (_currentIndex == index) return; // already on this tab — skip setState
+    if (_currentIndex == index) return;
     setState(() => _currentIndex = index);
     _doClear(index);
   }
 
-  /// Marks the correct types as read for [tab].
-  /// markTypesAsRead is a no-op when nothing changed, so this cannot loop.
   void _doClear(int tab) {
     if (!_isInitialized || !mounted) return;
     final List<String> types;
@@ -203,7 +197,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         padding: const EdgeInsets.all(4),
         constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
         decoration:
-            const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+        const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
         child: Text(count > 99 ? '99+' : '$count',
             style: const TextStyle(
                 color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
@@ -221,7 +215,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         padding: const EdgeInsets.all(3),
         constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
         decoration:
-            const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+        const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
         child: Text(count > 99 ? '99+' : '$count',
             style: const TextStyle(
                 color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
@@ -272,7 +266,7 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
               children: [
                 IconButton(
                   icon:
-                      const Icon(Icons.notifications_outlined, color: Primary),
+                  const Icon(Icons.notifications_outlined, color: Primary),
                   iconSize: _kIconSize,
                   padding: _kIconPadding,
                   constraints: _kIconConstraints,
@@ -281,9 +275,6 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
                         context,
                         MaterialPageRoute(
                             builder: (_) => const NotificationScreen()));
-                    // Reload badge counts after returning.
-                    // NotificationScreen already called markTypesAsRead for
-                    // whatever the user tapped — no _doClear needed here.
                     if (mounted) {
                       context.read<NotificationProvider>().loadNotifications();
                     }

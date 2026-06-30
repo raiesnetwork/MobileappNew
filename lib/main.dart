@@ -1541,7 +1541,6 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     await ctx.read<PersonalChatProvider>().initialize();
     await _requestLocationPermission();
 
-
     final sock = SocketService().socket;
     if (sock != null) {
       ctx.read<GroupChatProvider>().setSocket(sock);
@@ -1558,6 +1557,9 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
     final freshPrefs = await SharedPreferences.getInstance();
     final freshToken = freshPrefs.getString('auth_token');
+
+    // ✅ CRITICAL: Clear stale meeting state BEFORE re-initializing
+    ctx.read<MeetingProvider>().clearMeetingState();
 
     ctx.read<VideoCallProvider>().initialize(
       userId:    user.id as String,

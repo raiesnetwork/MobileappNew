@@ -393,6 +393,8 @@ class _CommunitiesScreenState extends State<CommunitiesScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        // ✅ NO BACK ARROW - disable auto back button
+        automaticallyImplyLeading: false,
         scrolledUnderElevation: 0,
         backgroundColor: Colors.white,
         elevation: 0,

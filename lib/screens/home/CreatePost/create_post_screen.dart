@@ -335,7 +335,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => MainScreen(initialIndex: 0),
+            builder: (_) =>  MainScreen(key: mainScreenKey, initialIndex: 0),
           ),
         );
       } else {

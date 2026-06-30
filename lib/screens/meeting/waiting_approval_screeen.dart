@@ -41,6 +41,7 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
     if (_meetingProvider == null) {
       _meetingProvider = context.read<MeetingProvider>();
       _meetingProvider!.addListener(_handleStatus);
+      debugPrint('👂 [WAITING] Listener registered for provider changes');
     }
   }
 
@@ -49,89 +50,168 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
     _controller.dispose();
     // Use saved provider reference instead of context.read
     _meetingProvider?.removeListener(_handleStatus);
+    debugPrint('👋 [WAITING] Listener removed on dispose');
     super.dispose();
   }
 
+  // ✅ COMPLETE _handleStatus() METHOD WITH ALL SAFETY CHECKS
   void _handleStatus() {
-    if (_hasNavigated || !mounted || _meetingProvider == null) return;
+    // ── Early returns for invalid states ────────────────────────────────
+    if (_hasNavigated || !mounted || _meetingProvider == null) {
+      debugPrint('⚠️ [WAITING] Early return | hasNavigated=$_hasNavigated | mounted=$mounted | providerNull=${_meetingProvider == null}');
+      return;
+    }
 
     final provider = _meetingProvider!;
+    final currentContext = context;
 
-    // Handle approval - navigate to meeting room
-    if (provider.joinStatus == JoinStatus.approved &&
-        provider.accessToken != null) {
+    // ── Check if we're still on the WaitingApprovalScreen ────────────────
+    // This prevents handling status when user has already popped/navigated
+    if (!Navigator.canPop(currentContext)) {
+      debugPrint('⚠️ [WAITING] Not on waiting screen (no canPop) — skipping auto-nav');
+      return;
+    }
+
+    debugPrint('🔄 [WAITING] Status check | joinStatus=${provider.joinStatus} | hasToken=${provider.accessToken != null}');
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ✅ HANDLE APPROVAL — Navigate to meeting room
+    // ─────────────────────────────────────────────────────────────────────
+    if (provider.joinStatus == JoinStatus.approved && provider.accessToken != null) {
+      debugPrint('✅ [WAITING] APPROVED | accessToken=${provider.accessToken?.substring(0, 20)}...');
+
+      // Prevent multiple navigations
+      if (_hasNavigated) {
+        debugPrint('⚠️ [WAITING] Already navigated once — skipping duplicate nav');
+        return;
+      }
+
       _hasNavigated = true;
+      debugPrint('🚪 [WAITING] Setting _hasNavigated=true → navigating to MeetingRoomScreen');
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
+        if (!mounted) {
+          debugPrint('⚠️ [WAITING] Widget unmounted before callback — aborting nav');
+          return;
+        }
+
+        try {
+          debugPrint('📍 [WAITING] Pushing MeetingRoomScreen | meetingId=${widget.meetingId}');
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
               builder: (_) => MeetingRoomScreen(meetingId: widget.meetingId),
             ),
           );
+        } catch (e) {
+          debugPrint('❌ [WAITING] Navigation error: $e');
+          _hasNavigated = false; // Reset on error
         }
       });
+      return; // ✅ CRITICAL: Return to prevent handling other statuses
     }
 
-    // Handle rejection - show dialog and navigate back
+    // ─────────────────────────────────────────────────────────────────────
+    // ✅ HANDLE REJECTION — Show dialog and go back
+    // ─────────────────────────────────────────────────────────────────────
     if (provider.joinStatus == JoinStatus.rejected) {
+      debugPrint('❌ [WAITING] REJECTED');
+
+      if (_hasNavigated) {
+        debugPrint('⚠️ [WAITING] Already navigated once — skipping duplicate nav');
+        return;
+      }
+
       _hasNavigated = true;
+      debugPrint('🚪 [WAITING] Setting _hasNavigated=true → showing rejection dialog');
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted) {
+          debugPrint('⚠️ [WAITING] Widget unmounted before callback — aborting dialog');
+          return;
+        }
 
-        // Show rejection dialog
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (dialogContext) => AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-            ),
-            title: Row(
-              children: [
-                Icon(Icons.cancel, color: Colors.red.shade700, size: 28),
-                const SizedBox(width: 12),
-                const Text(
-                  "Request Rejected",
-                  style: TextStyle(fontWeight: FontWeight.w600),
+        try {
+          debugPrint('📋 [WAITING] Showing rejection dialog');
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialogContext) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+              ),
+              title: Row(
+                children: [
+                  Icon(Icons.cancel, color: Colors.red.shade700, size: 28),
+                  const SizedBox(width: 12),
+                  const Text(
+                    "Request Rejected",
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+              content: const Text(
+                "Your request to join this meeting was rejected by the host.",
+                style: TextStyle(fontSize: 15),
+              ),
+              actions: [
+                TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: Colors.red.shade700,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 12,
+                    ),
+                  ),
+                  onPressed: () {
+                    debugPrint('👤 [WAITING] User clicked OK on rejection dialog');
+
+                    // ✅ Clear state before closing dialog
+                    _meetingProvider?.clearMeetingState();
+
+                    Navigator.pop(dialogContext); // Close dialog
+
+                    if (mounted) {
+                      Navigator.pop(context); // Go back to join screen
+                      debugPrint('✅ [WAITING] Popped back to join screen');
+                    }
+                  },
+                  child: const Text("OK"),
                 ),
               ],
             ),
-            content: const Text(
-              "Your request to join this meeting was rejected by the host.",
-              style: TextStyle(fontSize: 15),
-            ),
-            actions: [
-              TextButton(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: Colors.red.shade700,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                ),
-                onPressed: () {
-                  Navigator.pop(dialogContext); // Close dialog
-                  Navigator.pop(context); // Go back to previous screen
-                },
-                child: const Text("OK"),
-              ),
-            ],
-          ),
-        );
+          );
+        } catch (e) {
+          debugPrint('❌ [WAITING] Dialog error: $e');
+          _hasNavigated = false; // Reset on error
+        }
       });
+      return; // ✅ CRITICAL: Return to prevent handling other statuses
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ⏳ STILL WAITING — No action, status will be checked again on next
+    // ─────────────────────────────────────────────────────────────────────
+    if (provider.joinStatus == JoinStatus.requesting) {
+      debugPrint('⏳ [WAITING] Still waiting for approval...');
+      return;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ⚠️ UNKNOWN STATE — Log and wait
+    // ─────────────────────────────────────────────────────────────────────
+    debugPrint('❓ [WAITING] Unknown status: ${provider.joinStatus} | errorMsg=${provider.errorMessage}');
   }
 
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
       onWillPop: () async {
-        _showCancelDialog();
-        return false;
+        debugPrint('🔙 [WAITING] Back pressed');
+        // ✅ Clear state when user presses back arrow
+        _meetingProvider?.clearMeetingState();
+        return true; // Allow pop
       },
       child: Scaffold(
         backgroundColor: Colors.white,
@@ -299,6 +379,7 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
   }
 
   void _showCancelDialog() {
+    debugPrint('❌ [WAITING] Cancel button tapped');
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -314,7 +395,10 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              debugPrint('⏳ [WAITING] User clicked "No, Wait"');
+              Navigator.pop(context);
+            },
             child: const Text("No, Wait"),
           ),
           TextButton(
@@ -322,9 +406,17 @@ class _WaitingApprovalScreenState extends State<WaitingApprovalScreen>
               foregroundColor: Colors.red,
             ),
             onPressed: () {
+              debugPrint('✅ [WAITING] User confirmed cancel');
+
               _meetingProvider?.cancelJoinRequest();
+              // ✅ Clear state before navigating back
+              _meetingProvider?.clearMeetingState();
+
               Navigator.pop(context); // Close dialog
               Navigator.pop(context); // Go back to previous screen
+
+              debugPrint('✅ [WAITING] Back navigation complete');
+
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text("Join request cancelled"),

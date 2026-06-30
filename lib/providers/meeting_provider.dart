@@ -480,6 +480,23 @@ class MeetingProvider extends ChangeNotifier {
     _safeNotifyListeners();
   }
 
+  /// ✅ NEW: Clear meeting state completely (fixes stale state on app restart)
+  void clearMeetingState() {
+    debugPrint('🧹 [MEETING] Clearing all meeting state');
+    _currentMeetingId = null;
+    _joinStatus = JoinStatus.idle;
+    _errorMessage = null;
+    _successMessage = null;
+    _isHost = false;
+    _accessToken = null;
+    _currentRole = null;
+    _pendingRequests.clear();
+    _chatMessages.clear();
+    _isChatJoined = false;
+    _safeNotifyListeners();
+    debugPrint('✅ [MEETING] State cleared completely');
+  }
+
   /// Fetch access token for joining the meeting
   Future<bool> _fetchAccessToken(String meetingId) async {
     if (_currentUserId == null || _currentUserName == null) {

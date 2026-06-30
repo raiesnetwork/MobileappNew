@@ -285,6 +285,9 @@ class _JoinMeetingScreenState extends State<JoinMeetingScreen> {
     final provider = context.read<MeetingProvider>();
     final authProvider = context.read<AuthProvider>();
 
+    // ✅ CLEAR STALE STATE BEFORE JOINING — CRITICAL FIX
+    provider.clearMeetingState();
+
     // ✅ Initialize provider first — CRITICAL
     final prefs = await SharedPreferences.getInstance();
     final authToken = prefs.getString('auth_token');

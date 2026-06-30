@@ -4,9 +4,10 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 
-import 'package:ixes.app/screens/BottomNaviagation.dart';
+
 import 'package:ixes.app/screens/service_request/service_request_deatils_page.dart';
 import '../../api_service/user_api_service.dart';
+import '../BottomNaviagation.dart';
 import '../announcement_page/announcement_screen.dart';
 import '../campaigns_page/campaigns_info screen.dart';
 import '../chats_page/group_chat/group_chat_detail.dart';
@@ -127,63 +128,99 @@ class _NotificationScreenState extends State<NotificationScreen> {
   // ── Navigation ────────────────────────────────────────────────────────────
 
   Future<void> _onNotificationTapped(Map<String, dynamic> n) async {
-    if (_navigating || !mounted) return;
+    if (_navigating || !mounted) {
+      print('🚫 [NOTIF TAP] Ignored tap — _navigating=$_navigating mounted=$mounted');
+      return;
+    }
     _navigating = true;
 
     final type = (n['type'] ?? '') as String;
     final related = n['relatedData'] as Map<String, dynamic>?;
 
-    // Capture provider BEFORE pop — context gone after pop
+    print('────────────────────────────────────────────');
+    print('👆 [NOTIF TAP] User tapped notification. type="$type" id=${n['_id']}');
+
+    // Capture provider BEFORE any navigation — context gone after pop
     final provider = context.read<NotificationProvider>();
 
-    // Pop first so mainScreenKey navigator is free
-    Navigator.of(context).pop();
-
     try {
-      await _dispatchAfterPop(
+      // FIX: Do NOT pop before dispatch. Instead, dispatch first so we have
+      // a valid context throughout (especially for the async post check).
+      // Pop happens inside _dispatchBeforePop after setup is done.
+      await _dispatchBeforePop(
         type: type,
         related: related,
         n: n,
         provider: provider,
       );
-    } catch (e) {
+    } catch (e, st) {
+      print('💥 [NOTIF NAV ERROR] type="$type" error=$e');
+      print(st);
       debugPrint('Notification nav error: $e');
     } finally {
-      // Always reset — even if dispatch threw or post check failed
       _navigating = false;
+      print('🏁 [NOTIF TAP] Dispatch finished for type="$type"');
+      print('────────────────────────────────────────────');
     }
   }
 
-  Future<void> _dispatchAfterPop({
+  Future<void> _dispatchBeforePop({
     required String type,
     required Map<String, dynamic>? related,
     required Map<String, dynamic> n,
     required NotificationProvider provider,
   }) async {
+    print('🔔 [NOTIF DISPATCH] raw type="$type"');
+    print('🔔 [NOTIF DISPATCH] related=$related');
+    print('🔔 [NOTIF DISPATCH] referenceId=${n['referenceId']}  notif._id=${n['_id']}  message="${n['message']}"');
+
+    // Helper: pop this screen, then switch tab on MainScreen.
     void goTab(int tab, List<String> types, {String? postId}) {
+      print('➡️ [NOTIF NAV] goTab(tab=$tab, types=$types, postId=$postId) for incoming type="$type"');
+      if (mounted) {
+        Navigator.of(context).pop();
+      } else {
+        print('⚠️ [NOTIF NAV] NotificationScreen not mounted — pop SKIPPED');
+      }
       final state = mainScreenKey.currentState;
       if (state != null && state.mounted) {
+        print('   ✅ mainScreenKey.currentState found & mounted — calling navigateToTab($tab)');
         state.navigateToTab(tab, postId: postId);
+      } else {
+        print('   ⚠️ mainScreenKey.currentState is NULL or UNMOUNTED — tab switch SKIPPED (this is likely why it sometimes does nothing!)');
       }
       provider.markTypesAsRead(types);
     }
 
+    // Helper: pop this screen, then push a new route onto MainScreen's navigator.
     void goRoute(Widget screen, List<String> types) {
+      print('➡️ [NOTIF NAV] goRoute(screen=${screen.runtimeType}, types=$types) for incoming type="$type"');
+      if (mounted) {
+        Navigator.of(context).pop();
+      } else {
+        print('⚠️ [NOTIF NAV] NotificationScreen not mounted — pop SKIPPED');
+      }
       final ctx = mainScreenKey.currentContext;
       if (ctx != null) {
+        print('   ✅ mainScreenKey.currentContext found — pushing ${screen.runtimeType}');
         Navigator.of(ctx).push(MaterialPageRoute(builder: (_) => screen));
+      } else {
+        print('   ⚠️ mainScreenKey.currentContext is NULL — push SKIPPED, route never shown (this is likely why it sometimes does nothing!)');
       }
       provider.markTypesAsRead(types);
     }
 
     // ── ANNOUNCEMENT ───────────────────────────────────────────────────────
     if (_announcementTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _announcementTypes');
       final communityId = related?['communityId']?.toString() ??
           n['communityId']?.toString() ??
           n['referenceId']?.toString();
+      print('   communityId resolved = $communityId');
       if (communityId != null && communityId.isNotEmpty) {
         goRoute(AnnouncementScreen(communityId: communityId), _announcementTypes);
       } else {
+        print('   no communityId found -> falling back to goTab(0)');
         goTab(0, _announcementTypes);
       }
       return;
@@ -191,18 +228,33 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── POST ───────────────────────────────────────────────────────────────
     if (_postTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _postTypes');
       final postId = related?['postId']?.toString() ??
           related?['referenceId']?.toString() ??
           n['referenceId']?.toString() ??
           n['postId']?.toString();
+      print('   postId resolved = $postId (length=${postId?.length})');
 
       if (postId != null && postId.length == 24) {
+        // FIX: Do the async API check BEFORE popping/navigating so we know
+        // exactly where to go. No more race between tab switch and dialog.
+        print('   calling UserAPI().getPostById($postId) ...');
         final response = await UserAPI().getPostById(postId);
+        print('   getPostById response = $response');
         final exists = response != null &&
             response['success'] == true &&
             response['data'] != null;
-        goTab(0, _postTypes, postId: exists ? postId : null);
-        if (!exists) {
+        print('   post exists = $exists');
+
+        if (exists) {
+          // Post exists — navigate to feed, passing the postId.
+          goTab(0, _postTypes, postId: postId);
+        } else {
+          // Post is gone — switch to feed tab (no postId) then show dialog.
+          print('   post NOT found -> goTab(0) then showing "Post Not Found" dialog');
+          goTab(0, _postTypes);
+          // Give the navigator a frame to settle before showing dialog.
+          await Future.delayed(const Duration(milliseconds: 150));
           final ctx = mainScreenKey.currentContext;
           if (ctx != null) {
             showDialog(
@@ -221,9 +273,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 ],
               ),
             );
+          } else {
+            print('   ⚠️ mainScreenKey.currentContext null — "Post Not Found" dialog SKIPPED');
           }
         }
       } else {
+        print('   postId missing or not 24 chars -> goTab(0) without postId');
         goTab(0, _postTypes);
       }
       return;
@@ -231,15 +286,18 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── PERSONAL CHAT ──────────────────────────────────────────────────────
     if (_chatTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _chatTypes -> goTab(2)');
       goTab(2, _chatTypes);
       return;
     }
 
     // ── GROUP CHAT ─────────────────────────────────────────────────────────
     if (type == 'GroupChat') {
+      print('✅ [NOTIF MATCH] type="$type" matched GroupChat');
       final groupId =
           related?['groupId']?.toString() ?? n['referenceId']?.toString();
       final msg = n['message']?.toString() ?? '';
+      print('   groupId=$groupId  message="$msg"');
       String groupName = 'Group Chat';
       final q = RegExp(r'"([^"]+)"').firstMatch(msg);
       if (q != null) {
@@ -249,13 +307,27 @@ class _NotificationScreenState extends State<NotificationScreen> {
         RegExp(r'\bin\s+(.+)$', caseSensitive: false).firstMatch(msg);
         if (m != null) groupName = m.group(1)?.trim() ?? groupName;
       }
+      print('   resolved groupName="$groupName"');
+
+      // Pop first so mainScreenKey navigator is free
+      if (mounted) {
+        Navigator.of(context).pop();
+      } else {
+        print('⚠️ [NOTIF NAV] NotificationScreen not mounted — pop SKIPPED');
+      }
 
       final state = mainScreenKey.currentState;
-      if (state != null && state.mounted) state.navigateToTab(2);
+      if (state != null && state.mounted) {
+        print('   ✅ mainScreenKey.currentState found & mounted — switching to Chats tab');
+        state.navigateToTab(2);
+      } else {
+        print('   ⚠️ mainScreenKey.currentState NULL/UNMOUNTED — tab switch to Chats SKIPPED');
+      }
 
       if (groupId != null && groupId.isNotEmpty) {
         final ctx = mainScreenKey.currentContext;
         if (ctx != null) {
+          print('   ✅ pushing GroupChatDetailPage(groupId=$groupId, groupName="$groupName")');
           Navigator.of(ctx).push(MaterialPageRoute(
             builder: (_) => GroupChatDetailPage(
               groupId: groupId,
@@ -263,7 +335,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
               isAdmin: false,
             ),
           ));
+        } else {
+          print('   ⚠️ mainScreenKey.currentContext NULL — GroupChatDetailPage push SKIPPED');
         }
+      } else {
+        print('   no groupId -> staying on Chats tab only');
       }
       provider.markTypesAsRead(['GroupChat']);
       return;
@@ -271,12 +347,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── SERVICE REQUEST ────────────────────────────────────────────────────
     if (_serviceReqTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _serviceReqTypes');
       final id = related?['assignedServiceReqId']?.toString() ??
           related?['serviceReqId']?.toString() ??
           n['referenceId']?.toString();
+      print('   serviceReq id resolved = $id');
       if (id != null && id.isNotEmpty) {
         goRoute(ServiceRequestDetailsScreen(requestId: id), _serviceReqTypes);
       } else {
+        print('   no id found -> falling back to goTab(4)');
         goTab(4, _serviceReqTypes);
       }
       return;
@@ -284,11 +363,14 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── SERVICE ────────────────────────────────────────────────────────────
     if (type == 'Service') {
+      print('✅ [NOTIF MATCH] type="$type" matched Service');
       final id =
           related?['serviceId']?.toString() ?? n['referenceId']?.toString();
+      print('   serviceId resolved = $id');
       if (id != null && id.isNotEmpty) {
         goRoute(ServiceDetailsScreen(serviceId: id), ['Service']);
       } else {
+        print('   no id found -> falling back to goTab(4)');
         goTab(4, ['Service']);
       }
       return;
@@ -296,17 +378,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── CAMPAIGN ───────────────────────────────────────────────────────────
     if (type == 'campaign') {
+      print('✅ [NOTIF MATCH] type="$type" matched campaign');
       final id =
           related?['campaignId']?.toString() ?? n['referenceId']?.toString();
       final communityName = related?['communityName']?.toString() ??
           n['communityName']?.toString() ??
           '';
+      print('   campaignId=$id communityName="$communityName"');
       if (id != null && id.isNotEmpty) {
         goRoute(
             CampaignDetailsScreen(
                 campaignId: id, communityName: communityName),
             ['campaign']);
       } else {
+        print('   no campaignId found -> falling back to goTab(4)');
         goTab(4, ['campaign']);
       }
       return;
@@ -314,17 +399,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     // ── COMMUNITY ──────────────────────────────────────────────────────────
     if (_communityTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _communityTypes -> goTab(3)');
       goTab(3, _communityTypes);
       return;
     }
 
     // ── DASHBOARD ──────────────────────────────────────────────────────────
     if (_dashTypes.contains(type)) {
+      print('✅ [NOTIF MATCH] type="$type" matched _dashTypes -> goTab(4)');
       goTab(4, _dashTypes);
       return;
     }
 
     // ── DEFAULT ────────────────────────────────────────────────────────────
+    print('⚠️ [NOTIF MATCH] type="$type" matched NOTHING ABOVE -> DEFAULT goTab(0, ["$type"])');
     goTab(0, [type]);
   }
 
@@ -475,7 +563,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 }
 
-// ── Tile — 100% original, zero changes ───────────────────────────────────────
+// ── Tile ──────────────────────────────────────────────────────────────────────
 
 class _NotificationTile extends StatelessWidget {
   final Map<String, dynamic> item;
@@ -580,7 +668,6 @@ class _TypeChip extends StatelessWidget {
           color: color.withOpacity(unread ? 0.1 : 0.06),
           borderRadius: BorderRadius.circular(20)),
       child: Text(label,
-
           style: TextStyle(fontSize: 11,
               color: unread ? color : Colors.grey.shade500,
               fontWeight: FontWeight.w500)),

@@ -120,7 +120,7 @@ class _SignupScreenState extends State<SignupScreen>
       if (mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MainScreen(initialIndex: 0)),
+          MaterialPageRoute(builder: (_) => MainScreen(key: mainScreenKey, initialIndex: 0)),
         );
       }
     } else {

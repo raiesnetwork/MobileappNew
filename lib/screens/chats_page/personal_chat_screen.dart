@@ -36,6 +36,8 @@ class _PersonalChatScreenState extends State<PersonalChatScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
+        // ✅ NO BACK ARROW - disable auto back button
+        automaticallyImplyLeading: false,
         title: const Text(
           'Personal Chats',
           style: TextStyle(
