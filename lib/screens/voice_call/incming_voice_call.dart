@@ -71,8 +71,9 @@ class _IncomingVoiceCallDialogState extends State<IncomingVoiceCallDialog>
   void _handleCallStateChange() {
     if (!mounted || _isActioning || _isPopping) return;
 
-    if (_provider.callState == VoiceCallState.ended) {
-      debugPrint('📵 IncomingVoiceCallDialog: caller cancelled → popping safely');
+    // ✅ Same fix as video: don't wait specifically for .ended
+    if (_provider.callState != VoiceCallState.ringing) {
+      debugPrint('📵 IncomingVoiceCallDialog: call state left "ringing" (now=${_provider.callState}) → popping safely');
       _safePop();
     }
   }

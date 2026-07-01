@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:ixes.app/providers/attendance_provider.dart';
+import 'package:ixes.app/utils/callend_tracker.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
@@ -54,7 +55,9 @@ import 'screens/auth/login_screen.dart';
 import 'screens/BottomNaviagation.dart';
 import 'utils/app_theme.dart';
 
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final ValueNotifier<bool> appIsForeground = ValueNotifier(true);
 const _uuid = Uuid();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -129,6 +132,15 @@ Future<void> _showCallkitIncoming({
   required String callType,
 }) async {
   final callUUID = roomName;
+
+  // ✅ FIX (Bug B root cause): stamp the dispatch clock for EVERY call we
+  // show, not just ones that went through _storePendingCall(). Previously
+  // calls delivered straight to CallKit (the common path) never set
+  // _pendingCallDispatchedAt, so _isCallExpired() could never return true
+  // for them and a stale/ended call could be resurrected indefinitely.
+  _dispatchedRoomName      = roomName;
+  _pendingCallDispatchedAt = DateTime.now();
+
   await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
     id:          callUUID,
     nameCaller:  callerName,
@@ -220,6 +232,42 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
+  // ✅ NEW: HANDLE CANCELLED CALL (caller ended before receiver answered)
+  //
+  // The server sends this when a call was pushed via FCM (receiver had no
+  // live socket) and the caller hangs up / cancels before the receiver
+  // answers. Without this handler the client silently drops the message,
+  // CallKit's ringtone/entry is never torn down, and the dead call can get
+  // resurfaced later (e.g. on app resume).
+  //
+  // ✅ FIX: This handler runs in its OWN isolate, separate from the main
+  // app isolate. Clearing _pendingCallData/_dispatchedRoomName here only
+  // clears THIS isolate's copy — the main isolate never finds out, so
+  // _checkActiveCallsOnResume() still thinks the call is "fresh" and
+  // resurfaces it when the user opens the app. Persisting to
+  // SharedPreferences via CallEndTracker is what actually survives across
+  // isolates.
+  // ────────────────────────────────────────────────────────────────────────────
+  if (type == 'cancel_call') {
+    final roomName = data['roomName'] ?? '';
+    debugPrint('🚫 [FCM KILLED] cancel_call | room=$roomName');
+
+    await CallEndTracker.markEnded(roomName); // ✅ NEW — survives across isolates
+
+    if (_dispatchedRoomName == roomName || _pendingCallData?['roomName'] == roomName) {
+      _clearCallState();
+    }
+
+    try {
+      await FlutterCallkitIncoming.endAllCalls();
+      debugPrint('✅ [FCM KILLED] CallKit calls ended for cancelled room=$roomName');
+    } catch (e) {
+      debugPrint('⚠️ [FCM KILLED] endAllCalls failed: $e');
+    }
+    return;
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
   // ✅ HANDLE CHAT NOTIFICATIONS (SHOW NATIVE NOTIFICATION)
   // ────────────────────────────────────────────────────────────────────────────
   if (type == 'chat') {
@@ -301,6 +349,20 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
       'groupId': groupId,
       'groupName': groupName,
     });
+    return;
+  }
+
+  if (type == 'call_ended' || type == 'call_rejected') {
+    final roomName = data['roomName'] ?? ''; // ✅ NEW: capture roomName if server sends it
+    debugPrint('📴 [FCM KILLED] $type received — clearing any stale CallKit entries | room=$roomName');
+    if (roomName.isNotEmpty) {
+      await CallEndTracker.markEnded(roomName); // ✅ NEW
+    }
+    try {
+      await FlutterCallkitIncoming.endAllCalls();
+    } catch (e) {
+      debugPrint('⚠️ [FCM KILLED] Failed to end stale calls: $e');
+    }
     return;
   }
 
@@ -521,6 +583,13 @@ Future<void> _initFCM() async {
 
         debugPrint('📲 [NATIVE→FLUTTER] type=$type | room=$roomName | caller=$callerName');
 
+        // ✅ NEW: don't resurface a call already known to be dead
+        final alreadyEnded = await CallEndTracker.isEnded(roomName);
+        if (alreadyEnded) {
+          debugPrint('☠️ [NATIVE→FLUTTER] room already ended — ignoring | room=$roomName');
+          return;
+        }
+
         if (roomName.isNotEmpty && callerId.isNotEmpty) {
           final ctx = navigatorKey.currentContext;
           bool socketHandled = false;
@@ -585,7 +654,12 @@ Future<void> _initFCM() async {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
-        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+
+        // ✅ NEW: don't resurface a call already known to be dead
+        final alreadyEnded = await CallEndTracker.isEnded(roomName);
+        if (alreadyEnded) {
+          debugPrint('☠️ [FCM INITIAL] room already ended — ignoring | room=$roomName');
+        } else if (roomName.isNotEmpty && callerId.isNotEmpty) {
           await _showCallkitIncoming(
             roomName:   roomName,
             callerId:   callerId,
@@ -643,7 +717,12 @@ Future<void> _initFCM() async {
         final roomName   = d['roomName']   ?? '';
         final callerId   = d['callerId']   ?? '';
         final callerName = d['callerName'] ?? 'Incoming Call';
-        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+
+        // ✅ NEW: don't resurface a call already known to be dead
+        final alreadyEnded = await CallEndTracker.isEnded(roomName);
+        if (alreadyEnded) {
+          debugPrint('☠️ [FCM OPENED] room already ended — ignoring | room=$roomName');
+        } else if (roomName.isNotEmpty && callerId.isNotEmpty) {
           await Future.delayed(const Duration(milliseconds: 500));
           final ctx = navigatorKey.currentContext;
           bool socketHandled = false;
@@ -724,6 +803,15 @@ Future<void> _initFCM() async {
       debugPrint('🌟 [FCM FG] type=$type | sender=${d['senderName']} | group=${d['groupName']} | caller=${d['callerName']}');
 
       if (type == 'voice_call' || type == 'video_call') {
+        final roomNameCheck = d['roomName'] ?? '';
+
+        // ✅ NEW: don't resurface a call already known to be dead
+        final alreadyEnded = await CallEndTracker.isEnded(roomNameCheck);
+        if (alreadyEnded) {
+          debugPrint('☠️ [FCM FG] room already ended — ignoring | room=$roomNameCheck');
+          return;
+        }
+
         await Future.delayed(const Duration(milliseconds: 800));
 
         final ctx = navigatorKey.currentContext;
@@ -752,12 +840,42 @@ Future<void> _initFCM() async {
         return; // ✅ ADD THIS LINE
       }
 
+      // ✅ NEW: HANDLE CANCELLED CALL (foreground) — caller ended before
+      // the receiver answered. Tear down CallKit + any in-app ringing UI
+      // and clear the file-scope pending call state so it can't be
+      // resurrected later (e.g. by _checkActiveCallsOnResume).
+      if (type == 'cancel_call') {
+        final roomName = d['roomName'] ?? '';
+        debugPrint('🚫 [FCM FG] cancel_call | room=$roomName');
+
+        await CallEndTracker.markEnded(roomName); // ✅ NEW
+
+        _clearCallState();
+
+        try {
+          await FlutterCallkitIncoming.endAllCalls();
+          debugPrint('✅ [FCM FG] CallKit calls ended for cancelled room=$roomName');
+        } catch (e) {
+          debugPrint('⚠️ [FCM FG] endAllCalls failed: $e');
+        }
+
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null) {
+          try { ctx.read<VideoCallProvider>().cancelIncomingCall(); } catch (_) {}
+          try { ctx.read<VoiceCallProvider>().cancelIncomingCall(); } catch (_) {}
+        }
+        return;
+      }
+
       // ✅ NEW: HANDLE CALL ENDED (User A ended the call)
       if (type == 'call_ended') {
         final callType = d['callType'] ?? '';
         final callerName = d['callerName'] ?? 'Unknown';
+        final roomName = d['roomName'] ?? ''; // ✅ NEW
 
         debugPrint('📴 [FCM FG] CALL ENDED | type=$callType | caller=$callerName');
+
+        if (roomName.isNotEmpty) await CallEndTracker.markEnded(roomName); // ✅ NEW
 
         final ctx = navigatorKey.currentContext;
         if (ctx != null) {
@@ -780,8 +898,11 @@ Future<void> _initFCM() async {
       if (type == 'call_rejected') {
         final callType = d['callType'] ?? '';
         final receiverName = d['receiverName'] ?? 'Unknown';
+        final roomName = d['roomName'] ?? ''; // ✅ NEW
 
         debugPrint('❌ [FCM FG] CALL REJECTED | type=$callType | rejectedBy=$receiverName');
+
+        if (roomName.isNotEmpty) await CallEndTracker.markEnded(roomName); // ✅ NEW
 
         final ctx = navigatorKey.currentContext;
         if (ctx != null) {
@@ -832,6 +953,22 @@ Future<void> _checkActiveCallsOnStartup() async {
     }
 
     for (final call in calls) {
+      final extraCheck = call['extra'] as Map<dynamic, dynamic>? ?? {};
+      final roomNameCheck = extraCheck['roomName']?.toString() ?? '';
+
+      // ✅ NEW: if this room is already known-ended, don't even consider
+      // resurrecting it — just clear it.
+      if (roomNameCheck.isNotEmpty && await CallEndTracker.isEnded(roomNameCheck)) {
+        debugPrint('☠️ [STARTUP] Room already ended — clearing | room=$roomNameCheck');
+        try {
+          final id = call['id']?.toString() ?? 'unknown';
+          await FlutterCallkitIncoming.endCall(id);
+        } catch (e) {
+          debugPrint('⚠️ [STARTUP] Could not clear ended room: $e');
+        }
+        continue;
+      }
+
       // ✅ If already accepted — user just tapped Answer from killed state.
       // Store as pending so _navigate() picks it up. Do NOT end it —
       // ending it triggers actionCallEnded which kills VoiceRoomScreen.
@@ -1093,9 +1230,16 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
     if (_pendingCallData != null) _startRetryLoop();
 
-    _callSub = _callStream.stream.listen((data) {
+    _callSub = _callStream.stream.listen((data) async {
       if (_providersReady && mounted) {
         if (_isCallExpired()) {
+          _clearCallState();
+          return;
+        }
+        // ✅ NEW: don't resurface a call already known to be dead
+        final roomName = data['roomName'] ?? '';
+        if (roomName.isNotEmpty && await CallEndTracker.isEnded(roomName)) {
+          debugPrint('☠️ [CALL STREAM] room already ended — ignoring | room=$roomName');
           _clearCallState();
           return;
         }
@@ -1192,6 +1336,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
         break;
 
       case Event.actionCallDecline:
+        CallEndTracker.markEnded(roomName); // ✅ NEW
         _clearCallState();
         _retryTimer?.cancel();
         if (roomName.isNotEmpty) _handledRoomNames.add(roomName);
@@ -1209,6 +1354,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
 
       case Event.actionCallTimeout:
       case Event.actionCallEnded:
+        CallEndTracker.markEnded(roomName); // ✅ NEW
         _clearCallState();
         _retryTimer?.cancel();
         _endAllCallKitCalls();
@@ -1234,7 +1380,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     _retryTimer?.cancel();
     int attempts = 0;
 
-    _retryTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+    _retryTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) async {
       attempts++;
       final data = _pendingCallData;
 
@@ -1242,6 +1388,15 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       if (_isCallExpired()) { _clearCallState(); timer.cancel(); return; }
       if (attempts > 300)   { _clearCallState(); timer.cancel(); return; }
       if (!mounted)         { timer.cancel(); return; }
+
+      // ✅ NEW: don't resurface a call already known to be dead
+      final roomName = data['roomName'] ?? '';
+      if (roomName.isNotEmpty && await CallEndTracker.isEnded(roomName)) {
+        debugPrint('☠️ [RETRY] room already ended — clearing | room=$roomName');
+        _clearCallState();
+        timer.cancel();
+        return;
+      }
 
       if (!_providersReady ||
           navigatorKey.currentContext == null ||
@@ -1347,6 +1502,7 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    appIsForeground.value = state == AppLifecycleState.resumed;
     if (!mounted) return;
 
     try {
@@ -1401,6 +1557,43 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
       }
 
       if (_handledRoomNames.contains(roomName)) return;
+
+      // ✅ NEW: THE key fix. Check the persisted ended-rooms record BEFORE
+      // trusting any local/in-memory "freshness" heuristic. This is what
+      // actually survives the background-isolate boundary — the CallKit
+      // notification can vanish correctly (native call) while the Dart
+      // side still thinks the call is live; this check catches that.
+      final alreadyEnded = await CallEndTracker.isEnded(roomName);
+      if (alreadyEnded) {
+        debugPrint('☠️ [RESUME] Room already marked ended — tearing down instead of resurfacing | room=$roomName');
+        await _endAllCallKitCalls();
+        _clearCallState();
+        return;
+      }
+
+      final isAccepted = call['accepted'] == true || call['isAccepted'] == true;
+
+      // ✅ FIX (Bug B): Previously this method would blindly re-show ANY
+      // active CallKit entry it found — including one for a call that had
+      // already ended (e.g. because a cancel_call FCM was missed, or the
+      // 30s CallKit timeout dismissed the banner without fully tearing
+      // down the session). That's what produced the double-ringtone: the
+      // stale CallKit entry kept ringing on its own AND this method pushed
+      // it into the in-app incoming-call UI too, adding a second ringtone.
+      //
+      // Now: only resurface an entry if it's accepted, OR it matches the
+      // most recent call we actually dispatched ourselves AND is still
+      // within the TTL window AND isn't in the persisted ended-rooms list
+      // (checked above). Anything else is treated as stale/unverified and
+      // torn down instead of shown again.
+      final isFreshTrackedCall = _dispatchedRoomName == roomName && !_isCallExpired();
+
+      if (!isAccepted && !isFreshTrackedCall) {
+        debugPrint('⏰ [RESUME] Stale/unverified CallKit entry — ending instead of resurfacing | room=$roomName');
+        await _endAllCallKitCalls();
+        _clearCallState();
+        return;
+      }
 
       if (_isCallExpired()) {
         debugPrint('⏰ [RESUME] Call expired — ending stale CallKit | room=$roomName');
@@ -1595,21 +1788,23 @@ class _AppWithLifecycleObserverState extends State<AppWithLifecycleObserver>
     ctx.read<CommentProvider>().setCurrentUserId(user.id as String? ?? '');
   }
 
+  // ✅ FIX: This previously emitted 'call-rejected-voice' and 'call-rejected'
+  // with callerId set to the CURRENT user's own id and an empty
+  // receiverId/receiverName. If the server relays this to whatever it has
+  // associated with that id, it can misfire against an unrelated or
+  // already-ended call — this is what produced the initiator seeing a
+  // spurious "Uday rejected your call" after their own 30s timeout had
+  // already fired. Removed the bogus emits; if the server needs a
+  // "user is back online, drop anything pending for me" signal, add a
+  // dedicated, explicitly-scoped event instead (e.g. sync-call-status).
   void _clearStaleCallState(dynamic socket, String userId) {
-    try {
-      socket.emit('call-rejected-voice', {
-        'callerId':      userId,
-        'currentUserId': userId,
-        'receiverName':  '',
-      });
-      socket.emit('call-rejected', {
-        'callerId':      userId,
-        'currentUserId': userId,
-        'receiverName':  '',
-      });
-    } catch (e) {
-      debugPrint('❌ [CALL STATE] Failed to clear stale flags: $e');
-    }
+    // Intentionally left as a no-op for the old fake reject emits.
+    // If a real "sync my call status" event is needed server-side, do:
+    // try {
+    //   socket.emit('sync-call-status', {'userId': userId});
+    // } catch (e) {
+    //   debugPrint('❌ [CALL STATE] sync-call-status failed: $e');
+    // }
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────

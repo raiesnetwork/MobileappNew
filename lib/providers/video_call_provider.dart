@@ -1,6 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/video_call_service.dart';
+
+import '../utils/callend_tracker.dart';
 import 'personal_chat_provider.dart';
 
 enum CallState { idle, calling, ringing, connected, ended }
@@ -149,9 +151,20 @@ class VideoCallProvider extends ChangeNotifier {
 
 // ✅ NEW METHOD: Re-attach listeners on reconnect
   void _reattachSocketListeners() {
-    _service.onIncomingVideoCall((data) {
+    _service.onIncomingVideoCall((data) async {
+      final roomName = data['roomName'] ?? '';
       debugPrint('📞 Incoming video call: $data');
-      _currentRoomName   = data['roomName'];
+
+      // ✅ NEW: guard against server replaying an incoming-call event for
+      // a room that already ended (e.g. we timed out / were told to hang
+      // up while offline, and the server never got the memo).
+      final alreadyEnded = await CallEndTracker.isEnded(roomName);
+      if (alreadyEnded) {
+        debugPrint('☠️ [VIDEO] Ignoring replayed incoming call — room already ended: $roomName');
+        return;
+      }
+
+      _currentRoomName   = roomName;
       _currentCallerId   = data['callerId'];
       _currentCallerName = data['callerName'];
       _callAcceptEmitted = false;
@@ -174,6 +187,7 @@ class VideoCallProvider extends ChangeNotifier {
       _callState    = CallState.ended;
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
       _saveCallRecord(status: 'outgoing');
       _clearCallData();
       _reRegisterUser();
@@ -193,6 +207,8 @@ class VideoCallProvider extends ChangeNotifier {
         debugPrint('⚠️ [VIDEO] Ignoring video-call-ended — selfEndedRecently=true');
         return;
       }
+
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
 
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
@@ -223,6 +239,7 @@ class VideoCallProvider extends ChangeNotifier {
       _callState    = CallState.ended;
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
       if (!_callAlreadySaved) {
         _saveCallRecord(status: 'completed');
         _callAlreadySaved = true;
@@ -514,6 +531,7 @@ class VideoCallProvider extends ChangeNotifier {
       return;
     }
     debugPrint('❌ Rejecting video call from: $_currentCallerId');
+    if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
     _saveCallRecord(status: 'rejected');
     _service.rejectCall(callerId: _currentCallerId!, receiverName: _currentUserName!);
     _callState   = CallState.ended;
@@ -554,6 +572,7 @@ class VideoCallProvider extends ChangeNotifier {
 
     debugPrint('📴 Ending video call with: $receiverId');
     notifyParticipantLeft();
+    if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
 
     _callAlreadySaved = true;
     _selfEndedAt = DateTime.now(); // ✅ mark that WE ended — suppress server echo for 5s
@@ -685,7 +704,16 @@ class VideoCallProvider extends ChangeNotifier {
     required String callerId,
     required String callerName,
     bool acceptedViaCallKit = false,
-  }) {
+  }) async {
+    // ✅ NEW: guard against resurfacing a call that already ended while we
+    // were backgrounded — the background FCM isolate marks rooms ended in
+    // persisted storage, so this survives even though it's a fresh isolate.
+    final alreadyEnded = await CallEndTracker.isEnded(roomName);
+    if (alreadyEnded) {
+      debugPrint('☠️ [VIDEO] setIncomingCallFromFCM ignored — room already ended: $roomName');
+      return;
+    }
+
     _currentRoomName     = roomName;
     _currentCallerId     = callerId;
     _currentCallerName   = callerName;
@@ -704,6 +732,7 @@ class VideoCallProvider extends ChangeNotifier {
 
   void cancelIncomingCall() {
     if (_callState != CallState.ringing && _callState != CallState.calling) return;
+    if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
     _saveCallRecord(status: 'incoming');
     _callState   = CallState.ended;
     _lastEndTime = DateTime.now();

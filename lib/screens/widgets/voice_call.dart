@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/voice_call_provider.dart';
+import '../../main.dart';
 import '../voice_call/incming_voice_call.dart';
 
 class VoiceCallListener extends StatefulWidget {
@@ -42,7 +43,8 @@ class _VoiceCallListenerState extends State<VoiceCallListener> {
         _provider.currentCallerName != null &&
         _provider.currentCallerName!.isNotEmpty &&
         !_provider.acceptedViaCallKit &&
-        !_isShowingIncomingScreen) {
+        !_isShowingIncomingScreen &&
+        appIsForeground.value) {
 
       _isShowingIncomingScreen = true;
       debugPrint('📞 VoiceCallListener: pushing IncomingVoiceCallDialog');

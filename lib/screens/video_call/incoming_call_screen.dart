@@ -61,8 +61,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   void _handleCallStateChange() {
     if (!mounted || _isActioning || _isPopping) return;
 
-    if (_provider.callState == CallState.ended) {
-      debugPrint('📵 IncomingCallScreen: caller cancelled → popping safely');
+    // ✅ FIX: pop for ANY state that isn't "ringing" anymore — not just "ended".
+    // cancelIncomingCall() (used on FCM timeout/cancel) may reset state to
+    // idle/none rather than .ended, so checking only for .ended left the
+    // ringtone playing forever after a timed-out or cancelled call.
+    if (_provider.callState != CallState.ringing) {
+      debugPrint('📵 IncomingCallScreen: call state left "ringing" (now=${_provider.callState}) → popping safely');
       _safePop();
     }
   }

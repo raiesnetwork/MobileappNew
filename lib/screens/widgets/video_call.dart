@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:ixes.app/providers/video_call_provider.dart';
+import '../../main.dart';
 import '../video_call/incoming_call_screen.dart';
 
 class IncomingCallListener extends StatefulWidget {
@@ -42,7 +43,8 @@ class _IncomingCallListenerState extends State<IncomingCallListener> {
         _provider.currentCallerName != null &&
         _provider.currentCallerName!.isNotEmpty &&
         !_provider.acceptedViaCallKit &&
-        !_isShowingIncomingScreen) {
+        !_isShowingIncomingScreen &&
+        appIsForeground.value) {
 
       _isShowingIncomingScreen = true;
       debugPrint('📲 IncomingCallListener: pushing IncomingCallScreen');

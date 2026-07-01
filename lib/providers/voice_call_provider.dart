@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/voice_call_service.dart';
+
+import '../utils/callend_tracker.dart';
 import 'personal_chat_provider.dart';
 
 enum VoiceCallState { idle, calling, ringing, connected, ended }
@@ -161,9 +163,20 @@ class VoiceCallProvider extends ChangeNotifier {
 
 // ✅ NEW METHOD: Re-attach listeners on reconnect
   void _reattachSocketListeners() {
-    _service.onIncomingVoiceCall((data) {
+    _service.onIncomingVoiceCall((data) async {
+      final roomName = data['roomName'] ?? '';
       debugPrint('📞 PROVIDER: Incoming voice call: $data');
-      _currentRoomName   = data['roomName'];
+
+      // ✅ NEW: guard against server replaying an incoming-call event for
+      // a room that already ended (e.g. we timed out / were told to hang
+      // up while offline, and the server never got the memo).
+      final alreadyEnded = await CallEndTracker.isEnded(roomName);
+      if (alreadyEnded) {
+        debugPrint('☠️ [VOICE] Ignoring replayed incoming call — room already ended: $roomName');
+        return;
+      }
+
+      _currentRoomName   = roomName;
       _currentCallerId   = data['callerId'];
       _currentCallerName = data['callerName'];
       _isConference      = data['isConference'] ?? false;
@@ -188,6 +201,7 @@ class VoiceCallProvider extends ChangeNotifier {
       _callState    = VoiceCallState.ended;
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
       _saveCallRecord(status: 'outgoing');
       _clearCallData();
       _reRegisterUser();
@@ -207,6 +221,8 @@ class VoiceCallProvider extends ChangeNotifier {
         debugPrint('⚠️ [VOICE] Ignoring voice-call-ended — selfEndedRecently=true');
         return;
       }
+
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
 
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
@@ -237,6 +253,7 @@ class VoiceCallProvider extends ChangeNotifier {
       _callState    = VoiceCallState.ended;
       _isInitiating = false;
       _lastEndTime  = DateTime.now();
+      if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
       _saveCallRecord(status: 'outgoing');
       _callEndedBeforeJoin = true;
       _clearCallData();
@@ -550,6 +567,7 @@ class VoiceCallProvider extends ChangeNotifier {
 
   void cancelIncomingCall() {
     if (_callState != VoiceCallState.ringing && _callState != VoiceCallState.calling) return;
+    if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
     _saveCallRecord(status: 'incoming');
     _callState   = VoiceCallState.ended;
     _lastEndTime = DateTime.now();
@@ -569,6 +587,7 @@ class VoiceCallProvider extends ChangeNotifier {
       _safeNotify();
       return;
     }
+    if (_currentRoomName != null) CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
     _saveCallRecord(status: 'rejected');
     _service.rejectVoiceCall(
       callerId:      _currentCallerId!,
@@ -612,7 +631,10 @@ class VoiceCallProvider extends ChangeNotifier {
       return;
     }
 
-    if (_currentRoomName != null) notifyParticipantLeft();
+    if (_currentRoomName != null) {
+      notifyParticipantLeft();
+      CallEndTracker.markEnded(_currentRoomName!); // ✅ NEW
+    }
 
     _callAlreadySaved = true;
     _selfEndedAt = DateTime.now(); // ✅ mark that WE ended — suppress server echo for 5s
@@ -747,7 +769,16 @@ class VoiceCallProvider extends ChangeNotifier {
     required String callerId,
     required String callerName,
     bool acceptedViaCallKit = false,
-  }) {
+  }) async {
+    // ✅ NEW: guard against resurfacing a call that already ended while we
+    // were backgrounded — the background FCM isolate marks rooms ended in
+    // persisted storage, so this survives even though it's a fresh isolate.
+    final alreadyEnded = await CallEndTracker.isEnded(roomName);
+    if (alreadyEnded) {
+      debugPrint('☠️ [VOICE] setIncomingCallFromFCM ignored — room already ended: $roomName');
+      return;
+    }
+
     _currentRoomName     = roomName;
     _currentCallerId     = callerId;
     _currentCallerName   = callerName;
