@@ -92,9 +92,8 @@ class _VideoCallScreenState extends State<VideoCallScreen> {
     if (!mounted || _isEnding) return;
     debugPrint('🔔 VideoCallScreen: callState=${_provider.callState}');
 
-    // ✅ FIX: No _hasJoined guard — always close on ended
-    // If ended during connecting phase, _closeScreen handles gracefully
-    if (_provider.callState == CallState.ended) {
+    if (_provider.callState == CallState.ended ||
+        (_provider.callState == CallState.idle && _isConnecting)) {
       debugPrint('📴 VideoCallScreen: call ended → closing');
       _closeScreen();
     }

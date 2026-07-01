@@ -203,9 +203,8 @@ class VoiceCallProvider extends ChangeNotifier {
       final selfEndedRecently = _selfEndedAt != null &&
           DateTime.now().difference(_selfEndedAt!).inSeconds < 5;
 
-      if (_callState == VoiceCallState.idle || selfEndedRecently) {
-        debugPrint('⚠️ [VOICE] Ignoring voice-call-ended — '
-            'idle=${_callState == VoiceCallState.idle} selfEndedRecently=$selfEndedRecently');
+      if (selfEndedRecently) {
+        debugPrint('⚠️ [VOICE] Ignoring voice-call-ended — selfEndedRecently=true');
         return;
       }
 

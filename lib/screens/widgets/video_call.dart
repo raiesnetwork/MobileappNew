@@ -32,7 +32,12 @@ class _IncomingCallListenerState extends State<IncomingCallListener> {
   void _handleCallStateChange() {
     if (!mounted) return;
 
-    // ✅ Only show on ringing + caller name exists + not already showing
+    // ✅ Reset the flag as soon as call is no longer ringing
+    if (_provider.callState != CallState.ringing &&
+        _provider.callState != CallState.connected) {
+      _isShowingIncomingScreen = false;
+    }
+
     if (_provider.callState == CallState.ringing &&
         _provider.currentCallerName != null &&
         _provider.currentCallerName!.isNotEmpty &&
@@ -42,7 +47,6 @@ class _IncomingCallListenerState extends State<IncomingCallListener> {
       _isShowingIncomingScreen = true;
       debugPrint('📲 IncomingCallListener: pushing IncomingCallScreen');
 
-      // ✅ postFrameCallback — never push mid-build
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         Navigator.of(context).push(
@@ -51,15 +55,11 @@ class _IncomingCallListenerState extends State<IncomingCallListener> {
             fullscreenDialog: true,
           ),
         ).then((_) {
-          // ✅ Reset when screen is popped for any reason
           _isShowingIncomingScreen = false;
           debugPrint('📲 IncomingCallListener: IncomingCallScreen dismissed');
         });
       });
     }
-
-    // ✅ DO NOT handle ended/idle here — IncomingCallScreen pops itself
-    // Handling it here too = double pop = black screen / app crash
   }
 
   @override

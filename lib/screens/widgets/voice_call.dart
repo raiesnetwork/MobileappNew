@@ -31,7 +31,13 @@ class _VoiceCallListenerState extends State<VoiceCallListener> {
   void _handleCallStateChange() {
     if (!mounted) return;
 
-    // ✅ Only show on ringing + caller name exists + not already showing
+    // ✅ Reset the flag as soon as call is no longer ringing
+    // This allows a new incoming call to show immediately after the previous one ends
+    if (_provider.callState != VoiceCallState.ringing &&
+        _provider.callState != VoiceCallState.connected) {
+      _isShowingIncomingScreen = false;
+    }
+
     if (_provider.callState == VoiceCallState.ringing &&
         _provider.currentCallerName != null &&
         _provider.currentCallerName!.isNotEmpty &&
@@ -42,27 +48,19 @@ class _VoiceCallListenerState extends State<VoiceCallListener> {
       debugPrint('📞 VoiceCallListener: pushing IncomingVoiceCallDialog');
       debugPrint('📞 Caller: ${_provider.currentCallerName}');
 
-      // ✅ postFrameCallback — never push mid-build
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-
-        // ✅ Use Navigator.push NOT showDialog
-        // Old showDialog + _dismissDialog caused double-pop = black screen crash
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => const IncomingVoiceCallDialog(),
             fullscreenDialog: true,
           ),
         ).then((_) {
-          // ✅ Reset when screen is popped for any reason
           _isShowingIncomingScreen = false;
           debugPrint('📞 VoiceCallListener: IncomingVoiceCallDialog dismissed');
         });
       });
     }
-
-    // ✅ NO else-if dismissing here — IncomingVoiceCallDialog pops itself.
-    // The old _dismissDialog() here was the exact cause of the double-pop crash.
   }
 
   @override

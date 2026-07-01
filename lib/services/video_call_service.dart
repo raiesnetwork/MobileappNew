@@ -142,8 +142,12 @@ class VideoCallService {
       return;
     }
 
-    _socket?.emit('call-accepted', callerId);
-    debugPrint('✅ Emitted call-accepted: $callerId | socketId=${_socket?.id}');
+    final data = {'callerId': callerId};
+
+
+    _socket?.emit('call-accepted', data);
+    debugPrint('✅ Emitted call-accepted: $data | socketId=${_socket?.id}');
+
   }
 
   // ============================================================================

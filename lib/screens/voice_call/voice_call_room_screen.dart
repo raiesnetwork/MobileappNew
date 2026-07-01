@@ -90,13 +90,13 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
     }
   }
 
+// REPLACE WITH:
   void _handleCallStateChange() {
     if (!mounted || _isEnding) return;
     debugPrint('🔔 VoiceRoomScreen: callState=${_provider.callState}');
 
-    // ✅ FIX: No _hasJoined guard — always close on ended
-    // If ended during connecting phase, _closeScreen handles gracefully
-    if (_provider.callState == VoiceCallState.ended) {
+    if (_provider.callState == VoiceCallState.ended ||
+        (_provider.callState == VoiceCallState.idle && _isConnecting)) {
       debugPrint('📴 VoiceRoomScreen: remote ended → closing');
       _closeScreen();
     }
@@ -445,7 +445,7 @@ class _VoiceRoomScreenState extends State<VoiceRoomScreen> {
   Widget _buildCenterContent(String callerName) {
     return Consumer<VoiceCallProvider>(
       builder: (_, provider, __) {
-        final isWaiting = provider.participants.isEmpty;
+        final isWaiting = _isConnecting;
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

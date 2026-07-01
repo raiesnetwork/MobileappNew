@@ -128,7 +128,7 @@ Future<void> _showCallkitIncoming({
   required String callerName,
   required String callType,
 }) async {
-  final callUUID = _uuid.v4();
+  final callUUID = roomName;
   await FlutterCallkitIncoming.showCallkitIncoming(CallKitParams(
     id:          callUUID,
     nameCaller:  callerName,
@@ -826,31 +826,45 @@ Future<void> _initFCM() async {
 Future<void> _checkActiveCallsOnStartup() async {
   try {
     final calls = await FlutterCallkitIncoming.activeCalls();
-    if (calls == null || calls.isEmpty) return;
-
-    final call  = calls.last;
-    final extra = call['extra'] as Map<dynamic, dynamic>? ??
-        call['Extra'] as Map<dynamic, dynamic>? ??
-        {};
-
-    final roomName   = extra['roomName']?.toString()   ?? call['roomName']?.toString()   ?? '';
-    final callerId   = extra['callerId']?.toString()   ?? call['callerId']?.toString()   ?? call['handle']?.toString()    ?? '';
-    final callerName = extra['callerName']?.toString() ?? call['callerName']?.toString() ?? call['nameCaller']?.toString() ?? 'Unknown';
-    final callType   = extra['callType']?.toString()   ?? call['callType']?.toString()   ?? 'voice_call';
-
-    if (roomName.isEmpty || callerId.isEmpty) {
-      debugPrint('⚠️ [STARTUP] Active call missing roomName/callerId — skipping');
+    if (calls == null || calls.isEmpty) {
+      debugPrint('✅ [STARTUP] No stale CallKit entries found');
       return;
     }
 
-    _storePendingCall({
-      'callType':   callType,
-      'roomName':   roomName,
-      'callerId':   callerId,
-      'callerName': callerName,
-      'autoAccept': true,
-    });
-    debugPrint('✅ [STARTUP] Pending call stored from activeCalls()');
+    for (final call in calls) {
+      // ✅ If already accepted — user just tapped Answer from killed state.
+      // Store as pending so _navigate() picks it up. Do NOT end it —
+      // ending it triggers actionCallEnded which kills VoiceRoomScreen.
+      final isAccepted = call['accepted'] == true || call['isAccepted'] == true;
+      if (isAccepted) {
+        final extra = call['extra'] as Map<dynamic, dynamic>? ?? {};
+        final roomName   = extra['roomName']?.toString()   ?? '';
+        final callerId   = extra['callerId']?.toString()   ?? call['handle']?.toString() ?? '';
+        final callerName = extra['callerName']?.toString() ?? call['nameCaller']?.toString() ?? 'Incoming Call';
+        final callType   = extra['callType']?.toString()   ?? 'voice_call';
+
+        if (roomName.isNotEmpty && callerId.isNotEmpty) {
+          _storePendingCall({
+            'callType':   callType,
+            'roomName':   roomName,
+            'callerId':   callerId,
+            'callerName': callerName,
+            'autoAccept': true,
+          });
+          debugPrint('✅ [STARTUP] Accepted call stored as pending | room=$roomName');
+        }
+        continue; // ← skip endCall for this one
+      }
+
+      // Not accepted = stale leftover from previous killed session → end it
+      try {
+        final id = call['id']?.toString() ?? 'unknown';
+        await FlutterCallkitIncoming.endCall(id);
+        debugPrint('📵 [STARTUP] Cleared stale CallKit: $id');
+      } catch (e) {
+        debugPrint('⚠️ [STARTUP] Could not clear: $e');
+      }
+    }
   } catch (e) {
     debugPrint('❌ [STARTUP] activeCalls() error: $e');
   }

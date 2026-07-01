@@ -189,9 +189,8 @@ class VideoCallProvider extends ChangeNotifier {
       final selfEndedRecently = _selfEndedAt != null &&
           DateTime.now().difference(_selfEndedAt!).inSeconds < 5;
 
-      if (_callState == CallState.idle || selfEndedRecently) {
-        debugPrint('⚠️ [VIDEO] Ignoring video-call-ended — '
-            'idle=${_callState == CallState.idle} selfEndedRecently=$selfEndedRecently');
+      if (selfEndedRecently) {
+        debugPrint('⚠️ [VIDEO] Ignoring video-call-ended — selfEndedRecently=true');
         return;
       }
 
